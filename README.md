@@ -191,7 +191,7 @@ Model Parameters:
 Example:
 
 ```bash
-python prot2mol_finetune_script.py --selfies_path ../data/my_selfies_data.csv --target_id CHEMBL12345 --prot_emb_model esm3 --pretrained_model_path ./saved_models/my_pretrained_model --learning_rate 2e-5 --train_batch_size 32 --epoch 30 --n_layer 6
+python finetune_script.py --selfies_path ../data/my_selfies_data.csv --target_id CHEMBL12345 --prot_emb_model esm3 --pretrained_model_path ./saved_models/my_pretrained_model --learning_rate 2e-5 --train_batch_size 32 --epoch 30 --n_layer 6
 ```
 &nbsp;
 &nbsp;
