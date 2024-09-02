@@ -35,6 +35,7 @@ def get_af2_embeddings(path, file_name, max_length):
                 current_structure = np.load(current_structure_path)
                 
                 # Pad the array if necessary
+                max_length = int(max_length)
                 if current_structure.shape[0] < max_length:
                     padding = max_length - current_structure.shape[0]
                     current_structure = np.pad(current_structure, ((0, padding), (0, 0)), 'constant')
