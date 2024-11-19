@@ -5,14 +5,12 @@ import argparse
 import numpy as np
 import selfies as sf
 from utils import metrics_calculation
-from transformers import Trainer, TrainingArguments
-from transformers import DataCollatorForLanguageModeling
+from transformers import TrainingArguments
 from transformers import BartTokenizer, GPT2Config, GPT2LMHeadModel
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_processing import train_val_test
 import torch.distributed
-from data_loader import CustomDataset, CustomEffDataset
 from gpt2_trainer import GPT2_w_crs_attn_Trainer
 from transformers import T5Tokenizer, T5EncoderModel
 import re
@@ -52,11 +50,10 @@ class TrainingScript(object):
         
         if not os.path.exists(train_vecs_path):
             print(f"Warning: Training vectors file not found at {train_vecs_path}")
-            print("You need to generate train_vecs.npy first")
-            # You could either raise an error or initialize with empty vectors
-            raise FileNotFoundError(f"Please ensure train_vecs.npy exists in {data_dir}")
+            print("You need to generate train_vecs.npy to calculate training similarity")
+
             # OR
-            # self.training_vec = np.array([])  # empty array as fallback
+            self.training_vec = None  
         else:
             self.training_vec = np.load(train_vecs_path)
 
