@@ -219,3 +219,10 @@ Example:
 python produce_molecules.py --model_file ./finetuned_models/set_100_finetuned_model/checkpoint-3100  --prot_emb_model ./data/prot_embed/prot_t5/prot_comp_set_pchembl_None_protlen_None/embeddings --generated_mol_file ./saved_mols/generated_molecules.csv  --selfies_path ./data/papyrus/prot_comp_set_pchembl_None_protlen_500_human_False --attn_output False  --prot_id CHEMBL4282  --num_samples 10000  --bs 100
 ```
 
+# Citation
+
+If you use this work in your research, please cite:
+
+```
+Unlu, A., & Çevrim, E., & Doğan, T. (2024). Prot2Mol: Target based molecule generation using protein embeddings and SELFIES molecule representation. GitHub. https://github.com/HUBioDataLab/Prot2Mol
+```
