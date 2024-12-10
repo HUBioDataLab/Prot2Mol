@@ -224,5 +224,5 @@ python produce_molecules.py --model_file ./finetuned_models/set_100_finetuned_mo
 If you use this work in your research, please cite:
 
 ```
-Unlu, A., & Çevrim, E., & Doğan, T. (2024). Prot2Mol: Target based molecule generation using protein embeddings and SELFIES molecule representation. GitHub. https://github.com/HUBioDataLab/Prot2Mol
+Ünlü, A., & Çevrim, E., & Doğan, T. (2024). Prot2Mol: Target based molecule generation using protein embeddings and SELFIES molecule representation. GitHub. https://github.com/HUBioDataLab/Prot2Mol
 ```
