@@ -38,7 +38,7 @@ def download_and_decompress(url, output_dir):
 
         return decompressed_file_path
 
-def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_threshold=None, prot_len=None, only_human=True):
+def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_threshold=None, prot_len=None, only_human=None, max_cores=10):
     
     converter = ChemblUniprotConverter()
     molecule_file = download_and_decompress(molecule_url, output_directory)
@@ -55,7 +55,7 @@ def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_thresho
             .query('Target_CHEMBL_ID.str.startswith("CHEMBL")')
             .rename(columns={"SMILES": "Compound_SMILES", "accession": "Target_Accession", "target_id": "Target_ID", "Sequence": "Target_FASTA"})
             .assign(Protein_Length=lambda df: df["Target_FASTA"].apply(len))
-            .assign(Compound_SELFIES=lambda df: process_in_parallel(df["Compound_SMILES"], 19))
+            .assign(Compound_SELFIES=lambda df: process_in_parallel(df["Compound_SMILES"], max_cores))
             .dropna())
 
     print(len(prot_comp_set))
@@ -74,9 +74,10 @@ def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_thresho
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pchembl_threshold",help="pchembl threshold, can be None", type=int, default=8)
-    parser.add_argument("--prot_len", help="Maximum protein length, can be None", type=int, default=150)
-    parser.add_argument("--human_only", help="Only human proteins", type=bool, default=False)
+    parser.add_argument("--pchembl_threshold",help="pchembl threshold, can be None", type=int, default=6)
+    parser.add_argument("--prot_len", help="Maximum protein length, can be None", type=int, default=1000)
+    parser.add_argument("--human_only", help="Only human proteins", type=bool, default=None)
+    parser.add_argument("--max_cores", help="Maximum number of cores to use", type=int, default=10)
     config = parser.parse_args()    
     # Create the output directory if it doesn't exist
     os.makedirs(output_directory, exist_ok=True)
@@ -84,6 +85,7 @@ if __name__ == "__main__":
     # Download and decompress the files
     prepare_papyrus(molecule_url, protein_url, output_directory, 
                     pchembl_threshold=config.pchembl_threshold, 
-                    prot_len=config.prot_len, only_human=config.human_only)
+                    prot_len=config.prot_len, only_human=config.human_only,
+                    max_cores=config.max_cores)
     
     print("Papyrus data preparation complete.\n")

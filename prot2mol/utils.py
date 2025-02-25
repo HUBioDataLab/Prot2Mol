@@ -137,10 +137,11 @@ def average_agg_tanimoto(stock_vecs, gen_vecs,
     assert agg in ['max', 'mean'], "Can aggregate only max or mean"
     agg_tanimoto = np.zeros(len(gen_vecs))
     total = np.zeros(len(gen_vecs))
+    best_stock_indices = np.zeros(len(gen_vecs), dtype=int)
+    
     for j in range(0, stock_vecs.shape[0], batch_size):
         x_stock = torch.tensor(stock_vecs[j:j + batch_size]).to(device).float()
         for i in range(0, gen_vecs.shape[0], batch_size):
-            
             y_gen = torch.tensor(gen_vecs[i:i + batch_size]).to(device).float()
             y_gen = y_gen.transpose(0, 1)
             tp = torch.mm(x_stock, y_gen)
@@ -150,16 +151,25 @@ def average_agg_tanimoto(stock_vecs, gen_vecs,
             if p != 1:
                 jac = jac**p
             if agg == 'max':
+                max_vals = jac.max(0)
+                max_indices = jac.argmax(0)
+                mask = max_vals > agg_tanimoto[i:i + y_gen.shape[1]]
                 agg_tanimoto[i:i + y_gen.shape[1]] = np.maximum(
-                    agg_tanimoto[i:i + y_gen.shape[1]], jac.max(0))
+                    agg_tanimoto[i:i + y_gen.shape[1]], max_vals)
+                best_stock_indices[i:i + y_gen.shape[1]][mask] = j + max_indices[mask]
             elif agg == 'mean':
                 agg_tanimoto[i:i + y_gen.shape[1]] += jac.sum(0)
                 total[i:i + y_gen.shape[1]] += jac.shape[0]
+    
     if agg == 'mean':
         agg_tanimoto /= total
     if p != 1:
         agg_tanimoto = (agg_tanimoto)**(1/p)
-    return np.mean(agg_tanimoto) if no_list else np.mean(agg_tanimoto), agg_tanimoto
+    
+    if no_list:
+        return np.mean(agg_tanimoto)
+    else:
+        return np.mean(agg_tanimoto), agg_tanimoto, best_stock_indices
 
 def generate_vecs(mols):
     zero_vec = np.zeros(1024)

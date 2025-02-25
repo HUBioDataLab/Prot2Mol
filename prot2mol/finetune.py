@@ -11,10 +11,10 @@ import argparse
 import torch 
 import torch.distributed
 import sys
-sys.path.insert(1, '../data_processing')
-import train_val_test
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data_processing import train_val_test
 from data_loader import CustomDataset
-from gpt2_trainer import GPT2_w_crs_attn_Trainer
+from prot2mol.trainer import GPT2_w_crs_attn_Trainer
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["WANDB_DISABLED"] = "false"
 
