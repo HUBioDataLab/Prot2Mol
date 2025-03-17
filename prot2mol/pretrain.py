@@ -18,7 +18,8 @@ from transformers import (
     BartTokenizer,
     GPT2Config,
     GPT2LMHeadModel,
-    T5Tokenizer
+    T5Tokenizer,
+    AutoTokenizer
 )
 
 # Local application imports
@@ -27,7 +28,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_processing import train_val_test
 from prot2mol.trainer import GPT2_w_crs_attn_Trainer
 from prot2mol.utils import metrics_calculation
-from prot2mol.protein_encoders import get_protein_encoder
+from prot2mol.protein_encoders import get_protein_encoder, get_protein_tokenizer, get_encoder_size
 from prot2mol.molecule_decoders import get_molecule_decoder
 
 # Set environment variables
@@ -110,12 +111,7 @@ class TrainingScript:
         """Initialize tokenizers for proteins and molecules."""
         self.logger.info("Initializing tokenizers...")
         self.mol_tokenizer = BartTokenizer.from_pretrained("zjunlp/MolGen-large", padding_side="left")
-        self.prot_tokenizer = T5Tokenizer.from_pretrained(
-            "Rostlab/prot_t5_xl_uniref50", 
-            do_lower_case=False, 
-            legacy=True, 
-            clean_up_tokenization_spaces=True
-        )
+        self.prot_tokenizer = get_protein_tokenizer(self.model_config['prot_emb_model'])
 
     def _init_models(self):
         """Initialize the GPT2 model and protein encoder."""
@@ -123,7 +119,7 @@ class TrainingScript:
         self.configuration = GPT2Config(
             add_cross_attention=True, 
             is_decoder=True,
-            n_embd=self.model_config['n_emb'], 
+            n_embd=get_encoder_size(self.model_config['prot_emb_model']), 
             n_head=self.model_config['n_head'], 
             vocab_size=len(self.mol_tokenizer.added_tokens_decoder), 
             n_positions=256, 
@@ -148,17 +144,21 @@ class TrainingScript:
         """
         try:
             # Replace non-standard amino acids with 'X'
-            sequence_examples = [" ".join(list(re.sub(r"[UZOB]", "X", seq))) for seq in batch["Target_FASTA"]]
-            
+            if self.model_config['prot_emb_model'] == "prot_t5":
+                sequence_examples = [" ".join(list(re.sub(r"[UZOB]", "X", seq))) for seq in batch["Target_FASTA"]]
+            else:
+                sequence_examples = [re.sub(r"[UZOB]", "X", seq) for seq in batch["Target_FASTA"]]
+
             # Tokenize the sequences
             ids = self.prot_tokenizer.batch_encode_plus(
                 sequence_examples, 
                 add_special_tokens=True, 
                 truncation=True,
                 max_length=self.model_config['prot_max_length'],
-                padding="max_length"
+                padding="max_length",
+                return_tensors="pt"
             )
-            
+
             return {
                 'prot_input_ids': ids['input_ids'],
                 'prot_attention_mask': ids['attention_mask']
@@ -318,7 +318,7 @@ class TrainingScript:
                 eval_dataset=self.test_data,
                 compute_metrics=self.compute_metrics,
                 encoder_model=self.encoder_model,
-                train_encoder_model=self.model_config['train_encoder_model']
+                train_encoder_model=self.model_config['train_encoder_model'] #flag of training the encoder
             )
             trainer.args._n_gpu = 1
             
@@ -382,7 +382,7 @@ def parse_arguments():
     model_group.add_argument(
         "--prot_emb_model",
         default="prot_t5",
-        choices=["prot_t5", "esm2", "esm3", "af2_single", "af2_struct", "af2_combined"],
+        choices=["prot_t5", "esm2", "esm3", "af2_single", "af2_struct", "af2_combined", "saprot"],
         help="Protein embedding model to use"
     )
     model_group.add_argument(
