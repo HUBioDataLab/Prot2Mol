@@ -380,7 +380,7 @@ def parse_arguments():
     model_group = parser.add_argument_group('Model Architecture')
     model_group.add_argument(
         "--prot_emb_model",
-        default="esm2",
+        default="saprot",
         choices=["prot_t5", "esm2", "saprot"],
         help="Protein embedding model to use"
     )
@@ -426,7 +426,7 @@ def parse_arguments():
     training_group.add_argument(
         "--n_layer",
         type=int,
-        default=2,
+        default=12,
         help="Number of transformer layers"
     )
     training_group.add_argument(
@@ -456,7 +456,7 @@ def parse_arguments():
     training_group.add_argument(
         "--train_encoder_model",
         action="store_true",
-        default=True,
+        default=False,
         help="Whether to train the protein encoder model"
     )
     training_group.add_argument(

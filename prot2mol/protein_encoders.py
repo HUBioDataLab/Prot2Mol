@@ -98,11 +98,11 @@ class ESM2Encoder(ProteinEncoder):
         return outputs.last_hidden_state
 
 class SaProtEncoder(ProteinEncoder):
-    def __init__(self, model_name: str = "westlake-repl/SaProt_650M_AF2", max_length: int = 1000,
+    def __init__(self, model_name: str = "westlake-repl/SaProt_1.3B_AF2", max_length: int = 1000,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
-        self.model = EsmForMaskedLM.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
+        self.model = EsmModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
         
         # Set model training mode and freeze parameters after initialization
 
@@ -161,7 +161,7 @@ def get_protein_tokenizer(model_name: str):
             clean_up_tokenization_spaces=True
         ),
         "esm2": AutoTokenizer.from_pretrained("facebook/esm2_t36_3B_UR50D"),
-        "saprot": AutoTokenizer.from_pretrained("westlake-repl/SaProt_650M_AF2"),
+        "saprot": AutoTokenizer.from_pretrained("westlake-repl/SaProt_1.3B_AF2"),
     }
     return tokenizers[model_name]
 
