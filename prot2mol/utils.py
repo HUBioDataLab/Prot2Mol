@@ -188,7 +188,7 @@ def logp_calculation(mols):
     return [Chem.Crippen.MolLogP(mol) if mol is not None else None for mol in mols]
 
 def metrics_calculation(predictions, references, train_data, train_vec=None,training=True):
-
+    
     predictions = [x.replace(" ", "") for x in predictions]
     references = [x.replace(" ", "") for x in references]
 
@@ -211,13 +211,13 @@ def metrics_calculation(predictions, references, train_data, train_vec=None,trai
         prediction_vecs = generate_vecs(prediction_mols)
         reference_vec = generate_vecs([Chem.MolFromSmiles(x) for x in reference_smiles if Chem.MolFromSmiles(x) is not None])
         
-        predicted_vs_reference_sim_mean, predicted_vs_reference_sim_list = average_agg_tanimoto(reference_vec,prediction_vecs, no_list=False)
+        predicted_vs_reference_sim_mean, predicted_vs_reference_sim_list, _ = average_agg_tanimoto(reference_vec,prediction_vecs, no_list=False)
         if train_vec is not None:
-            predicted_vs_training_sim_mean, predicted_vs_training_sim_list = average_agg_tanimoto(train_vec,prediction_vecs, no_list=False)
+            predicted_vs_training_sim_mean, predicted_vs_training_sim_list, _ = average_agg_tanimoto(train_vec,prediction_vecs, no_list=False)
         else:
             predicted_vs_training_sim_mean, predicted_vs_training_sim_list = 0, []
         
-        IntDiv = 1 - average_agg_tanimoto(prediction_vecs, prediction_vecs, agg="mean", no_list=True)[0]
+        IntDiv = 1 - average_agg_tanimoto(prediction_vecs, prediction_vecs, agg="mean", no_list=True)
         
         prediction_sa_score_list = sascorer_calculation(prediction_mols)
         prediction_sa_score = np.mean(prediction_sa_score_list)
@@ -254,7 +254,7 @@ def metrics_calculation(predictions, references, train_data, train_vec=None,trai
         wandb.log(metrics) 
     if training:
         return metrics
-    else:
+    elif training == False:
         
         result_dict = {"smiles": prediction_smiles["smiles"],
                        "test_sim": predicted_vs_reference_sim_list, 

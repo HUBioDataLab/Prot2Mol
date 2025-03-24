@@ -21,7 +21,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             encoder_hidden_states=last_hidden_state, 
             labels=input_sequence
         )  
-        
+
         return (outputs.loss, outputs) if return_outputs else outputs.loss
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):

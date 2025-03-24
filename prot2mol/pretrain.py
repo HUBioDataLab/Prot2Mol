@@ -204,14 +204,13 @@ class TrainingScript:
             dict: Dictionary with computed metrics
         """
         try:
-            # Extract logits and labels
-            logits, labels = eval_pred
-            
+            logits = eval_pred.predictions
+            labels = eval_pred.label_ids    
             # Convert logits to predictions
             predictions = np.argmax(logits, axis=-1)
-            
             # Replace -100 tokens with pad_token_id for decoding
             labels = np.where(labels != -100, labels, self.mol_tokenizer.pad_token_id)
+            
             
             # Decode predictions and labels
             decoded_preds = self.mol_tokenizer.batch_decode(
@@ -224,13 +223,13 @@ class TrainingScript:
                 skip_special_tokens=True, 
                 clean_up_tokenization_spaces=True
             )
-            
-            # Calculate metrics
+            # Calculate metrics - explicitly set training=True to ensure it returns only metrics dict
             return metrics_calculation(
                 predictions=decoded_preds, 
                 references=decoded_labels, 
                 train_data=self.train_data, 
-                train_vec=self.training_vec
+                train_vec=self.training_vec,
+                training=True
             )
         except Exception as e:
             self.logger.error(f"Error computing metrics: {str(e)}")
@@ -409,7 +408,7 @@ def parse_arguments():
     training_group.add_argument(
         "--valid_batch_size",
         type=int,
-        default=2,
+        default=1,
         help="Batch size for validation"
     )
     training_group.add_argument(
@@ -457,7 +456,7 @@ def parse_arguments():
     training_group.add_argument(
         "--train_encoder_model",
         action="store_true",
-        default=False,
+        default=True,
         help="Whether to train the protein encoder model"
     )
     training_group.add_argument(

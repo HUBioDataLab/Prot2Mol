@@ -35,7 +35,7 @@ class ProtT5Encoder(ProteinEncoder):
                  active: bool = True):
         super().__init__(max_length, device, active)
         print("active Value: ", active)
-        self.model = T5EncoderModel.from_pretrained(model_name).to(device)
+        self.model = T5EncoderModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
         if active is True:
             print("ProtT5 Encoder is setting Training Mode")
             self.model.train()
@@ -45,7 +45,7 @@ class ProtT5Encoder(ProteinEncoder):
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
-
+        self.check_model_trainability()
     def check_model_trainability(self):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
@@ -55,7 +55,7 @@ class ProtT5Encoder(ProteinEncoder):
         print(f"- Trainable parameters: {encoder_trainable_params}")
 
     def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        self.check_model_trainability()
+        
         outputs = self.model(input_ids=sequences, attention_mask=attention_mask)
 
         return outputs.last_hidden_state
@@ -65,7 +65,7 @@ class ESM2Encoder(ProteinEncoder):
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
-        self.model = EsmModel.from_pretrained(model_name).to(device)
+        self.model = EsmModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
 
 
         # Set model training mode and freeze parameters after initialization
@@ -102,7 +102,7 @@ class SaProtEncoder(ProteinEncoder):
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
-        self.model = EsmForMaskedLM.from_pretrained(model_name).to(device)
+        self.model = EsmForMaskedLM.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
         
         # Set model training mode and freeze parameters after initialization
 
