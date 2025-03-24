@@ -380,8 +380,8 @@ def parse_arguments():
     model_group = parser.add_argument_group('Model Architecture')
     model_group.add_argument(
         "--prot_emb_model",
-        default="prot_t5",
-        choices=["prot_t5", "esm2", "esm3", "af2_single", "af2_struct", "af2_combined", "saprot"],
+        default="esm2",
+        choices=["prot_t5", "esm2", "saprot"],
         help="Protein embedding model to use"
     )
     model_group.add_argument(
