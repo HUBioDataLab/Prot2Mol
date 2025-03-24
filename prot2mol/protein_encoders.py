@@ -78,7 +78,7 @@ class ESM2Encoder(ProteinEncoder):
             print("ESM2 Encoder is setting Training Mode")
             self.model.train()
             print("ESM2 Encoder is runned Training Mode")
-
+        self.check_model_trainability()  
     def check_model_trainability(self):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
@@ -91,7 +91,7 @@ class ESM2Encoder(ProteinEncoder):
 
         input_ids = sequences
 
-        self.check_model_trainability()  
+        
 
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
 
@@ -112,7 +112,7 @@ class SaProtEncoder(ProteinEncoder):
                 param.requires_grad = False
         elif active is True:
             self.model.train()
-
+        self.check_model_trainability() 
     def check_model_trainability(self):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
@@ -125,7 +125,7 @@ class SaProtEncoder(ProteinEncoder):
 
         input_ids = sequences
         
-        self.check_model_trainability() 
+        
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
 
         # Return the last hidden state for consistency with other encoders
