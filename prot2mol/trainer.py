@@ -7,7 +7,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         self.train_encoder_model = train_encoder_model
         self.encoder_model = encoder_model
         
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         input_sequence = inputs["mol_input_ids"]
         
         # Use the encoder's encode method
