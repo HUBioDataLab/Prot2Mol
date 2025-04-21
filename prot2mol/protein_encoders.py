@@ -61,7 +61,7 @@ class ProtT5Encoder(ProteinEncoder):
         return outputs.last_hidden_state
 
 class ESM2Encoder(ProteinEncoder):
-    def __init__(self, model_name: str = "facebook/esm2_t36_3B_UR50D", max_length: int = 1000,
+    def __init__(self, model_name: str = "facebook/esm2_t33_650M_UR50D", max_length: int = 1000,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
@@ -159,7 +159,7 @@ def get_protein_tokenizer(model_name: str):
             legacy=True, 
             clean_up_tokenization_spaces=True
         ),
-        "esm2": AutoTokenizer.from_pretrained("facebook/esm2_t36_3B_UR50D"),
+        "esm2": AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D"),
         "saprot": AutoTokenizer.from_pretrained("westlake-repl/SaProt_1.3B_AF2"),
     }
     return tokenizers[model_name]
@@ -167,7 +167,7 @@ def get_protein_tokenizer(model_name: str):
 def get_encoder_size(model_name: str):
     ENCODER_DIMS = {
     "prot_t5": 1024,
-    "esm2": 2560,
+    "esm2": 1280,
     "saprot": 1280
     }
     return ENCODER_DIMS[model_name]
