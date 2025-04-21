@@ -111,6 +111,9 @@ class TrainingScript:
         """Initialize tokenizers for proteins and molecules."""
         self.logger.info("Initializing tokenizers...")
         self.mol_tokenizer = BartTokenizer.from_pretrained("zjunlp/MolGen-large", padding_side="left")
+        if self.mol_tokenizer.pad_token is None:
+            self.mol_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        self.true_vocab_size = len(self.mol_tokenizer.get_vocab())
         self.prot_tokenizer = get_protein_tokenizer(self.model_config['prot_emb_model'])
 
     def _init_models(self):
@@ -120,8 +123,8 @@ class TrainingScript:
             add_cross_attention=True, 
             is_decoder=True,
             n_embd=get_encoder_size(self.model_config['prot_emb_model']), 
-            n_head=self.model_config['n_head'], 
-            vocab_size=len(self.mol_tokenizer.added_tokens_decoder), 
+            n_head=self.model_config['n_head'],
+            vocab_size=self.true_vocab_size,
             n_positions=256, 
             n_layer=self.model_config['n_layer'], 
             bos_token_id=self.mol_tokenizer.bos_token_id,
@@ -185,7 +188,7 @@ class TrainingScript:
                 max_length=self.model_config['max_mol_len'],
                 padding="max_length"
             )
-            
+
             return {
                 'mol_input_ids': ids['input_ids'],
                 'mol_attention_mask': ids['attention_mask']
