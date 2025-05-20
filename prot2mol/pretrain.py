@@ -139,7 +139,6 @@ class TrainingScript:
         self.logger.info("Initializing tokenizers...")
         self.mol_tokenizer = BartTokenizer.from_pretrained("zjunlp/MolGen-large", padding_side="left")
         if self.mol_tokenizer.pad_token is None:
-            print("padding is added...")
             self.mol_tokenizer.add_special_tokens({"pad_token": "<pad>"})
             #self.mol_tokenizer.pad_token = self.mol_tokenizer.eos_token
         self.true_vocab_size = len(self.mol_tokenizer.get_vocab())
