@@ -6,6 +6,9 @@ from typing import Optional, Tuple, Dict, Any
 import re
 import numpy as np
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+
 def count_trainable_parameters(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -61,7 +64,7 @@ class ProtT5Encoder(ProteinEncoder):
         return outputs.last_hidden_state
 
 class ESM2Encoder(ProteinEncoder):
-    def __init__(self, model_name: str = "facebook/esm2_t36_3B_UR50D", max_length: int = 1000,
+    def __init__(self, model_name: str = "facebook/esm2_t33_650M_UR50D", max_length: int = 1000,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
@@ -102,8 +105,8 @@ class SaProtEncoder(ProteinEncoder):
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
-        self.model = EsmModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
-        
+        #self.model = EsmModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
+        self.model = EsmModel.from_pretrained(model_name).to(device)
         # Set model training mode and freeze parameters after initialization
 
         if active is False:
@@ -160,7 +163,7 @@ def get_protein_tokenizer(model_name: str):
             legacy=True, 
             clean_up_tokenization_spaces=True
         ),
-        "esm2": AutoTokenizer.from_pretrained("facebook/esm2_t36_3B_UR50D"),
+        "esm2": AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D"),
         "saprot": AutoTokenizer.from_pretrained("westlake-repl/SaProt_1.3B_AF2"),
     }
     return tokenizers[model_name]
@@ -168,7 +171,7 @@ def get_protein_tokenizer(model_name: str):
 def get_encoder_size(model_name: str):
     ENCODER_DIMS = {
     "prot_t5": 1024,
-    "esm2": 2560,
+    "esm2": 1280,
     "saprot": 1280
     }
     return ENCODER_DIMS[model_name]
