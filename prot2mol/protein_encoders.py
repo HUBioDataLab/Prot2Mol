@@ -6,6 +6,9 @@ from typing import Optional, Tuple, Dict, Any
 import re
 import numpy as np
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+
 def count_trainable_parameters(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -102,6 +105,7 @@ class SaProtEncoder(ProteinEncoder):
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
+
         self.model = EsmModel.from_pretrained(model_name).to(device)
         # Set model training mode and freeze parameters after initialization
 

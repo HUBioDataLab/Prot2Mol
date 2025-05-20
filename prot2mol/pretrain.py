@@ -21,6 +21,7 @@ from transformers import (
     T5Tokenizer,
     AutoTokenizer
 )
+import multiprocessing as mp
 
 # Local application imports
 # Add project root to path
@@ -28,6 +29,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_processing import train_val_test
 from prot2mol.trainer import GPT2_w_crs_attn_Trainer
 from prot2mol.utils import metrics_calculation
+from prot2mol.utils_fps import generate_morgan_fingerprints_parallel
 from prot2mol.protein_encoders import get_protein_encoder, get_protein_tokenizer, get_encoder_size
 from prot2mol.molecule_decoders import get_molecule_decoder
 
@@ -100,10 +102,35 @@ class TrainingScript:
         data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
         train_vecs_path = os.path.join(data_dir, "train_vecs.npy")
         
+        #if not os.path.exists(train_vecs_path):
+        #    self.logger.warning(f"Training vectors file not found at {train_vecs_path}")
+        #    self.logger.warning("You need to generate train_vecs.npy to calculate training similarity")
+        #    self.training_vec = None
         if not os.path.exists(train_vecs_path):
-            self.logger.warning(f"Training vectors file not found at {train_vecs_path}")
-            self.logger.warning("You need to generate train_vecs.npy to calculate training similarity")
-            self.training_vec = None
+            # If the fingerprint file doesn't exist, build it from scratch
+            self.logger.info("train_vecs.npy not found, generating fingerprints for training set...")
+            import pandas as pd
+            from selfies import decoder as sf_decoder
+
+            # 1) Read SELFIES CSV and decode to SMILES
+            df = pd.read_csv(self.selfies_path)
+            selfies_list = df["Compound_SELFIES"].tolist()
+            smiles_list = [sf_decoder(s) for s in selfies_list]
+
+            # 2) Generate Morgan fingerprints in parallel
+            fps = generate_morgan_fingerprints_parallel(
+                smiles_list,
+                radius=2,
+                nBits=1024,
+                n_jobs= min(mp.cpu_count()-1, 10)
+            )
+
+            # 3) Save to disk for future runs
+            os.makedirs(data_dir, exist_ok=True)
+            np.save(train_vecs_path, fps)
+            self.logger.info(f"Saved training fingerprints to {train_vecs_path}")
+            self.training_vec = fps
+
         else:
             self.training_vec = np.load(train_vecs_path)
 
@@ -113,6 +140,7 @@ class TrainingScript:
         self.mol_tokenizer = BartTokenizer.from_pretrained("zjunlp/MolGen-large", padding_side="left")
         if self.mol_tokenizer.pad_token is None:
             self.mol_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            #self.mol_tokenizer.pad_token = self.mol_tokenizer.eos_token
         self.true_vocab_size = len(self.mol_tokenizer.get_vocab())
         self.prot_tokenizer = get_protein_tokenizer(self.model_config['prot_emb_model'])
 
@@ -302,7 +330,7 @@ class TrainingScript:
                 weight_decay=self.training_config['weight_decay'],
                 per_device_train_batch_size=self.training_config['train_batch_size'],
                 per_device_eval_batch_size=self.training_config['valid_batch_size'],
-                save_total_limit=1,
+                save_total_limit=10,
                 disable_tqdm=True,
                 logging_steps=10,
                 dataloader_num_workers=10,
@@ -322,7 +350,7 @@ class TrainingScript:
                 encoder_model=self.encoder_model,
                 train_encoder_model=self.model_config['train_encoder_model'] #flag of training the encoder
             )
-            trainer.args._n_gpu = 1
+            #trainer.args._n_gpu = 1
             
             self.logger.info(f"Building trainer on device: {training_args.device} with {training_args.n_gpu} GPUs")
             
