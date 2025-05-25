@@ -105,7 +105,7 @@ class SaProtEncoder(ProteinEncoder):
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
                  active: bool = True):
         super().__init__(max_length, device, active)
-        #self.model = EsmModel.from_pretrained(model_name, torch_dtype=torch.float16).to(device)
+
         self.model = EsmModel.from_pretrained(model_name).to(device)
         # Set model training mode and freeze parameters after initialization
 
