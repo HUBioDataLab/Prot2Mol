@@ -8,7 +8,7 @@ from conversion import ChemblUniprotConverter, process_in_parallel
 # Define the URLs and the output directory
 molecule_url = "https://zenodo.org/records/7019874/files/05.5++_combined_set_without_stereochemistry.tsv.xz"
 protein_url = "https://zenodo.org/records/7019874/files/05.5_combined_set_protein_targets.tsv.xz"
-output_directory = "../data/papyrus/"
+output_directory = "./data/papyrus/"
 
 def download_and_decompress(url, output_dir):
     # Get the filename from the URL
@@ -50,31 +50,31 @@ def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_thresho
         prot_data = prot_data[prot_data["Organism"] == "Homo sapiens (Human)"].reset_index(drop=True)
     
     prot_comp_set = (
-            pd.merge(mol_data[["SMILES","accession", "pchembl_value_Mean","target_id"]], prot_data[["target_id","Sequence"]], on="target_id")
+            pd.merge(mol_data[["SMILES","accession", "pchembl_value_Median","target_id", "CID"]], prot_data[["target_id","Sequence"]], on="target_id")
             .assign(Target_CHEMBL_ID=lambda df: df['accession'].apply(converter.convert_2_chembl_id))
             .query('Target_CHEMBL_ID.str.startswith("CHEMBL")')
-            .rename(columns={"SMILES": "Compound_SMILES", "accession": "Target_Accession", "target_id": "Target_ID", "Sequence": "Target_FASTA"})
+            .rename(columns={"SMILES": "Compound_SMILES", "accession": "Target_Accession", "target_id": "Target_ID", "Sequence": "Target_FASTA", "CID": "Compound_CID"})
             .assign(Protein_Length=lambda df: df["Target_FASTA"].apply(len))
             .assign(Compound_SELFIES=lambda df: process_in_parallel(df["Compound_SMILES"], max_cores))
             .dropna())
 
     print(len(prot_comp_set))
     if pchembl_threshold: 
-        prot_comp_set = prot_comp_set.query("pchembl_value_Mean >= @pchembl_threshold")
+        prot_comp_set = prot_comp_set.query("pchembl_value_Median >= @pchembl_threshold")
         print(len(prot_comp_set))
 
     if prot_len:
         prot_comp_set = prot_comp_set.query("Protein_Length < @prot_len")
         print(len(prot_comp_set))
         
-    prot_comp_set[["Target_FASTA", "Target_CHEMBL_ID", "Compound_SELFIES"]].to_csv(
-        f"../data/papyrus/prot_comp_set_pchembl_{pchembl_threshold}_protlen_{prot_len}_human_{only_human}.csv", 
+    prot_comp_set[["Target_FASTA", "Target_CHEMBL_ID", "Compound_SELFIES", "Compound_SMILES", "pchembl_value_Median", "Compound_CID"]].to_csv(
+        f"./data/papyrus/prot_comp_set_pchembl_{pchembl_threshold}_protlen_{prot_len}_human_{only_human}.csv", 
         index=False)
 
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pchembl_threshold",help="pchembl threshold, can be None", type=int, default=6)
+    parser.add_argument("--pchembl_threshold",help="pchembl threshold, can be None", type=int, default=None)
     parser.add_argument("--prot_len", help="Maximum protein length, can be None", type=int, default=1000)
     parser.add_argument("--human_only", help="Only human proteins", type=bool, default=None)
     parser.add_argument("--max_cores", help="Maximum number of cores to use", type=int, default=10)
@@ -84,7 +84,6 @@ if __name__ == "__main__":
 
     # Download and decompress the files
     prepare_papyrus(molecule_url, protein_url, output_directory, 
-                    pchembl_threshold=config.pchembl_threshold, 
                     prot_len=config.prot_len, only_human=config.human_only,
                     max_cores=config.max_cores)
     
