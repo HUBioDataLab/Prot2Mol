@@ -237,8 +237,13 @@ class Prot2MolModel(nn.Module):
         pooled_hidden_states = self.readout(input_to_readout, mol_attention_mask)
         
         # Predict pChEMBL values for ALL samples (positive and negative)
-        # Note: pChEMBL predictions are always computed, regardless of train_lm flag
-        pchembl_predictions = self.pchembl_head(pooled_hidden_states).squeeze(-1)  # [batch_size]
+        # Only compute if the head is active/trainable
+        pchembl_predictions = None
+        should_run_pchembl = self._config.get('train_pchembl_head', True)
+        
+        if should_run_pchembl:
+            # Note: pChEMBL predictions are always computed, regardless of train_lm flag
+            pchembl_predictions = self.pchembl_head(pooled_hidden_states).squeeze(-1)  # [batch_size]
         
         # Compute losses based on training mode
         lm_loss = None
@@ -246,27 +251,36 @@ class Prot2MolModel(nn.Module):
         total_loss = None
         corr_loss = None
         
-        if pchembl_only_mode:
-            # Stage 1: Only train pChEMBL head
-            if pchembl_values is not None:
+        if (not pchembl_only_mode) and (not should_run_pchembl):
+            # 1. LM Only Mode (Encoder-Decoder only)
+            lm_loss = decoder_outputs.loss
+            if lm_loss is not None:
+                total_loss = self.lm_weight * lm_loss
+                
+        elif pchembl_only_mode:
+            # 2. pChEMBL Only Mode (Stage 1)
+            # Implicit assumption: pchembl_only_mode implies train_pchembl_head is True
+            if pchembl_values is not None and pchembl_predictions is not None:
                 pchembl_loss = F.mse_loss(pchembl_predictions, pchembl_values) 
                 corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
                 total_loss = pchembl_loss #+ corr_loss * 0.2
+                
         else:
-            # Stage 2: Full training mode
+            # 3. Full Training Mode (Stage 2 with pChEMBL head active)
             # Note: train_lm is already handled in labels_for_lm above
             lm_loss = decoder_outputs.loss
             
-            if pchembl_values is not None:
+            if pchembl_values is not None and pchembl_predictions is not None:
                 pchembl_loss = F.mse_loss(pchembl_predictions, pchembl_values)
                 corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
-                #total_loss = pchembl_loss + corr_loss * 0.2
+                
                 # Combine losses with learnable weights
                 if lm_loss is not None:
-                    total_loss = self.lm_weight * lm_loss + self.pchembl_weight * pchembl_loss# + self.corr_loss * 0.2
+                    total_loss = self.lm_weight * lm_loss + self.pchembl_weight * pchembl_loss
                 else:
-                    total_loss = self.pchembl_weight * pchembl_loss# + self.corr_loss * 0.2
+                    total_loss = self.pchembl_weight * pchembl_loss
             elif lm_loss is not None:
+                # Fallback if pchembl values are missing but head is active
                 total_loss = self.lm_weight * lm_loss
 
         outputs = {

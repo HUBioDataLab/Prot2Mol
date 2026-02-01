@@ -122,6 +122,14 @@ class TrainingScript:
 
     def _prepare_normalization_and_thresholds(self):
         """Calculate and store normalization constants and thresholds from the dataset."""
+        # OPTIMIZATION: Skip if not training pChEMBL head
+        if not self.model_config['train_pchembl_head']:
+            self.logger.info("pChEMBL head training is disabled. Skipping normalization setup.")
+            self.pchembl_mean = 0.0
+            self.pchembl_std = 1.0
+            self.pchembl_threshold = 6.0
+            return
+
         import pandas as pd
         self.logger.info("Preparing normalization constants from dataset...")
         df = pd.read_csv(self.selfies_path)
@@ -460,30 +468,39 @@ class TrainingScript:
             pad_mask = ids['input_ids'] == self.mol_tokenizer.pad_token_id
             labels[pad_mask] = -100
             
-            # Normalize pchembl values
-            # NOTE: We don't mask labels for negative samples anymore!
-            # Language modeling should work on ALL samples.
-            # The model's forward() will handle train_lm flag for negative samples.
+            pchembl_values = batch["pchembl_value_Median"]
             normalized_pchembl = []
             train_lm_flags = []
-            negative_sample_count = 0
             
-            for i, val in enumerate(pchembl_values):
-                # Determine if we should train language modeling on this sample
-                # Only train LM on positive samples (pchembl >= threshold)
-                if val >= self.pchembl_threshold:
-                    train_lm_flags.append(True)
-                else:
-                    train_lm_flags.append(False)
-                    negative_sample_count += 1
+            # Check if pChEMBL head is trained
+            should_run_pchembl = self.model_config['train_pchembl_head']
+            
+            if not should_run_pchembl:
+                # If head is disabled, treat ALL samples as valid for LM
+                # We ignore pChEMBL values entirely
+                train_lm_flags = [True] * len(pchembl_values)
+                normalized_pchembl = [0.0] * len(pchembl_values) # Dummy values
                 
-                # Apply Min-Max normalization
-                normalized_val = (val - self.pchembl_mean) / (self.pchembl_std + 1e-8)
-                normalized_pchembl.append(normalized_val)
-            
-            # Debug: log how many samples are negative
-            if negative_sample_count > 0:
-                print(f"DEBUG tokenize_mol: {negative_sample_count}/{len(pchembl_values)} negative samples (pchembl < {self.pchembl_threshold}) - train_lm=False for these")
+            else:
+                # Normalize pchembl values and determine train_lm flag
+                # Only train LM on positive samples (pchembl >= threshold)
+                negative_sample_count = 0
+                
+                for i, val in enumerate(pchembl_values):
+                    
+                    if val >= self.pchembl_threshold:
+                        train_lm_flags.append(True)
+                    else:
+                        train_lm_flags.append(False)
+                        negative_sample_count += 1
+                    
+                    # Apply Min-Max normalization
+                    normalized_val = (val - self.pchembl_mean) / (self.pchembl_std + 1e-8)
+                    normalized_pchembl.append(normalized_val)
+                
+                # Debug: log how many samples are negative
+                if negative_sample_count > 0:
+                    print(f"DEBUG tokenize_mol: {negative_sample_count}/{len(pchembl_values)} negative samples (pchembl < {self.pchembl_threshold}) - train_lm=False for these")
 
             return {
                 'mol_input_ids': ids['input_ids'],
