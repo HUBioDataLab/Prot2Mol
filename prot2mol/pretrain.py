@@ -74,7 +74,8 @@ class TrainingScript:
             'prot_max_length': config.prot_max_length,
             'train_encoder_model': config.train_encoder_model,
             'train_decoder_model': config.train_decoder_model,
-            'train_pchembl_head': config.train_pchembl_head
+            'train_pchembl_head': config.train_pchembl_head,
+            'pchembl_huber_delta': config.pchembl_huber_delta
         }
         
         self.training_config = {
@@ -87,7 +88,10 @@ class TrainingScript:
             'dataloader_num_workers': config.dataloader_num_workers,
             'resume_from_checkpoint': config.resume_from_checkpoint,
             'load_pretrained_model': config.load_pretrained_model,
-            'ignore_mismatched_optimizer': config.ignore_mismatched_optimizer
+            'ignore_mismatched_optimizer': config.ignore_mismatched_optimizer,
+            'eval_split': config.eval_split,
+            'eval_split_ratio': config.eval_split_ratio,
+            'split_seed': config.split_seed
         }
 
         self.selfies_path = selfies_path
@@ -110,6 +114,17 @@ class TrainingScript:
                                "or --load_pretrained_model to fine-tune on a new dataset.")
         
         self._prepare_normalization_and_thresholds()
+
+        # Convert raw Huber delta (pChEMBL units) to normalized scale
+        if self.pchembl_std > 0:
+            delta_norm = config.pchembl_huber_delta / self.pchembl_std
+        else:
+            delta_norm = config.pchembl_huber_delta
+        self.model_config['pchembl_huber_delta'] = delta_norm
+        self.logger.info(
+            f"Huber delta: raw={config.pchembl_huber_delta:.3f}, "
+            f"normalized={delta_norm:.3f}"
+        )
         
         # Load training vectors for similarity calculation
         self._load_training_vectors()
@@ -131,7 +146,29 @@ class TrainingScript:
             return
 
         import pandas as pd
-        self.logger.info("Preparing normalization constants from dataset...")
+        # Try to load cached stats computed on the train split
+        cache_dir = os.environ.get('DATASETS_CACHE_DIR', "/gpfs/projects/etur29/atabey/datasets")
+        dataset_name = self.selfies_path.split("/")[-1].split(".")[0]
+        processed_data_path = os.path.join(cache_dir, dataset_name)
+        stats_path = os.path.join(processed_data_path, "pchembl_stats.json")
+
+        if os.path.exists(stats_path):
+            try:
+                import json
+                with open(stats_path, "r") as f:
+                    stats = json.load(f)
+                self.pchembl_mean = float(stats["pchembl_mean"])
+                self.pchembl_std = float(stats["pchembl_std"])
+                self.pchembl_threshold = float(stats.get("pchembl_threshold", 6.0))
+                self.logger.info(
+                    f"Loaded pChEMBL stats from cache: mean={self.pchembl_mean:.3f}, "
+                    f"std={self.pchembl_std:.3f}, threshold={self.pchembl_threshold:.3f}"
+                )
+                return
+            except Exception as e:
+                self.logger.warning(f"Failed to load cached pChEMBL stats: {e}")
+
+        self.logger.info("Preparing normalization constants from dataset (fallback)...")
         df = pd.read_csv(self.selfies_path)
         pchembl_values = df['pchembl_value_Median'].dropna()
         
@@ -612,7 +649,7 @@ class TrainingScript:
             # Note: In DDP, predictions are gathered from all ranks for complete metrics
             # Note: self.trainer is set during model_training() when trainer is created
             if hasattr(self, 'trainer') and self.trainer is not None:
-                pchembl_preds, pchembl_targets = self.trainer.get_pchembl_predictions()
+                pchembl_preds, pchembl_targets, group_ids = self.trainer.get_pchembl_predictions()
                 if pchembl_preds is not None and pchembl_targets is not None:
                     # If there's a mismatch, only use the first N pChEMBL predictions that match LM count
                     # This handles cases where Transformers deduplicates predictions in DDP mode
@@ -624,8 +661,10 @@ class TrainingScript:
                             # Trim pChEMBL predictions to match LM count (removes duplicates from DDP)
                             pchembl_preds = pchembl_preds[:lm_sample_count]
                             pchembl_targets = pchembl_targets[:lm_sample_count]
+                            if group_ids is not None:
+                                group_ids = group_ids[:lm_sample_count]
                     
-                    pchembl_metrics = self._compute_pchembl_metrics(pchembl_preds, pchembl_targets)
+                    pchembl_metrics = self._compute_pchembl_metrics(pchembl_preds, pchembl_targets, group_ids)
                     metrics.update(pchembl_metrics)
                     
                     # Clear pChEMBL predictions after computing metrics to prevent accumulation
@@ -714,12 +753,13 @@ class TrainingScript:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
     
-    def _compute_pchembl_metrics(self, pchembl_predictions, pchembl_targets):
+    def _compute_pchembl_metrics(self, pchembl_predictions, pchembl_targets, group_ids=None):
         """Compute pChEMBL prediction evaluation metrics.
         
         Args:
             pchembl_predictions: Predicted pChEMBL values (numpy array)
             pchembl_targets: True pChEMBL values (numpy array, normalized)
+            group_ids: Group identifiers for pairwise metrics (numpy array or None)
         
         Returns:
             dict: Dictionary with pChEMBL regression metrics
@@ -758,7 +798,7 @@ class TrainingScript:
             except ValueError:
                 r2 = float('nan')
             
-            return {
+            metrics = {
                 'pchembl_mse': mse,
                 'pchembl_mae': mae,
                 'pchembl_rmse': rmse,
@@ -772,12 +812,92 @@ class TrainingScript:
                 'pchembl_mae_raw': mae_raw,
                 'pchembl_rmse_raw': rmse_raw
             }
+
+            # Correlation metrics (raw scale)
+            try:
+                from scipy.stats import pearsonr, spearmanr
+                pearson_corr, _ = pearsonr(true_raw, pred_raw)
+                spearman_corr, _ = spearmanr(true_raw, pred_raw)
+                metrics['pchembl_pearson_raw'] = float(pearson_corr)
+                metrics['pchembl_spearman_raw'] = float(spearman_corr)
+            except Exception as e:
+                self.logger.warning(f"Could not compute Pearson/Spearman correlations: {e}")
+
+            # Pairwise ranking metrics within group_id
+            if group_ids is not None:
+                try:
+                    group_ids = np.asarray(group_ids)
+                    group_ids = group_ids[valid_mask]
+                    valid_group_mask = group_ids >= 0
+                    if valid_group_mask.any():
+                        group_ids = group_ids[valid_group_mask]
+                        pred_raw_g = pred_raw[valid_group_mask]
+                        true_raw_g = true_raw[valid_group_mask]
+
+                        pair_acc = self._pairwise_accuracy(pred_raw_g, true_raw_g, group_ids)
+                        if pair_acc is not None:
+                            metrics['pchembl_pairwise_acc'] = pair_acc
+
+                        group_spearman = self._group_spearman(pred_raw_g, true_raw_g, group_ids)
+                        if group_spearman is not None:
+                            metrics['pchembl_group_spearman'] = group_spearman
+                except Exception as e:
+                    self.logger.warning(f"Could not compute group-based metrics: {e}")
+
+            return metrics
             
         except Exception as e:
             self.logger.error(f"Error computing pChEMBL metrics: {str(e)}")
             import traceback
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
+
+    def _pairwise_accuracy(self, y_pred, y_true, group_ids, max_pairs_per_group=200):
+        """Estimate pairwise ranking accuracy within groups."""
+        correct = 0
+        total = 0
+        for g in np.unique(group_ids):
+            idx = np.where(group_ids == g)[0]
+            if idx.size < 2:
+                continue
+            # random pairing to avoid O(n^2)
+            np.random.shuffle(idx)
+            half = idx.size // 2
+            if half == 0:
+                continue
+            a = idx[:half]
+            b = idx[half:half * 2]
+            dy_true = y_true[a] - y_true[b]
+            dy_pred = y_pred[a] - y_pred[b]
+            # ignore ties
+            non_zero = dy_true != 0
+            if not np.any(non_zero):
+                continue
+            dy_true = dy_true[non_zero]
+            dy_pred = dy_pred[non_zero]
+            correct += np.sum(np.sign(dy_true) == np.sign(dy_pred))
+            total += dy_true.size
+        if total == 0:
+            return None
+        return float(correct / total)
+
+    def _group_spearman(self, y_pred, y_true, group_ids, min_group_size=3):
+        """Compute macro-average Spearman within groups."""
+        try:
+            from scipy.stats import spearmanr
+        except Exception:
+            return None
+        corrs = []
+        for g in np.unique(group_ids):
+            idx = np.where(group_ids == g)[0]
+            if idx.size < min_group_size:
+                continue
+            corr, _ = spearmanr(y_true[idx], y_pred[idx])
+            if np.isfinite(corr):
+                corrs.append(corr)
+        if not corrs:
+            return None
+        return float(np.mean(corrs))
         
     def model_training(self):
         """Execute the model training process."""
@@ -829,10 +949,33 @@ class TrainingScript:
             # --- End of Caching Logic ---
             
             # Split dataset
-            self.logger.info(f"Splitting dataset into train and test sets...")
-            dataset = dataset["train"].train_test_split(test_size=0.01, seed=42)
-            self.train_data = dataset["train"]
-            self.test_data = dataset["test"]
+            self.logger.info("Splitting dataset into train and test sets...")
+            full_data = dataset["train"]
+            split_ratio = self.training_config.get("eval_split_ratio", 0.01)
+            split_mode = self.training_config.get("eval_split", "random")
+
+            if split_mode == "aid":
+                if "AID" not in full_data.column_names:
+                    self.logger.warning("AID column not found in dataset. Falling back to random split.")
+                    dataset = full_data.train_test_split(test_size=split_ratio, seed=self.training_config.get("split_seed", 42))
+                    self.train_data = dataset["train"]
+                    self.test_data = dataset["test"]
+                else:
+                    aids = full_data.unique("AID")
+                    rng = np.random.RandomState(self.training_config.get("split_seed", 42))
+                    rng.shuffle(aids)
+                    n_holdout = max(1, int(len(aids) * split_ratio))
+                    holdout_aids = set(aids[:n_holdout])
+                    self.logger.info(f"AID hold-out split: {n_holdout} AIDs held out ({split_ratio:.3f} of {len(aids)})")
+                    num_proc = self.training_config['dataloader_num_workers']
+                    if num_proc is not None and num_proc < 1:
+                        num_proc = None
+                    self.test_data = full_data.filter(lambda x: x["AID"] in holdout_aids, num_proc=num_proc)
+                    self.train_data = full_data.filter(lambda x: x["AID"] not in holdout_aids, num_proc=num_proc)
+            else:
+                dataset = full_data.train_test_split(test_size=split_ratio, seed=self.training_config.get("split_seed", 42))
+                self.train_data = dataset["train"]
+                self.test_data = dataset["test"]
             
             self.logger.info(f"Dataset split: {len(self.train_data)} train, {len(self.test_data)} test samples")
             
@@ -1071,6 +1214,31 @@ def parse_arguments():
         type=float,
         default=0.01,
         help="Weight decay for optimization"
+    )
+    training_group.add_argument(
+        "--eval_split",
+        type=str,
+        default="random",
+        choices=["random", "aid"],
+        help="Validation split strategy: random or AID hold-out"
+    )
+    training_group.add_argument(
+        "--eval_split_ratio",
+        type=float,
+        default=0.01,
+        help="Fraction of data (or AIDs) held out for validation"
+    )
+    training_group.add_argument(
+        "--split_seed",
+        type=int,
+        default=42,
+        help="Random seed for data split reproducibility"
+    )
+    training_group.add_argument(
+        "--pchembl_huber_delta",
+        type=float,
+        default=1.0,
+        help="Huber delta for pChEMBL loss (raw pChEMBL units)"
     )
     training_group.add_argument(
         "--train_encoder_model",

@@ -52,7 +52,7 @@ def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_thresho
         prot_data = prot_data[prot_data["Organism"] == "Homo sapiens (Human)"].reset_index(drop=True)
     
     prot_comp_set = (
-            pd.merge(mol_data[["SMILES","accession", "pchembl_value_Median","target_id", "CID"]], prot_data[["target_id","Sequence"]], on="target_id")
+            pd.merge(mol_data[["SMILES","accession", "pchembl_value_Median","target_id", "CID", "AID"]], prot_data[["target_id","Sequence"]], on="target_id")
             .assign(Target_CHEMBL_ID=lambda df: df['accession'].apply(converter.convert_2_chembl_id))
             .query('Target_CHEMBL_ID.str.startswith("CHEMBL")')
             .rename(columns={"SMILES": "Compound_SMILES", "accession": "Target_Accession", "target_id": "Target_ID", "Sequence": "Target_FASTA", "CID": "Compound_CID"})
@@ -69,7 +69,7 @@ def prepare_papyrus(molecule_url, protein_url, output_directory, pchembl_thresho
         prot_comp_set = prot_comp_set.query("Protein_Length < @prot_len")
         print(len(prot_comp_set))
         
-    prot_comp_set[["Target_FASTA", "Target_CHEMBL_ID", "Compound_SELFIES", "Compound_SMILES", "pchembl_value_Median", "Compound_CID"]].to_csv(
+    prot_comp_set[["Target_FASTA", "Target_CHEMBL_ID", "Target_ID", "AID", "Compound_SELFIES", "Compound_SMILES", "pchembl_value_Median", "Compound_CID"]].to_csv(
         f"./data/papyrus/prot_comp_set_pchembl_{pchembl_threshold}_protlen_{prot_len}_human_{only_human}.csv", 
         index=False)
 

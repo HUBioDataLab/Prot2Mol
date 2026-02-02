@@ -126,15 +126,19 @@ class Prot2MolModel(nn.Module):
         # Initialize auxiliary pChEMBL prediction head
         self.logger.info("Initializing auxiliary pChEMBL prediction head")
         hidden_size = encoder_dim  # Use same dimension as decoder hidden states
-        self.readout = AttnPool(hidden_size, n_heads=min(4, self._config['n_head']))
-        self.pchembl_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size // 2),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_size // 2, hidden_size // 4),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_size // 4, 1)
+        pair_dim = self._config.get("affinity_pair_dim", min(256, hidden_size))
+        pair_heads = self._config.get("affinity_pair_heads", min(8, self._config['n_head']))
+        pair_layers = self._config.get("affinity_pair_layers", 2)
+        max_prot_tokens = self._config.get("affinity_max_prot_tokens", 256)
+        attn_bins = self._config.get("affinity_attn_bins", 16)
+        self.pchembl_head = AffinityHead(
+            d_model=hidden_size,
+            d_pair=pair_dim,
+            n_heads=pair_heads,
+            n_layers=pair_layers,
+            max_prot_tokens=max_prot_tokens,
+            attn_bins=attn_bins,
+            dropout=self._config.get("affinity_dropout", 0.1)
         )
         
         # Learnable loss weighting parameters
@@ -144,13 +148,11 @@ class Prot2MolModel(nn.Module):
         # Log parameter counts separately
         encoder_params = sum(p.numel() for p in self.protein_encoder.parameters())
         decoder_params = sum(p.numel() for p in self.molecule_decoder.parameters())
-        readout_params = sum(p.numel() for p in self.readout.parameters())
         pchembl_params = sum(p.numel() for p in self.pchembl_head.parameters())
         total_params = self.num_parameters()
         
         self.logger.info(f"Protein encoder parameters: {encoder_params:,}")
         self.logger.info(f"Molecule decoder parameters: {decoder_params:,}")
-        self.logger.info(f"Readout (AttnPool) parameters: {readout_params:,}")
         self.logger.info(f"pChEMBL prediction head parameters: {pchembl_params:,}")
         self.logger.info(f"Total model parameters: {total_params:,}")
         self.logger.info(f"Learnable loss weights initialized: LM={self.lm_weight.item():.3f}, pChEMBL={self.pchembl_weight.item():.3f}")
@@ -209,6 +211,10 @@ class Prot2MolModel(nn.Module):
                 labels_for_lm = labels
             # else: train_lm is False, labels_for_lm stays None
         
+        # Determine if we need cross-attention weights for the pChEMBL head
+        should_run_pchembl = self._config.get('train_pchembl_head', True)
+        output_attentions = bool(should_run_pchembl)
+        
         # Forward pass through GPT2 decoder with cross-attention
         with torch.set_grad_enabled(self.molecule_decoder.training):
             decoder_outputs = self.molecule_decoder(
@@ -218,6 +224,7 @@ class Prot2MolModel(nn.Module):
                 encoder_attention_mask=prot_attention_mask,
                 labels=labels_for_lm,
                 output_hidden_states=True,
+                output_attentions=output_attentions,
                 return_dict=True
             )
         
@@ -228,22 +235,23 @@ class Prot2MolModel(nn.Module):
         # Create attention mask for molecule tokens to exclude padding
         mol_attention_mask = (mol_input_ids != self._config['mol_tokenizer'].pad_token_id).float()
         
-        # Mean pooling over sequence dimension
-        masked_hidden_states = hidden_states * mol_attention_mask.unsqueeze(-1)
-        # Compute pooled representation using attention pooling
-        # In pchembl_only_mode, we detach the input hidden_states to prevent gradients to encoder/decoder
-        # but allow gradients to flow through readout and pchembl_head
-        input_to_readout = hidden_states.detach() if pchembl_only_mode else hidden_states
-        pooled_hidden_states = self.readout(input_to_readout, mol_attention_mask)
-        
         # Predict pChEMBL values for ALL samples (positive and negative)
         # Only compute if the head is active/trainable
         pchembl_predictions = None
-        should_run_pchembl = self._config.get('train_pchembl_head', True)
-        
         if should_run_pchembl:
             # Note: pChEMBL predictions are always computed, regardless of train_lm flag
-            pchembl_predictions = self.pchembl_head(pooled_hidden_states).squeeze(-1)  # [batch_size]
+            head_prot = protein_embeddings.detach() if pchembl_only_mode else protein_embeddings
+            head_mol = hidden_states.detach() if pchembl_only_mode else hidden_states
+            cross_attn = None
+            if decoder_outputs.cross_attentions is not None:
+                cross_attn = self._reduce_cross_attn(decoder_outputs.cross_attentions)
+            pchembl_predictions = self.pchembl_head(
+                head_prot,
+                head_mol,
+                cross_attn,
+                prot_attention_mask,
+                mol_attention_mask
+            )
         
         # Compute losses based on training mode
         lm_loss = None
@@ -261,7 +269,8 @@ class Prot2MolModel(nn.Module):
             # 2. pChEMBL Only Mode (Stage 1)
             # Implicit assumption: pchembl_only_mode implies train_pchembl_head is True
             if pchembl_values is not None and pchembl_predictions is not None:
-                pchembl_loss = F.mse_loss(pchembl_predictions, pchembl_values) 
+                delta = self._config.get("pchembl_huber_delta", 1.0)
+                pchembl_loss = F.smooth_l1_loss(pchembl_predictions, pchembl_values, beta=delta)
                 corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
                 total_loss = pchembl_loss #+ corr_loss * 0.2
                 
@@ -271,7 +280,8 @@ class Prot2MolModel(nn.Module):
             lm_loss = decoder_outputs.loss
             
             if pchembl_values is not None and pchembl_predictions is not None:
-                pchembl_loss = F.mse_loss(pchembl_predictions, pchembl_values)
+                delta = self._config.get("pchembl_huber_delta", 1.0)
+                pchembl_loss = F.smooth_l1_loss(pchembl_predictions, pchembl_values, beta=delta)
                 corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
                 
                 # Combine losses with learnable weights
@@ -324,6 +334,22 @@ class Prot2MolModel(nn.Module):
     def corr_loss_calculation(self, pchembl_predictions, pchembl_values, eps=1e-8):
         x = pchembl_predictions - pchembl_predictions.mean(); v = pchembl_values - pchembl_values.mean()
         return 1 - (x*v).mean() / (x.pow(2).mean().sqrt()*v.pow(2).mean().sqrt()+eps)
+
+    def _reduce_cross_attn(self, cross_attentions):
+        """Average cross-attention over layers and heads to get [B, Lm, Lp]."""
+        if cross_attentions is None:
+            return None
+        if isinstance(cross_attentions, (list, tuple)):
+            attn = torch.stack(cross_attentions, dim=0)
+        else:
+            attn = cross_attentions
+        if attn.dim() == 5:
+            # [layers, B, heads, Lm, Lp]
+            attn = attn.mean(dim=0).mean(dim=1)
+        elif attn.dim() == 4:
+            # [B, heads, Lm, Lp]
+            attn = attn.mean(dim=1)
+        return attn
     
     def get_encoder_hidden_states(self, prot_input_ids, prot_attention_mask):
         """
@@ -366,8 +392,6 @@ class Prot2MolModel(nn.Module):
         
         self._set_requires_grad(self.protein_encoder, trainable_encoder)
         self._set_requires_grad(self.molecule_decoder, trainable_decoder)
-        # Train both readout and pchembl_head together
-        self._set_requires_grad(self.readout, trainable_pchembl_head)
         self._set_requires_grad(self.pchembl_head, trainable_pchembl_head)
         
         # The learnable loss weights should always be trainable
@@ -376,7 +400,6 @@ class Prot2MolModel(nn.Module):
         
         encoder_trainable = sum(p.numel() for p in self.protein_encoder.parameters() if p.requires_grad)
         decoder_trainable = sum(p.numel() for p in self.molecule_decoder.parameters() if p.requires_grad)
-        readout_trainable = sum(p.numel() for p in self.readout.parameters() if p.requires_grad)
         pchembl_head_trainable = sum(p.numel() for p in self.pchembl_head.parameters() if p.requires_grad)
         lm_weight_trainable = self.lm_weight.numel() if self.lm_weight.requires_grad else 0
         pchembl_weight_trainable = self.pchembl_weight.numel() if self.pchembl_weight.requires_grad else 0
@@ -385,7 +408,6 @@ class Prot2MolModel(nn.Module):
             f"Trainable parameters per module: "
             f"Encoder={encoder_trainable:,}, "
             f"Decoder={decoder_trainable:,}, "
-            f"Readout={readout_trainable:,}, "
             f"pChEMBL Head={pchembl_head_trainable:,}, "
             f"LM Weight={lm_weight_trainable}, "
             f"pChEMBL Weight={pchembl_weight_trainable}, "
@@ -420,3 +442,163 @@ class AttnPool(nn.Module):
         kpm = ~(mask.bool())                              # [B,T]
         pooled, _ = self.attn(q, H, H, key_padding_mask=kpm, need_weights=False)
         return self.ln(pooled.squeeze(1))                 # [B,d]
+
+
+class PairFormerLiteBlock(nn.Module):
+    def __init__(self, d_pair, n_heads=4, dropout=0.1):
+        super().__init__()
+        self.row_attn = nn.MultiheadAttention(d_pair, n_heads, dropout=dropout, batch_first=True)
+        self.col_attn = nn.MultiheadAttention(d_pair, n_heads, dropout=dropout, batch_first=True)
+        self.ln_row = nn.LayerNorm(d_pair)
+        self.ln_col = nn.LayerNorm(d_pair)
+        self.ffn = nn.Sequential(
+            nn.Linear(d_pair, d_pair * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_pair * 2, d_pair)
+        )
+        self.ln_ffn = nn.LayerNorm(d_pair)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, z, prot_mask, mol_mask):
+        # z: [B, Lm, Lp, d]
+        B, Lm, Lp, d = z.shape
+
+        # Row attention (ligand token attends over protein tokens)
+        z_row = z.reshape(B * Lm, Lp, d)
+        kpm = None
+        if prot_mask is not None:
+            kpm = ~(prot_mask.bool())
+            kpm = kpm.unsqueeze(1).expand(B, Lm, Lp).reshape(B * Lm, Lp)
+        row_out, _ = self.row_attn(z_row, z_row, z_row, key_padding_mask=kpm, need_weights=False)
+        z_row = self.ln_row(z_row + self.dropout(row_out))
+        z = z_row.reshape(B, Lm, Lp, d)
+
+        # Column attention (protein token attends over ligand tokens)
+        z_col = z.permute(0, 2, 1, 3).reshape(B * Lp, Lm, d)
+        kpm = None
+        if mol_mask is not None:
+            kpm = ~(mol_mask.bool())
+            kpm = kpm.unsqueeze(1).expand(B, Lp, Lm).reshape(B * Lp, Lm)
+        col_out, _ = self.col_attn(z_col, z_col, z_col, key_padding_mask=kpm, need_weights=False)
+        z_col = self.ln_col(z_col + self.dropout(col_out))
+        z = z_col.reshape(B, Lp, Lm, d).permute(0, 2, 1, 3)
+
+        # Feed-forward
+        z = self.ln_ffn(z + self.dropout(self.ffn(z)))
+        return z
+
+
+class AffinityHead(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        d_pair=256,
+        n_heads=4,
+        n_layers=2,
+        max_prot_tokens=256,
+        attn_bins=16,
+        dropout=0.1
+    ):
+        super().__init__()
+        self.d_pair = d_pair
+        self.max_prot_tokens = max_prot_tokens
+        self.attn_bins = attn_bins
+        self.attn_eps = 1e-6
+        self.attn_dmax = 8.0
+
+        self.proj_p = nn.Linear(d_model, d_pair)
+        self.proj_m = nn.Linear(d_model, d_pair)
+        self.ln_p = nn.LayerNorm(d_pair)
+        self.ln_m = nn.LayerNorm(d_pair)
+
+        self.bias_p = nn.Linear(d_pair, d_pair, bias=False)
+        self.bias_m = nn.Linear(d_pair, d_pair, bias=False)
+
+        self.pair_mlp = nn.Sequential(
+            nn.Linear(4 * d_pair, d_pair),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_pair, d_pair)
+        )
+
+        self.bin_embed = nn.Embedding(attn_bins, d_pair)
+
+        self.blocks = nn.ModuleList([
+            PairFormerLiteBlock(d_pair, n_heads=n_heads, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+
+        self.out = nn.Sequential(
+            nn.LayerNorm(d_pair),
+            nn.Linear(d_pair, d_pair),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_pair, 1)
+        )
+
+    def _crop_protein(self, E, A, prot_mask):
+        if A is None or self.max_prot_tokens is None:
+            return E, A, prot_mask
+        B, Lp, d = E.shape
+        if Lp <= self.max_prot_tokens:
+            return E, A, prot_mask
+
+        if prot_mask is None:
+            prot_mask = torch.ones(B, Lp, device=E.device, dtype=torch.float)
+
+        # Importance from attention mass
+        importance = A.sum(dim=1)  # [B, Lp]
+        importance = importance.masked_fill(~prot_mask.bool(), float("-inf"))
+        k = min(self.max_prot_tokens, Lp)
+        topk = torch.topk(importance, k=k, dim=1).indices  # [B, k]
+
+        E = torch.gather(E, dim=1, index=topk.unsqueeze(-1).expand(B, k, d))
+        prot_mask = torch.gather(prot_mask, dim=1, index=topk)
+        A = torch.gather(A, dim=2, index=topk.unsqueeze(1).expand(B, A.size(1), k))
+        return E, A, prot_mask
+
+    def forward(self, E, D, A, prot_mask, mol_mask):
+        # E: [B, Lp, d_model], D: [B, Lm, d_model], A: [B, Lm, Lp]
+        if prot_mask is None:
+            prot_mask = torch.ones(E.size(0), E.size(1), device=E.device, dtype=torch.float)
+        if mol_mask is None:
+            mol_mask = torch.ones(D.size(0), D.size(1), device=D.device, dtype=torch.float)
+
+        E, A, prot_mask = self._crop_protein(E, A, prot_mask)
+
+        Ep = self.ln_p(self.proj_p(E))
+        Dm = self.ln_m(self.proj_m(D))
+
+        B, Lm, _ = Dm.shape
+        Lp = Ep.shape[1]
+
+        Dm_i = Dm.unsqueeze(2).expand(B, Lm, Lp, self.d_pair)
+        Ep_j = Ep.unsqueeze(1).expand(B, Lm, Lp, self.d_pair)
+        pair_input = torch.cat(
+            [Dm_i, Ep_j, Dm_i * Ep_j, (Dm_i - Ep_j).abs()],
+            dim=-1
+        )
+
+        z = self.pair_mlp(pair_input)
+        z = z + self.bias_m(Dm).unsqueeze(2) + self.bias_p(Ep).unsqueeze(1)
+
+        if A is not None:
+            A_clamped = A.clamp(min=self.attn_eps)
+            dtilde = (-torch.log(A_clamped)).clamp(max=self.attn_dmax)
+            bin_width = self.attn_dmax / self.attn_bins
+            bin_idx = torch.clamp((dtilde / bin_width).long(), max=self.attn_bins - 1)
+            z = z + self.bin_embed(bin_idx)
+
+        for blk in self.blocks:
+            z = blk(z, prot_mask, mol_mask)
+
+        # Attention-weighted pooling
+        if A is None:
+            w = mol_mask.unsqueeze(2) * prot_mask.unsqueeze(1)
+        else:
+            w = A * mol_mask.unsqueeze(2) * prot_mask.unsqueeze(1)
+        w_sum = w.sum(dim=(1, 2)).clamp(min=1e-6).unsqueeze(-1)
+        g = (z * w.unsqueeze(-1)).sum(dim=(1, 2)) / w_sum
+
+        return self.out(g).squeeze(-1)

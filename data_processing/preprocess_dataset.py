@@ -9,6 +9,9 @@ Usage:
     python preprocess_dataset.py --selfies_path /path/to/dataset.csv --prot_emb_model prot_t5 --cache_dir /path/to/cache
 
 After preprocessing, the cached data will be saved to the specified cache directory (default: /gpfs/projects/etur29/atabey/datasets).
+
+Use --eval_split and --eval_split_ratio to compute pChEMBL normalization from the
+train split only (recommended to avoid leakage).
 """
 
 import os
@@ -17,6 +20,7 @@ import argparse
 import logging
 import re
 from datetime import datetime
+import numpy as np
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,14 +37,8 @@ class DatasetPreprocessor:
     def __init__(self, config):
         self.config = config
         self.logger = self._setup_logging()
-        
-        # Prepare pChEMBL normalization
-        self._prepare_normalization()
-        
-        # Initialize tokenizers
-        self._init_tokenizers()
-        
-        # Define cache path
+
+        # Define cache path early (used for saving stats)
         if config.cache_dir:
             self.cache_dir = config.cache_dir
         else:
@@ -50,6 +48,13 @@ class DatasetPreprocessor:
         self.processed_data_path = os.path.join(self.cache_dir, dataset_name)
         
         self.logger.info(f"Cache will be saved to: {self.processed_data_path}")
+        
+        # Prepare pChEMBL normalization
+        self._prepare_normalization()
+        self._prepare_group_ids()
+        
+        # Initialize tokenizers
+        self._init_tokenizers()
     
     def _setup_logging(self):
         """Setup logging configuration."""
@@ -70,8 +75,30 @@ class DatasetPreprocessor:
         """Calculate pChEMBL normalization constants."""
         import pandas as pd
         self.logger.info("Preparing normalization constants from dataset...")
-        df = pd.read_csv(self.config.selfies_path)
-        pchembl_values = df['pchembl_value_Median'].dropna()
+        usecols = ["pchembl_value_Median"]
+        if self.config.eval_split == "aid":
+            usecols.append("AID")
+        df = pd.read_csv(self.config.selfies_path, usecols=usecols)
+
+        if self.config.eval_split == "aid" and "AID" in df.columns:
+            aids = df["AID"].astype(str).unique()
+            rng = np.random.RandomState(self.config.split_seed)
+            rng.shuffle(aids)
+            n_holdout = max(1, int(len(aids) * self.config.eval_split_ratio))
+            holdout_aids = set(aids[:n_holdout])
+            train_mask = ~df["AID"].astype(str).isin(holdout_aids)
+            pchembl_values = df.loc[train_mask, "pchembl_value_Median"].dropna()
+            self.logger.info(
+                f"Using AID hold-out for normalization: {n_holdout} AIDs held out "
+                f"({self.config.eval_split_ratio:.3f} of {len(aids)})"
+            )
+        else:
+            pchembl_values = df["pchembl_value_Median"].dropna()
+            if 0.0 < self.config.eval_split_ratio < 1.0:
+                pchembl_values = pchembl_values.sample(
+                    frac=1.0 - self.config.eval_split_ratio,
+                    random_state=self.config.split_seed
+                )
         
         self.pchembl_mean = pchembl_values.mean()
         self.pchembl_std  = pchembl_values.std(ddof=0)
@@ -79,6 +106,43 @@ class DatasetPreprocessor:
         
         self.logger.info(f"pChEMBL normalization range: mean={self.pchembl_mean:.3f}, std={self.pchembl_std:.3f}")
         self.logger.info(f"pChEMBL positive threshold set to: >={self.pchembl_threshold}")
+
+        # Persist stats for training/eval to avoid leakage
+        try:
+            os.makedirs(self.processed_data_path, exist_ok=True)
+            stats_path = os.path.join(self.processed_data_path, "pchembl_stats.json")
+            import json
+            with open(stats_path, "w") as f:
+                json.dump({
+                    "pchembl_mean": float(self.pchembl_mean),
+                    "pchembl_std": float(self.pchembl_std),
+                    "pchembl_threshold": float(self.pchembl_threshold),
+                    "eval_split": self.config.eval_split,
+                    "eval_split_ratio": float(self.config.eval_split_ratio),
+                    "split_seed": int(self.config.split_seed)
+                }, f, indent=2)
+            self.logger.info(f"Saved pChEMBL stats to: {stats_path}")
+        except Exception as e:
+            self.logger.warning(f"Could not save pChEMBL stats: {e}")
+
+    def _prepare_group_ids(self):
+        """Prepare AID+Target_ID group mapping for pairwise ranking loss."""
+        import pandas as pd
+        self.group_id_map = None
+        try:
+            df = pd.read_csv(self.config.selfies_path, usecols=["AID", "Target_ID"])
+        except Exception as e:
+            self.logger.warning(f"Could not load AID/Target_ID columns for grouping: {e}")
+            return
+
+        if "AID" not in df.columns or "Target_ID" not in df.columns:
+            self.logger.warning("AID/Target_ID columns not found in dataset. Pairwise loss will be disabled.")
+            return
+
+        group_keys = df["AID"].astype(str) + "__" + df["Target_ID"].astype(str)
+        unique_keys = pd.unique(group_keys)
+        self.group_id_map = {k: i for i, k in enumerate(unique_keys)}
+        self.logger.info(f"Prepared group_id map with {len(self.group_id_map):,} AID+Target_ID groups")
     
     def _init_tokenizers(self):
         """Initialize tokenizers for proteins and molecules."""
@@ -161,13 +225,19 @@ class DatasetPreprocessor:
                 train_lm_flags.append(val >= self.pchembl_threshold)
                 normalized_val = (val - self.pchembl_mean) / (self.pchembl_std + 1e-8)
                 normalized_pchembl.append(normalized_val)
+
+            group_ids = None
+            if self.group_id_map is not None and "AID" in batch and "Target_ID" in batch:
+                group_keys = [f"{a}__{t}" for a, t in zip(batch["AID"], batch["Target_ID"])]
+                group_ids = [self.group_id_map.get(k, -1) for k in group_keys]
             
             return {
                 'mol_input_ids': ids['input_ids'],
                 'mol_attention_mask': ids['attention_mask'],
                 'labels': labels,
                 'pchembl_values': torch.tensor(normalized_pchembl, dtype=torch.float),
-                'train_lm': torch.tensor(train_lm_flags, dtype=torch.bool)
+                'train_lm': torch.tensor(train_lm_flags, dtype=torch.bool),
+                'group_id': torch.tensor(group_ids, dtype=torch.long) if group_ids is not None else torch.tensor([-1] * len(batch["Compound_SELFIES"]), dtype=torch.long)
             }
         except Exception as e:
             self.logger.error(f"Error in molecule tokenization: {str(e)}")
@@ -272,6 +342,25 @@ def parse_args():
         default=None,
         help="Directory to store processed datasets (overrides default path)"
     )
+    parser.add_argument(
+        "--eval_split",
+        type=str,
+        default="random",
+        choices=["random", "aid"],
+        help="Split strategy used for normalization statistics"
+    )
+    parser.add_argument(
+        "--eval_split_ratio",
+        type=float,
+        default=0.01,
+        help="Fraction of data (or AIDs) held out for validation"
+    )
+    parser.add_argument(
+        "--split_seed",
+        type=int,
+        default=42,
+        help="Random seed for split reproducibility"
+    )
     
     return parser.parse_args()
 
@@ -308,4 +397,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

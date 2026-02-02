@@ -1,5 +1,6 @@
 from transformers import Trainer, GenerationConfig
 import torch
+import torch.nn.functional as F
 
 class GPT2_w_crs_attn_Trainer(Trainer):
     """
@@ -9,7 +10,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
     protein encoder and molecule decoder.
     """
     
-    def __init__(self, *args, pchembl_only_mode=False, ignore_mismatched_optimizer=False, **kwargs):
+    def __init__(self, *args, pchembl_only_mode=False, ignore_mismatched_optimizer=False, pchembl_pair_weight=1.0, **kwargs):
         """
         Initialize the trainer with support for two-stage training.
         
@@ -20,14 +21,17 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         super().__init__(*args, **kwargs)
         self.pchembl_only_mode = pchembl_only_mode
         self.ignore_mismatched_optimizer = ignore_mismatched_optimizer
+        self.pchembl_pair_weight = pchembl_pair_weight
         # Storage for pChEMBL predictions during evaluation
         self.pchembl_predictions_list = []
         self.pchembl_targets_list = []
+        self.pchembl_group_ids_list = []
         
     def clear_pchembl_predictions(self):
         """Clear accumulated pChEMBL predictions. Called at the start of each evaluation."""
         self.pchembl_predictions_list = []
         self.pchembl_targets_list = []
+        self.pchembl_group_ids_list = []
     
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
         """
@@ -78,10 +82,74 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             train_lm=train_lm,
             pchembl_only_mode=self.pchembl_only_mode
         )
-        
-        loss = outputs["loss"]
+
+        lm_loss = outputs.get("lm_loss", None)
+        pchembl_preds = outputs.get("pchembl_predictions", None)
+        group_ids = inputs.get("group_id", None)
+
+        pchembl_loss = None
+        pair_loss = None
+
+        if pchembl_preds is not None and pchembl_values is not None:
+            delta = model._config.get("pchembl_huber_delta", 1.0)
+            pchembl_loss = F.smooth_l1_loss(pchembl_preds, pchembl_values, beta=delta)
+            if group_ids is not None:
+                pair_loss = self._pairwise_huber(pchembl_preds, pchembl_values, group_ids, delta=delta)
+
+        # Combine losses
+        loss = None
+        if self.pchembl_only_mode:
+            if pchembl_loss is not None:
+                total_pair = pair_loss if pair_loss is not None else 0.0
+                loss = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+        else:
+            if lm_loss is not None:
+                loss = model.lm_weight * lm_loss
+            if pchembl_loss is not None:
+                total_pair = pair_loss if pair_loss is not None else 0.0
+                pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+                loss = pchembl_term if loss is None else loss + pchembl_term
+
+        # Fallback to model loss if something is missing
+        if loss is None:
+            loss = outputs["loss"]
+
+        outputs["loss"] = loss
         outputs["inputs"] = inputs
         return (loss, outputs) if return_outputs else loss
+
+    def _pairwise_huber(self, y_pred, y_true, group_ids, delta=1.0):
+        """Compute pairwise Huber loss within each group_id."""
+        if group_ids is None:
+            return torch.tensor(0.0, device=y_pred.device)
+
+        # Filter invalid group ids
+        valid_mask = group_ids >= 0
+        if not torch.any(valid_mask):
+            return torch.tensor(0.0, device=y_pred.device)
+
+        y_pred = y_pred[valid_mask]
+        y_true = y_true[valid_mask]
+        group_ids = group_ids[valid_mask]
+
+        losses = []
+        for g in torch.unique(group_ids):
+            idx = (group_ids == g).nonzero(as_tuple=True)[0]
+            if idx.numel() < 2:
+                continue
+            perm = idx[torch.randperm(idx.numel(), device=idx.device)]
+            half = perm.numel() // 2
+            if half == 0:
+                continue
+            a = perm[:half]
+            b = perm[half:half * 2]
+            dy_pred = y_pred[a] - y_pred[b]
+            dy_true = y_true[a] - y_true[b]
+            losses.append(F.smooth_l1_loss(dy_pred, dy_true, beta=delta))
+
+        if len(losses) == 0:
+            return torch.tensor(0.0, device=y_pred.device)
+        return torch.stack(losses).mean()
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         """
@@ -148,6 +216,8 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                 if pchembl_preds is not None and model_inputs.get("pchembl_values") is not None:
                     self.pchembl_predictions_list.append(pchembl_preds.detach().cpu())
                     self.pchembl_targets_list.append(model_inputs["pchembl_values"].detach().cpu())
+                    if "group_id" in inputs:
+                        self.pchembl_group_ids_list.append(inputs["group_id"].detach().cpu())
                 
                 # Debug: check loss value
                 if loss is not None:
@@ -189,14 +259,17 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                                to match what Transformers does with LM predictions
         
         Returns:
-            Tuple of (predictions, targets) as numpy arrays, or (None, None) if empty
+            Tuple of (predictions, targets, group_ids) as numpy arrays, or (None, None, None) if empty
         """
         if len(self.pchembl_predictions_list) == 0:
-            return None, None
+            return None, None, None
         
         # Concatenate all batches on this rank
         predictions = torch.cat(self.pchembl_predictions_list, dim=0)
         targets = torch.cat(self.pchembl_targets_list, dim=0)
+        group_ids = None
+        if len(self.pchembl_group_ids_list) > 0:
+            group_ids = torch.cat(self.pchembl_group_ids_list, dim=0)
         
         local_samples = predictions.shape[0]
         
@@ -212,6 +285,8 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             device = torch.device(f"cuda:{self.args.local_rank}")
             predictions = predictions.to(device)
             targets = targets.to(device)
+            if group_ids is not None:
+                group_ids = group_ids.to(device)
             
             world_size = dist.get_world_size()
             rank = dist.get_rank()
@@ -228,23 +303,34 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                 padding = torch.zeros(max_size - predictions.shape[0], device=predictions.device)
                 predictions = torch.cat([predictions, padding], dim=0)
                 targets = torch.cat([targets, padding], dim=0)
+                if group_ids is not None:
+                    gid_padding = torch.full((max_size - group_ids.shape[0],), -1, device=group_ids.device, dtype=group_ids.dtype)
+                    group_ids = torch.cat([group_ids, gid_padding], dim=0)
             
             # Gather from all ranks
             gathered_preds = [torch.zeros_like(predictions) for _ in range(world_size)]
             gathered_targets = [torch.zeros_like(targets) for _ in range(world_size)]
+            gathered_groups = [torch.zeros_like(group_ids) for _ in range(world_size)] if group_ids is not None else None
             
             dist.all_gather(gathered_preds, predictions)
             dist.all_gather(gathered_targets, targets)
+            if group_ids is not None:
+                dist.all_gather(gathered_groups, group_ids)
             
             # Concatenate and trim
             predictions_list = []
             targets_list = []
+            groups_list = []
             for i, size in enumerate(size_list):
                 predictions_list.append(gathered_preds[i][:size.item()])
                 targets_list.append(gathered_targets[i][:size.item()])
+                if group_ids is not None:
+                    groups_list.append(gathered_groups[i][:size.item()])
             
             predictions = torch.cat(predictions_list, dim=0)
             targets = torch.cat(targets_list, dim=0)
+            if group_ids is not None:
+                group_ids = torch.cat(groups_list, dim=0)
             
             total_samples = predictions.shape[0]
            
@@ -257,8 +343,9 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         # Convert to numpy
         predictions_np = predictions.cpu().numpy()
         targets_np = targets.cpu().numpy()
+        group_ids_np = group_ids.cpu().numpy() if group_ids is not None else None
         
-        return predictions_np, targets_np
+        return predictions_np, targets_np, group_ids_np
     
     def _load_optimizer_and_scheduler(self, checkpoint):
         """
