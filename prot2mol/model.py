@@ -4,8 +4,6 @@ import torch.nn.functional as F
 from transformers import GPT2Config, GPT2LMHeadModel
 from .protein_encoders import get_protein_encoder, get_encoder_size
 import logging
-from dataclasses import dataclass
-from typing import Optional
 
 
 
@@ -426,22 +424,6 @@ def create_prot2mol_model(config):
         Prot2MolModel instance
     """
     return Prot2MolModel(config)
-
-class AttnPool(nn.Module):
-    def __init__(self, d_model, n_heads=4):
-        super().__init__()
-        self.query = nn.Parameter(torch.randn(1, 1, d_model))
-        self.attn  = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
-        self.ln    = nn.LayerNorm(d_model)
-
-    def forward(self, H, mask):
-        # H: [B, T, d], mask: [B, T] with 1 for tokens, 0 for pads
-        B = H.size(0)
-        q = self.query.expand(B, -1, -1)                 # [B,1,d]
-        # key_padding_mask: True for pads
-        kpm = ~(mask.bool())                              # [B,T]
-        pooled, _ = self.attn(q, H, H, key_padding_mask=kpm, need_weights=False)
-        return self.ln(pooled.squeeze(1))                 # [B,d]
 
 
 class PairFormerLiteBlock(nn.Module):

@@ -18,7 +18,6 @@ import os
 import sys
 import argparse
 import logging
-import re
 from datetime import datetime
 import numpy as np
 
@@ -26,8 +25,8 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datasets import load_dataset
-from transformers import BartTokenizer
-from prot2mol.protein_encoders import get_protein_tokenizer
+from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequences
+from prot2mol.hf_utils import load_molgen_tokenizer
 import torch
 
 # Set environment variables
@@ -149,35 +148,17 @@ class DatasetPreprocessor:
         self.logger.info("Initializing tokenizers...")
         
         # Molecule tokenizer
-        mol_model_path = self._get_model_path("zjunlp--MolGen-large")
-        self.mol_tokenizer = BartTokenizer.from_pretrained(mol_model_path, padding_side="left")
+        self.mol_tokenizer = load_molgen_tokenizer(padding_side="left")
         
         # Protein tokenizer
         self.prot_tokenizer = get_protein_tokenizer(self.config.prot_emb_model)
         
         self.logger.info("Tokenizers initialized successfully")
     
-    def _get_model_path(self, model_name):
-        """Get the correct path for a locally cached model."""
-        models_base = os.environ.get('MODELS_BASE_PATH', './models')
-        base_path = os.path.join(models_base, f"models--{model_name}")
-        snapshots_path = os.path.join(base_path, "snapshots")
-        
-        if os.path.exists(snapshots_path):
-            snapshots = os.listdir(snapshots_path)
-            if snapshots:
-                return os.path.join(snapshots_path, snapshots[0])
-        
-        return base_path
-    
     def tokenize_prot_function(self, batch):
         """Tokenize protein sequences."""
         try:
-            # Replace non-standard amino acids
-            if self.config.prot_emb_model == "prot_t5":
-                sequence_examples = [" ".join(list(re.sub(r"[UZOB]", "X", seq))) for seq in batch["Target_FASTA"]]
-            else:
-                sequence_examples = [re.sub(r"[UZOB]", "X", seq) for seq in batch["Target_FASTA"]]
+            sequence_examples = format_protein_sequences(batch["Target_FASTA"], self.config.prot_emb_model)
             
             # Tokenize
             ids = self.prot_tokenizer.batch_encode_plus(

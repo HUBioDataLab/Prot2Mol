@@ -2,7 +2,6 @@ import pandas as pd
 import selfies as sf
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from rdkit import Chem
 from rdkit.Chem import RDConfig
 import os
 import sys

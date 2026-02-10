@@ -5,29 +5,22 @@ import math
 import argparse
 import logging
 import datetime
-import re
-from typing import Dict, List, Tuple, Any, Optional
-from torch.distributed import init_process_group, destroy_process_group, barrier
+from torch.distributed import init_process_group, destroy_process_group
 # Third-party library imports
 import numpy as np
 import torch
 import wandb
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from datasets import load_dataset, Dataset, load_from_disk
-from transformers import (
-    TrainingArguments,
-    BartTokenizer,
-    T5Tokenizer,
-    AutoTokenizer
-)
+from datasets import load_from_disk
+from transformers import TrainingArguments
 
 # Local application imports
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_processing import train_val_test
 from prot2mol.trainer import GPT2_w_crs_attn_Trainer
 from prot2mol.utils import metrics_calculation, canonicalize_smiles_list, decode_selfies_list
-from prot2mol.protein_encoders import get_protein_tokenizer
+from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequences
+from prot2mol.hf_utils import load_molgen_tokenizer
 from prot2mol.model import create_prot2mol_model
 
 # Set environment variables
@@ -346,26 +339,10 @@ class TrainingScript:
             self.logger.error(f"Failed to initialize DDP: {e}")
             raise
 
-    def _get_model_path(self, model_name):
-        """Get the correct path for a locally cached model."""
-        # Use environment variable or fallback to hardcoded path
-        models_base = os.environ.get('MODELS_BASE_PATH', './models')
-        base_path = os.path.join(models_base, f"models--{model_name}")
-        snapshots_path = os.path.join(base_path, "snapshots")
-        
-        if os.path.exists(snapshots_path):
-            # Get the first (and typically only) snapshot directory
-            snapshots = os.listdir(snapshots_path)
-            if snapshots:
-                return os.path.join(snapshots_path, snapshots[0])
-        
-        return base_path
-
     def _init_tokenizers(self):
         """Initialize tokenizers for proteins and molecules."""
         self.logger.info("Initializing tokenizers...")
-        mol_model_path = self._get_model_path("zjunlp--MolGen-large")
-        self.mol_tokenizer = BartTokenizer.from_pretrained(mol_model_path, padding_side="left")
+        self.mol_tokenizer = load_molgen_tokenizer(padding_side="left")
         self.prot_tokenizer = get_protein_tokenizer(self.model_config['prot_emb_model'])
 
     def _init_models(self):
@@ -453,11 +430,7 @@ class TrainingScript:
             dict: Dictionary with tokenized protein data
         """
         try:
-            # Replace non-standard amino acids with 'X'
-            if self.model_config['prot_emb_model'] == "prot_t5":
-                sequence_examples = [" ".join(list(re.sub(r"[UZOB]", "X", seq))) for seq in batch["Target_FASTA"]]
-            else:
-                sequence_examples = [re.sub(r"[UZOB]", "X", seq) for seq in batch["Target_FASTA"]]
+            sequence_examples = format_protein_sequences(batch["Target_FASTA"], self.model_config['prot_emb_model'])
 
             # Tokenize the sequences
             ids = self.prot_tokenizer.batch_encode_plus(
@@ -497,7 +470,6 @@ class TrainingScript:
                 return_tensors="pt"
             )
             
-            pchembl_values = batch["pchembl_value_Median"]
             labels = ids['input_ids'].clone()
             
             # Mask padded positions in labels (set to -100 to ignore in loss)
@@ -537,7 +509,12 @@ class TrainingScript:
                 
                 # Debug: log how many samples are negative
                 if negative_sample_count > 0:
-                    print(f"DEBUG tokenize_mol: {negative_sample_count}/{len(pchembl_values)} negative samples (pchembl < {self.pchembl_threshold}) - train_lm=False for these")
+                    self.logger.debug(
+                        "tokenize_mol: %s/%s negative samples (pchembl < %s) -> train_lm=False",
+                        negative_sample_count,
+                        len(pchembl_values),
+                        self.pchembl_threshold
+                    )
 
             return {
                 'mol_input_ids': ids['input_ids'],

@@ -12,20 +12,20 @@ import json
 import logging
 import argparse
 import warnings
-from typing import List, Dict, Optional, Tuple, Union
-from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 
 import torch
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from transformers import BartTokenizer, GenerationConfig
+from transformers import GenerationConfig
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from prot2mol.model import Prot2MolModel
-from prot2mol.protein_encoders import get_protein_tokenizer
+from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequence
+from prot2mol.hf_utils import load_molgen_tokenizer
 from prot2mol.utils import metrics_calculation, canonicalize_smiles_list, decode_selfies_list
 import selfies as sf
 from rdkit import RDLogger
@@ -85,27 +85,14 @@ class MoleculeGenerator:
         )
         return logging.getLogger(__name__)
     
-    def _get_model_path(self, model_name: str) -> str:
-        """Get the correct path for a locally cached model."""
-        models_base = os.environ.get('MODELS_BASE_PATH', '/home/hu/hu544211/Prot2Mol/models')
-        base_path = os.path.join(models_base, f"models--{model_name}")
-        snapshots_path = os.path.join(base_path, "snapshots")
-        
-        if os.path.exists(snapshots_path):
-            snapshots = os.listdir(snapshots_path)
-            if snapshots:
-                return os.path.join(snapshots_path, snapshots[0])
-        
-        return base_path
-    
     def _load_components(self):
         """Load tokenizers and model."""
         self.logger.info("Loading tokenizers and model...")
         
         # Load molecule tokenizer
         self.logger.info("Loading molecule tokenizer...")
-        mol_model_path = self._get_model_path("zjunlp--MolGen-large")
-        self.mol_tokenizer = BartTokenizer.from_pretrained(mol_model_path, padding_side="left")
+        models_base = os.environ.get('MODELS_BASE_PATH', '/home/hu/hu544211/Prot2Mol/models')
+        self.mol_tokenizer = load_molgen_tokenizer(models_base=models_base, padding_side="left")
         
         # Load protein tokenizer
         self.logger.info("Loading protein tokenizer...")
@@ -303,12 +290,7 @@ class MoleculeGenerator:
             Protein embeddings tensor
         """
         # Prepare sequence for tokenization
-        if self.config.prot_emb_model == "prot_t5":
-            # For ProtT5, add spaces between amino acids
-            formatted_sequence = " ".join(list(protein_sequence.replace("U", "X").replace("Z", "X").replace("O", "X").replace("B", "X")))
-        else:
-            # For other models, use sequence as-is
-            formatted_sequence = protein_sequence.replace("U", "X").replace("Z", "X").replace("O", "X").replace("B", "X")
+        formatted_sequence = format_protein_sequence(protein_sequence, self.config.prot_emb_model)
         
         # Tokenize protein sequence
         prot_tokens = self.prot_tokenizer.encode_plus(

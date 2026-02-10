@@ -1,11 +1,15 @@
-import torch
-from transformers import (T5Tokenizer, T5EncoderModel, 
-                        AutoTokenizer, EsmModel,
-                        EsmTokenizer, EsmForMaskedLM)
-from typing import Optional, Tuple, Dict, Any
+import logging
 import re
+from typing import Iterable, List, Optional
+
 import numpy as np
-import os
+import torch
+from transformers import AutoTokenizer, EsmForMaskedLM, EsmModel, T5EncoderModel, T5Tokenizer
+
+from .hf_utils import resolve_model_path
+
+logger = logging.getLogger(__name__)
+_NON_STD_AA = re.compile(r"[UZOB]")
 def count_trainable_parameters(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -31,30 +35,26 @@ class ProtT5Encoder(ProteinEncoder):
     def __init__(self, model_name: str = "Rostlab/prot_t5_xl_uniref50", max_length: int = 1000,
                  active: bool = True):
         super().__init__(max_length, active)
-        print("active Value: ", active)
         # Use local path if it contains our local models directory structure
         if "Rostlab" in model_name and not model_name.startswith("/"):
-            model_path = _get_model_path("Rostlab--prot_t5_xl_uniref50")
+            model_path = resolve_model_path("Rostlab--prot_t5_xl_uniref50")
         else:
             model_path = model_name
         self.model = T5EncoderModel.from_pretrained(model_path)
         if active is True:
-            print("ProtT5 Encoder is setting Training Mode")
             self.model.train()
-            print("ProtT5 Encoder is runned Training Mode")
+            logger.info("ProtT5 encoder set to training mode")
         elif active is False:
-            print("ProtT5 Encoder is setting to Evaluation Mode")
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
+            logger.info("ProtT5 encoder frozen (eval mode)")
         self.check_model_trainability()
     def check_model_trainability(self):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
         encoder_trainable_params = count_trainable_parameters(self.model)
-        
-        print(f"Encoder Model Status:")
-        print(f"- Trainable parameters: {encoder_trainable_params}")
+        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
 
     def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         
@@ -69,7 +69,7 @@ class ESM2Encoder(ProteinEncoder):
         super().__init__(max_length, active)
         # Use local path if it contains our local models directory structure
         if "facebook" in model_name and not model_name.startswith("/"):
-            model_path = _get_model_path("facebook--esm2_t33_650M_UR50D")
+            model_path = resolve_model_path("facebook--esm2_t33_650M_UR50D")
         else:
             model_path = model_name
         self.model = EsmModel.from_pretrained(model_path)
@@ -80,19 +80,16 @@ class ESM2Encoder(ProteinEncoder):
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
-            print("ESM2 Encoder is running on Non-Training Mode")
+            logger.info("ESM2 encoder frozen (eval mode)")
         elif active is True:
-            print("ESM2 Encoder is setting Training Mode")
             self.model.train()
-            print("ESM2 Encoder is runned Training Mode")
+            logger.info("ESM2 encoder set to training mode")
         self.check_model_trainability()  
     def check_model_trainability(self):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
         encoder_trainable_params = count_trainable_parameters(self.model)
-        
-        print(f"Encoder Model Status:")
-        print(f"- Trainable parameters: {encoder_trainable_params}")
+        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
 
     def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
@@ -110,7 +107,7 @@ class SaProtEncoder(ProteinEncoder):
         super().__init__(max_length, active)
         # Use local path if it contains our local models directory structure
         if "westlake-repl" in model_name and not model_name.startswith("/"):
-            model_path = _get_model_path("westlake-repl--SaProt_1.3B_AF2")
+            model_path = resolve_model_path("westlake-repl--SaProt_1.3B_AF2")
         else:
             model_path = model_name
         self.model = EsmForMaskedLM.from_pretrained(model_path)
@@ -128,9 +125,7 @@ class SaProtEncoder(ProteinEncoder):
         """Check trainability status of both encoder and main model"""
         # Check encoder model
         encoder_trainable_params = count_trainable_parameters(self.model)
-        
-        print(f"Encoder Model Status:")
-        print(f"- Trainable parameters: {encoder_trainable_params}")
+        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
 
     def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
@@ -162,33 +157,28 @@ def get_protein_encoder(model_name: str, max_length: int = 1000,
     
     return encoders[model_name](max_length=max_length, active=active)
 
+def format_protein_sequence(sequence: str, model_name: str) -> str:
+    """Normalize non-standard amino acids and format for tokenizer."""
+    cleaned = _NON_STD_AA.sub("X", sequence)
+    if model_name == "prot_t5":
+        return " ".join(list(cleaned))
+    return cleaned
 
-def _get_model_path(model_name):
-    import os
-    """Get the correct path for a locally cached model."""
-    models_base = os.environ.get('MODELS_BASE_PATH', './models')
-    base_path = os.path.join(models_base, f"models--{model_name}")
-    snapshots_path = os.path.join(base_path, "snapshots")
-    
-    if os.path.exists(snapshots_path):
-        # Get the first (and typically only) snapshot directory
-        snapshots = os.listdir(snapshots_path)
-        if snapshots:
-            return os.path.join(snapshots_path, snapshots[0])
-    
-    return base_path
+
+def format_protein_sequences(sequences: Iterable[str], model_name: str) -> List[str]:
+    """Vectorized wrapper for format_protein_sequence."""
+    return [format_protein_sequence(seq, model_name) for seq in sequences]
 
 def get_protein_tokenizer(model_name: str):
-    import os
     tokenizers = {
         "prot_t5": T5Tokenizer.from_pretrained(
-            _get_model_path("Rostlab--prot_t5_xl_uniref50"), 
+            resolve_model_path("Rostlab--prot_t5_xl_uniref50"),
             do_lower_case=False, 
             legacy=True, 
             clean_up_tokenization_spaces=True
         ),
-        "esm2": AutoTokenizer.from_pretrained(_get_model_path("facebook--esm2_t36_3B_UR50D")),
-        "saprot": AutoTokenizer.from_pretrained(_get_model_path("westlake-repl--SaProt_1.3B_AF2")),
+        "esm2": AutoTokenizer.from_pretrained(resolve_model_path("facebook--esm2_t36_3B_UR50D")),
+        "saprot": AutoTokenizer.from_pretrained(resolve_model_path("westlake-repl--SaProt_1.3B_AF2")),
     }
     return tokenizers[model_name]
 

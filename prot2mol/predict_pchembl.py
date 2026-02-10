@@ -15,8 +15,7 @@ import json
 import logging
 import argparse
 import warnings
-from typing import List, Dict, Optional, Tuple, Union
-from pathlib import Path
+from typing import List, Optional, Tuple
 
 import torch
 import numpy as np
@@ -26,14 +25,14 @@ import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import BartTokenizer
 from scipy.stats import pearsonr, spearmanr
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from prot2mol.model import Prot2MolModel
-from prot2mol.protein_encoders import get_protein_tokenizer
+from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequences
+from prot2mol.hf_utils import load_molgen_tokenizer
 import selfies as sf
 from rdkit import RDLogger
 
@@ -107,31 +106,16 @@ class PChemblPredictor:
         )
         return logging.getLogger(__name__)
 
-    def _get_model_path(self, model_name: str) -> str:
-        """Get the correct path for a locally cached model."""
-        models_base = os.environ.get('MODELS_BASE_PATH', '/gpfs/projects/etur29/atabey/models') 
-        # Fallback to standard locations if env var not set to user specific
-        if not os.path.exists(models_base):
-             models_base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-
-        base_path = os.path.join(models_base, f"models--{model_name}")
-        snapshots_path = os.path.join(base_path, "snapshots")
-        
-        if os.path.exists(snapshots_path):
-            snapshots = os.listdir(snapshots_path)
-            if snapshots:
-                return os.path.join(snapshots_path, snapshots[0])
-        
-        return base_path
-
     def _load_components(self):
         """Load tokenizers and model."""
         self.logger.info("Loading components...")
         
         # Load molecule tokenizer
         self.logger.info("Loading molecule tokenizer...")
-        mol_model_path = self._get_model_path("zjunlp--MolGen-large")
-        self.mol_tokenizer = BartTokenizer.from_pretrained(mol_model_path, padding_side="left")
+        models_base = os.environ.get('MODELS_BASE_PATH', '/gpfs/projects/etur29/atabey/models')
+        if not os.path.exists(models_base):
+            models_base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
+        self.mol_tokenizer = load_molgen_tokenizer(models_base=models_base, padding_side="left")
         
         # Add SELFIES alphabet to tokenizer
         # Note: Ideally we should use the same alphabet as training. 
@@ -222,12 +206,7 @@ class PChemblPredictor:
 
     def _prepare_protein_embeddings(self, sequences: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Batch tokenize protein sequences."""
-        formatted_sequences = []
-        for seq in sequences:
-            if self.config.prot_emb_model == "prot_t5":
-                formatted_sequences.append(" ".join(list(seq.replace("U", "X").replace("Z", "X").replace("O", "X").replace("B", "X"))))
-            else:
-                formatted_sequences.append(seq.replace("U", "X").replace("Z", "X").replace("O", "X").replace("B", "X"))
+        formatted_sequences = format_protein_sequences(sequences, self.config.prot_emb_model)
         
         prot_tokens = self.prot_tokenizer.batch_encode_plus(
             formatted_sequences,
@@ -238,8 +217,6 @@ class PChemblPredictor:
             return_tensors='pt'
         )
         return prot_tokens['input_ids'].to(self.device), prot_tokens['attention_mask'].to(self.device)
-
-        self.logger.info("Done.")
 
     def evaluate(self):
         """

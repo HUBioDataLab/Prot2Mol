@@ -1,4 +1,4 @@
-from transformers import Trainer, GenerationConfig
+from transformers import Trainer
 import torch
 import torch.nn.functional as F
 
@@ -173,6 +173,9 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         # Configure model for prediction
         model_config = model.config
         original_bos_token_id = model_config.bos_token_id
+        original_pad_token_id = model_config.pad_token_id
+        original_forced_bos = getattr(model_config, "forced_bos_token_id", None)
+        original_forced_eos = getattr(model_config, "forced_eos_token_id", None)
         model.config.bos_token_id = 1
         model.config.pad_token_id = 1
         model.config.forced_bos_token_id = 1
@@ -249,6 +252,11 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         finally:
             # Restore original bos_token_id
             model.config.bos_token_id = original_bos_token_id
+            model.config.pad_token_id = original_pad_token_id
+            if hasattr(model.config, "forced_bos_token_id"):
+                model.config.forced_bos_token_id = original_forced_bos
+            if hasattr(model.config, "forced_eos_token_id"):
+                model.config.forced_eos_token_id = original_forced_eos
     
     def get_pchembl_predictions(self, gather_across_ranks=True):
         """
