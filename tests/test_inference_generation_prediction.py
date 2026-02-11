@@ -1,11 +1,15 @@
+import json
+import os
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
+import prot2mol.inference.predict_pchembl as predict_module
 from prot2mol.inference.produce_molecules import MoleculeGenerator
-from prot2mol.inference.predict_pchembl import PChemblPredictor
+from prot2mol.inference.predict_pchembl import PChemblPredictor, parse_args
 
 
 def _generator_config(**overrides):
@@ -38,7 +42,10 @@ def _predictor_config(**overrides):
         input_file="/tmp/in.csv",
         model_path="/tmp/model",
         output_file="/tmp/out.csv",
+        models_base=None,
         data_path=None,
+        chembl_uniprot_mapping_path=None,
+        protein_targets_path=None,
         prot_emb_model="prot_t5",
         n_layer=1,
         n_head=2,
@@ -48,7 +55,6 @@ def _predictor_config(**overrides):
         batch_size=2,
         pchembl_mean=5.0,
         pchembl_std=2.0,
-        eval=False,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -183,3 +189,314 @@ def test_predictor_requires_target_context(monkeypatch):
         assert False, "Expected ValueError for missing Target_FASTA/Target_CHEMBL_ID"
     except ValueError as exc:
         assert "Target_FASTA" in str(exc) or "Target_CHEMBL_ID" in str(exc)
+
+
+def test_predictor_load_eval_split_dataset_respects_mode(monkeypatch):
+    cfg = _predictor_config()
+
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+
+    captured = {}
+
+    def _fake_split(full_data, split_mode, split_ratio, split_seed, logger=None, **kwargs):
+        captured["full_data"] = full_data
+        captured["split_mode"] = split_mode
+        captured["split_ratio"] = split_ratio
+        captured["split_seed"] = split_seed
+        return "train_split", {"rows": [1, 2]}
+
+    monkeypatch.setattr(
+        predict_module,
+        "load_processed_dataset",
+        lambda input_file, cache_dir=None: ({"train": "FULL_DATA"}, "/tmp/cache/in"),
+    )
+    monkeypatch.setattr(predict_module, "split_train_eval_dataset", _fake_split)
+
+    pred = PChemblPredictor(cfg)
+    eval_ds = pred._load_eval_split_dataset(split_mode="aid", split_ratio=0.25, split_seed=13)
+
+    assert eval_ds == {"rows": [1, 2]}
+    assert captured["full_data"] == "FULL_DATA"
+    assert captured["split_mode"] == "aid"
+    assert captured["split_ratio"] == 0.25
+    assert captured["split_seed"] == 13
+
+
+def test_predictor_sanitize_output_dataframe_drops_internal_columns(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+
+    pred = PChemblPredictor(cfg)
+    raw = pd.DataFrame(
+        {
+            "Target_FASTA": ["MKT"],
+            "prot_input_ids": [[1, 2]],
+            "prot_attention_mask": [[1, 1]],
+            "mol_input_ids": [[3, 4]],
+            "mol_attention_mask": [[1, 1]],
+            "labels": [[5, 6]],
+            "train_lm": [True],
+            "train_m": [True],
+            "Predicted_pChEMBL": [7.1],
+            "pchembl_value_Median": [7.0],
+        }
+    )
+
+    out = pred._sanitize_output_dataframe(raw)
+    for col in [
+        "Target_FASTA",
+        "prot_input_ids",
+        "prot_attention_mask",
+        "mol_input_ids",
+        "mol_attention_mask",
+        "labels",
+        "train_lm",
+        "train_m",
+    ]:
+        assert col not in out.columns
+    assert "Predicted_pChEMBL" in out.columns
+    assert "pchembl_value_Median" in out.columns
+
+
+def test_predictor_resolves_target_fasta_from_chembl_mapping(tmp_path, monkeypatch):
+    cfg = _predictor_config(batch_size=2)
+
+    map_file = tmp_path / "chembl_uniprot_mapping.txt"
+    map_file.write_text(
+        "# header\n"
+        "P24941\tCHEMBL301\tCyclin-dependent kinase 2\tSINGLE PROTEIN\n"
+    )
+    targets_file = tmp_path / "protein_targets.tsv"
+    targets_file.write_text(
+        "target_id\tHGNC_symbol\tUniProtID\tStatus\tOrganism\tClassification\tLength\tSequence\n"
+        "P24941_WT\tCDK2\tCDK2_HUMAN\treviewed\tHomo sapiens\tClass\t4\tMKTK\n"
+    )
+    cfg.chembl_uniprot_mapping_path = str(map_file)
+    cfg.protein_targets_path = str(targets_file)
+
+    def _fake_load_components(self):
+        from conftest import DummyBatchTokenizer
+
+        self.mol_tokenizer = DummyBatchTokenizer()
+        self.prot_tokenizer = DummyBatchTokenizer()
+
+        class _FakeModel:
+            def eval(self):
+                return self
+
+            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
+                b = mol_input_ids.shape[0]
+                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
+
+        self.model = _FakeModel()
+
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
+    monkeypatch.setattr(
+        "prot2mol.inference.predict_pchembl.tokenize_selfies_for_inference",
+        lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+        ),
+    )
+
+    pred = PChemblPredictor(cfg)
+    df = pd.DataFrame(
+        {
+            "Target_CHEMBL_ID": ["CHEMBL301", "CHEMBL301"],
+            "Generated_SELFIES": ["[C]", "[O]"],
+        }
+    )
+    out = pred._predict_dataframe(df)
+
+    assert "Target_FASTA" in out.columns
+    assert set(out["Target_FASTA"].tolist()) == {"MKTK"}
+    assert "Predicted_pChEMBL" in out.columns
+
+
+def test_predictor_resolves_target_fasta_from_uniprot_id(tmp_path, monkeypatch):
+    cfg = _predictor_config(batch_size=2)
+
+    targets_file = tmp_path / "protein_targets.tsv"
+    targets_file.write_text(
+        "target_id\tHGNC_symbol\tUniProtID\tStatus\tOrganism\tClassification\tLength\tSequence\n"
+        "P31749_WT\tAKT1\tAKT1_HUMAN\treviewed\tHomo sapiens\tClass\t4\tAKTS\n"
+    )
+    cfg.protein_targets_path = str(targets_file)
+
+    def _fake_load_components(self):
+        from conftest import DummyBatchTokenizer
+
+        self.mol_tokenizer = DummyBatchTokenizer()
+        self.prot_tokenizer = DummyBatchTokenizer()
+
+        class _FakeModel:
+            def eval(self):
+                return self
+
+            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
+                b = mol_input_ids.shape[0]
+                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
+
+        self.model = _FakeModel()
+
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
+    monkeypatch.setattr(
+        "prot2mol.inference.predict_pchembl.tokenize_selfies_for_inference",
+        lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+        ),
+    )
+
+    pred = PChemblPredictor(cfg)
+    df = pd.DataFrame(
+        {
+            "UniProt_ID": ["P31749", "P31749"],
+            "Generated_SELFIES": ["[C]", "[O]"],
+        }
+    )
+    out = pred._predict_dataframe(df)
+
+    assert "Target_FASTA" in out.columns
+    assert set(out["Target_FASTA"].tolist()) == {"AKTS"}
+    assert "Predicted_pChEMBL" in out.columns
+
+
+def test_predictor_resolves_target_fasta_from_lowercase_uniprot_id(tmp_path, monkeypatch):
+    cfg = _predictor_config(batch_size=2)
+
+    targets_file = tmp_path / "protein_targets.tsv"
+    targets_file.write_text(
+        "target_id\tHGNC_symbol\tUniProtID\tStatus\tOrganism\tClassification\tLength\tSequence\n"
+        "P31749_WT\tAKT1\tAKT1_HUMAN\treviewed\tHomo sapiens\tClass\t4\tAKTS\n"
+    )
+    cfg.protein_targets_path = str(targets_file)
+
+    def _fake_load_components(self):
+        from conftest import DummyBatchTokenizer
+
+        self.mol_tokenizer = DummyBatchTokenizer()
+        self.prot_tokenizer = DummyBatchTokenizer()
+
+        class _FakeModel:
+            def eval(self):
+                return self
+
+            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
+                b = mol_input_ids.shape[0]
+                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
+
+        self.model = _FakeModel()
+
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
+    monkeypatch.setattr(
+        "prot2mol.inference.predict_pchembl.tokenize_selfies_for_inference",
+        lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+        ),
+    )
+
+    pred = PChemblPredictor(cfg)
+    df = pd.DataFrame(
+        {
+            "uniprot_id": ["P31749", "P31749"],
+            "Generated_SELFIES": ["[C]", "[O]"],
+        }
+    )
+    out = pred._predict_dataframe(df)
+
+    assert "Target_FASTA" in out.columns
+    assert set(out["Target_FASTA"].tolist()) == {"AKTS"}
+    assert "Predicted_pChEMBL" in out.columns
+
+
+def test_predictor_auto_configure_uses_parent_checkpoint_config(tmp_path, monkeypatch):
+    model_parent = tmp_path / "run_dir"
+    ckpt = model_parent / "checkpoint-123"
+    ckpt.mkdir(parents=True)
+    (model_parent / "config.json").write_text(
+        json.dumps(
+            {
+                "n_layer": 12,
+                "n_head": 16,
+                "n_emb": 1024,
+                "prot_emb_model": "esm2",
+                "max_mol_len": 200,
+                "prot_max_length": 1000,
+            }
+        )
+    )
+
+    cfg = _predictor_config(model_path=str(ckpt), n_layer=1, n_head=2, n_emb=8, prot_emb_model="prot_t5")
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+
+    pred = PChemblPredictor(cfg)
+    assert pred.config.n_layer == 12
+    assert pred.config.n_head == 16
+    assert pred.config.n_emb == 1024
+    assert pred.config.prot_emb_model == "esm2"
+
+
+def test_predictor_load_components_uses_project_models_fallback(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.delenv("MODELS_BASE_PATH", raising=False)
+
+    captured = {}
+
+    def _fake_load_molgen_tokenizer(models_base=None, fallback_bases=None, padding_side="left"):
+        captured["models_base"] = models_base
+        captured["fallback_bases"] = fallback_bases
+        captured["padding_side"] = padding_side
+        return SimpleNamespace()
+
+    class _FakeModel:
+        def eval(self):
+            return self
+
+    monkeypatch.setattr(predict_module, "load_molgen_tokenizer", _fake_load_molgen_tokenizer)
+    monkeypatch.setattr(predict_module, "get_protein_tokenizer", lambda _: SimpleNamespace())
+    monkeypatch.setattr(PChemblPredictor, "_load_model", lambda self, _: _FakeModel())
+
+    PChemblPredictor(cfg)
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert captured["models_base"] is None
+    assert os.path.join(project_root, "models") in captured["fallback_bases"]
+    assert os.path.join(os.path.expanduser("~"), "Prot2Mol", "models") in captured["fallback_bases"]
+    assert captured["padding_side"] == "left"
+
+
+def test_parse_args_accepts_reproduce_and_rejects_legacy_eval_flag():
+    args = parse_args(
+        [
+            "--input_file",
+            "/tmp/in.csv",
+            "--model_path",
+            "/tmp/model",
+            "--output_file",
+            "/tmp/out.csv",
+            "--reproduce",
+            "random",
+        ]
+    )
+    assert args.reproduce == "random"
+
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--input_file",
+                "/tmp/in.csv",
+                "--model_path",
+                "/tmp/model",
+                "--output_file",
+                "/tmp/out.csv",
+                "--eval",
+            ]
+        )

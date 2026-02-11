@@ -2,7 +2,10 @@ predict:
   input_file: /absolute/path/to/input.csv
   model_path: /absolute/path/to/model_dir
   output_file: ./predictions.csv
+  models_base: null
   data_path: null
+  chembl_uniprot_mapping_path: null
+  protein_targets_path: null
 
   prot_emb_model: prot_t5
   n_layer: 1
@@ -14,4 +17,6 @@ predict:
   batch_size: 64
   pchembl_mean: 5.924
   pchembl_std: 1.362
-  eval: false
+  reproduce_split_ratio: 0.01
+  reproduce_split_seed: 42
+  reproduce: null

@@ -257,18 +257,9 @@ class MoleculeGenerator:
             else:
                 test_data = pd.read_csv(test_path)
         
-        # Add SELFIES alphabet to tokenizer from both datasets
-        all_selfies = []
-        if 'Compound_SELFIES' in train_data.columns:
-            all_selfies.extend(train_data['Compound_SELFIES'].tolist())
-        if 'Compound_SELFIES' in test_data.columns:
-            all_selfies.extend(test_data['Compound_SELFIES'].tolist())
-        
-        if all_selfies:
-            self.logger.info("Adding SELFIES alphabet to tokenizer...")
-            alphabet = list(sf.get_alphabet_from_selfies(all_selfies))
-            self.mol_tokenizer.add_tokens(alphabet)
-            self.logger.info(f"Added {len(alphabet)} SELFIES tokens to tokenizer")
+        # Keep tokenizer vocabulary fixed at inference time to match model training/load.
+        # Runtime tokenizer growth can desynchronize vocab assumptions from checkpoint weights.
+        self.logger.info("Using fixed MolGen tokenizer vocabulary (no runtime token additions).")
         
         self.logger.info(f"Loaded {len(train_data)} training samples and {len(test_data)} test samples")
         

@@ -160,6 +160,23 @@ python prot2mol/main.py predict \
   --config prot2mol/configs/predict.yaml
 ```
 
+Reproduce validation-split predictions (same split strategies used in training):
+
+```bash
+python prot2mol/main.py predict \
+  --config prot2mol/configs/predict.yaml \
+  --reproduce random
+```
+
+Use `--reproduce aid` for AID hold-out validation split.
+If local model caches are not under the default path, set `predict.models_base` in YAML
+or export `MODELS_BASE_PATH` to the directory that contains `models--zjunlp--MolGen-large`.
+For ID-based target resolution, set:
+- `predict.chembl_uniprot_mapping_path` (CHEMBL -> UniProt mapping file)
+- `predict.protein_targets_path` (Papyrus protein targets TSV with `target_id` and `Sequence`)
+Output CSVs automatically exclude internal columns used only for preprocessing/inference
+(e.g., `Target_FASTA`, token IDs/masks, labels, and train flags).
+
 ## Minimal Data Requirements
 
 ### Training dataset CSV
@@ -184,7 +201,10 @@ Required:
 Target specification:
 
 - either `Target_FASTA`
-- or `Target_CHEMBL_ID` with `--data_path` for sequence lookup
+- or `UniProt_ID` (resolved as `<UniProt>_WT` in protein target TSV)
+- or `Target_CHEMBL_ID` (resolved via CHEMBL->UniProt mapping, then `<UniProt>_WT`)
+
+For `--reproduce aid`, include `AID` in the input CSV.
 
 ## Citation
 

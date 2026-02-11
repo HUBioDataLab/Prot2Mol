@@ -5,8 +5,9 @@ pChEMBL Prediction Script for Prot2Mol
 This script predicts pChEMBL values for molecules against protein targets.
 It supports:
 1. Direct protein sequences via 'Target_FASTA' column.
-2. Protein ID lookup via 'Target_CHEMBL_ID' column (using --data_path).
-3. Batch processing of mixed targets.
+2. UniProt accession lookup via 'UniProt_ID' + protein targets TSV.
+3. Target CHEMBL lookup via 'Target_CHEMBL_ID' + CHEMBL->UniProt mapping.
+4. Batch processing of mixed targets.
 """
 
 import os
@@ -15,7 +16,7 @@ import json
 import logging
 import argparse
 import warnings
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import numpy as np
@@ -35,6 +36,8 @@ from prot2mol.core.protein_encoders import get_protein_tokenizer
 from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model
 from prot2mol.data.pipeline import (
     find_molecule_column,
+    load_processed_dataset,
+    split_train_eval_dataset,
     to_selfies_list,
     tokenize_protein_sequences_for_inference,
     tokenize_selfies_for_inference,
@@ -64,15 +67,34 @@ class PChemblPredictor:
         self.prot_tokenizer = None
         self.model = None
         self.sequence_cache = {}  # Cache for ID -> Sequence lookup
+        self._chembl_to_uniprot: Optional[Dict[str, str]] = None
+        self._target_id_to_sequence: Optional[Dict[str, str]] = None
         
         # Load model and tokenizers
         self._auto_configure_model()
         self._load_components()
 
+    def _resolve_model_config_path(self) -> Optional[str]:
+        """Find config.json in checkpoint dir or its parents."""
+        model_path = os.path.abspath(self.config.model_path)
+        candidate_dirs = [model_path]
+        parent = os.path.dirname(model_path)
+        if parent and parent not in candidate_dirs:
+            candidate_dirs.append(parent)
+        grandparent = os.path.dirname(parent)
+        if grandparent and grandparent not in candidate_dirs:
+            candidate_dirs.append(grandparent)
+
+        for directory in candidate_dirs:
+            config_path = os.path.join(directory, "config.json")
+            if os.path.exists(config_path):
+                return config_path
+        return None
+
     def _auto_configure_model(self):
         """Attempt to load model configuration from config.json to override defaults."""
-        config_path = os.path.join(self.config.model_path, "config.json")
-        if os.path.exists(config_path):
+        config_path = self._resolve_model_config_path()
+        if config_path is not None:
              self.logger.info(f"Found config.json at {config_path}, loading configuration...")
              try:
                  with open(config_path, 'r') as f:
@@ -98,7 +120,11 @@ class PChemblPredictor:
              except Exception as e:
                  self.logger.warning(f"Failed to load config.json: {e}")
         else:
-             self.logger.warning(f"No config.json found in {self.config.model_path}. Using CLI arguments/defaults. Ensure they match the trained model!")
+             self.logger.warning(
+                 "No config.json found in checkpoint directory or parents for %s. "
+                 "Using CLI/YAML values; ensure architecture args match training.",
+                 self.config.model_path,
+             )
         
     def _setup_logging(self) -> logging.Logger:
         logging.basicConfig(
@@ -117,10 +143,26 @@ class PChemblPredictor:
         
         # Load molecule tokenizer
         self.logger.info("Loading molecule tokenizer...")
-        models_base = os.environ.get('MODELS_BASE_PATH', '/gpfs/projects/etur29/atabey/models')
-        if not os.path.exists(models_base):
-            models_base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-        self.mol_tokenizer = load_molgen_tokenizer(models_base=models_base, padding_side="left")
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        configured_base = getattr(self.config, "models_base", None)
+        models_base = configured_base or os.environ.get("MODELS_BASE_PATH")
+        fallback_bases = [
+            os.path.join(project_root, "models"),
+            os.path.join(os.path.expanduser("~"), "Prot2Mol", "models"),
+        ]
+        try:
+            self.mol_tokenizer = load_molgen_tokenizer(
+                models_base=models_base,
+                fallback_bases=fallback_bases,
+                padding_side="left",
+            )
+        except OSError:
+            self.logger.error(
+                "Failed to load MolGen tokenizer. Set --models_base (or MODELS_BASE_PATH) "
+                "to the folder containing 'models--zjunlp--MolGen-large'. "
+                "Example: /home/<user>/Prot2Mol/models"
+            )
+            raise
         
         # Add SELFIES alphabet to tokenizer
         # Note: Ideally we should use the same alphabet as training. 
@@ -156,10 +198,253 @@ class PChemblPredictor:
             pbar.update(1)
         return model
 
+    def _resolve_optional_file(
+        self,
+        configured_path: Optional[str],
+        env_var: Optional[str],
+        candidates: List[str],
+    ) -> Optional[str]:
+        """Return first existing file path among explicit/env/candidate locations."""
+        ordered = []
+        if configured_path:
+            ordered.append(configured_path)
+        if env_var:
+            env_value = os.environ.get(env_var)
+            if env_value:
+                ordered.append(env_value)
+        ordered.extend(candidates)
+
+        seen = set()
+        for path in ordered:
+            if not path:
+                continue
+            expanded = os.path.expanduser(path)
+            if expanded in seen:
+                continue
+            seen.add(expanded)
+            if os.path.isfile(expanded):
+                return expanded
+        return None
+
+    def _resolve_chembl_mapping_path(self) -> Optional[str]:
+        """Resolve CHEMBL->UniProt mapping file path."""
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        candidates = [
+            os.path.join(project_root, "dataset", "chembl_uniprot_mapping.txt"),
+            os.path.join(project_root, "data", "chembl_uniprot_mapping.txt"),
+        ]
+        return self._resolve_optional_file(
+            configured_path=getattr(self.config, "chembl_uniprot_mapping_path", None),
+            env_var="CHEMBL_UNIPROT_MAPPING_PATH",
+            candidates=candidates,
+        )
+
+    def _resolve_protein_targets_path(self) -> Optional[str]:
+        """Resolve Papyrus protein-target TSV path for sequence lookup."""
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_path = getattr(self.config, "data_path", None)
+        data_candidates = []
+        if data_path:
+            expanded = os.path.expanduser(data_path)
+            if os.path.isfile(expanded):
+                data_candidates.append(expanded)
+            elif os.path.isdir(expanded):
+                data_candidates.extend(
+                    [
+                        os.path.join(expanded, "05.5_combined_set_protein_targets.tsv"),
+                        os.path.join(expanded, "papyrus", "05.5_combined_set_protein_targets.tsv"),
+                    ]
+                )
+        candidates = data_candidates + [
+            os.path.join(project_root, "dataset", "papyrus", "05.5_combined_set_protein_targets.tsv"),
+            os.path.join(project_root, "data", "papyrus", "05.5_combined_set_protein_targets.tsv"),
+        ]
+        return self._resolve_optional_file(
+            configured_path=getattr(self.config, "protein_targets_path", None),
+            env_var="PROTEIN_TARGETS_PATH",
+            candidates=candidates,
+        )
+
+    def _load_chembl_to_uniprot_map(self) -> Dict[str, str]:
+        """Load CHEMBL target id -> UniProt accession mapping."""
+        if self._chembl_to_uniprot is not None:
+            return self._chembl_to_uniprot
+
+        mapping_path = self._resolve_chembl_mapping_path()
+        mapping: Dict[str, str] = {}
+        if not mapping_path:
+            self.logger.warning(
+                "No CHEMBL mapping file found. Set --chembl_uniprot_mapping_path "
+                "or CHEMBL_UNIPROT_MAPPING_PATH to enable Target_CHEMBL_ID resolution."
+            )
+            self._chembl_to_uniprot = mapping
+            return mapping
+
+        try:
+            with open(mapping_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    row = line.strip()
+                    if not row or row.startswith("#"):
+                        continue
+                    cols = row.split("\t")
+                    if len(cols) < 2:
+                        continue
+                    uniprot = cols[0].strip()
+                    chembl = cols[1].strip()
+                    if not uniprot or not chembl:
+                        continue
+                    mapping[chembl.upper()] = uniprot
+            self.logger.info("Loaded %s CHEMBL->UniProt mappings from %s", len(mapping), mapping_path)
+        except Exception as exc:
+            self.logger.warning("Failed to parse CHEMBL mapping file %s: %s", mapping_path, exc)
+            mapping = {}
+
+        self._chembl_to_uniprot = mapping
+        return mapping
+
+    def _load_target_sequence_lookup(self) -> Dict[str, str]:
+        """Load target_id -> sequence lookup from Papyrus protein target file."""
+        if self._target_id_to_sequence is not None:
+            return self._target_id_to_sequence
+
+        targets_path = self._resolve_protein_targets_path()
+        lookup: Dict[str, str] = {}
+        if not targets_path:
+            self.logger.warning(
+                "No protein target file found. Set --protein_targets_path (or data_path) "
+                "to resolve Target_CHEMBL_ID / UniProt_ID to Target_FASTA."
+            )
+            self._target_id_to_sequence = lookup
+            return lookup
+
+        try:
+            sep = "\t" if targets_path.endswith(".tsv") else ","
+            targets_df = pd.read_csv(targets_path, sep=sep)
+            if "target_id" not in targets_df.columns or "Sequence" not in targets_df.columns:
+                self.logger.warning(
+                    "Protein target file %s missing required columns 'target_id' and 'Sequence'.",
+                    targets_path,
+                )
+                self._target_id_to_sequence = lookup
+                return lookup
+
+            ids = targets_df["target_id"].astype(str)
+            seqs = targets_df["Sequence"].astype(str)
+            for target_id, seq in zip(ids, seqs):
+                clean_id = target_id.strip()
+                clean_seq = seq.strip()
+                if clean_id and clean_seq and clean_seq.lower() != "nan":
+                    lookup[clean_id] = clean_seq
+            self.logger.info("Loaded %s protein target sequences from %s", len(lookup), targets_path)
+        except Exception as exc:
+            self.logger.warning("Failed to parse protein targets file %s: %s", targets_path, exc)
+            lookup = {}
+
+        self._target_id_to_sequence = lookup
+        return lookup
+
+    def _sequence_from_uniprot(self, uniprot_id: str) -> Optional[str]:
+        """Resolve sequence from UniProt accession using target lookup file."""
+        if not isinstance(uniprot_id, str):
+            return None
+        token = uniprot_id.strip()
+        if not token:
+            return None
+
+        lookup = self._load_target_sequence_lookup()
+        if not lookup:
+            return None
+
+        # Papyrus target IDs are commonly stored as "<UniProt>_WT".
+        candidates = [token]
+        if token.endswith("_WT"):
+            candidates.append(token[:-3])
+        else:
+            candidates.append(f"{token}_WT")
+
+        for candidate in candidates:
+            seq = lookup.get(candidate)
+            if seq:
+                return seq
+        return None
+
+    def _fill_target_fasta_from_ids(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Populate missing Target_FASTA from UniProt_ID / Target_CHEMBL_ID columns."""
+        if "Target_FASTA" not in df.columns:
+            df["Target_FASTA"] = pd.NA
+
+        missing_mask = df["Target_FASTA"].isna() | (df["Target_FASTA"].astype(str).str.strip() == "")
+        if not missing_mask.any():
+            return df
+
+        resolved = 0
+        total_missing = int(missing_mask.sum())
+
+        # 1) Prefer direct UniProt_ID when present.
+        if "UniProt_ID" in df.columns:
+            uni_values = df.loc[missing_mask, "UniProt_ID"].astype(str)
+            uni_values = uni_values[uni_values.str.strip() != ""]
+            uni_map = {uid: self._sequence_from_uniprot(uid) for uid in uni_values.unique()}
+            uni_resolved = df.loc[missing_mask, "UniProt_ID"].map(uni_map)
+            has_seq = uni_resolved.notna()
+            fill_idx = uni_resolved.index[has_seq]
+            df.loc[fill_idx, "Target_FASTA"] = uni_resolved[has_seq].values
+            resolved += int(has_seq.sum())
+
+        # Refresh missing mask after UniProt resolution.
+        missing_mask = df["Target_FASTA"].isna() | (df["Target_FASTA"].astype(str).str.strip() == "")
+
+        # 2) Resolve Target_CHEMBL_ID -> UniProt -> sequence.
+        if missing_mask.any() and "Target_CHEMBL_ID" in df.columns:
+            chembl_map = self._load_chembl_to_uniprot_map()
+            if chembl_map:
+                chembl_values = df.loc[missing_mask, "Target_CHEMBL_ID"].astype(str).str.upper()
+                chembl_values = chembl_values[chembl_values.str.strip() != ""]
+                seq_map = {}
+                for chembl_id in chembl_values.unique():
+                    uniprot = chembl_map.get(chembl_id)
+                    seq_map[chembl_id] = self._sequence_from_uniprot(uniprot) if uniprot else None
+                chembl_resolved = df.loc[missing_mask, "Target_CHEMBL_ID"].astype(str).str.upper().map(seq_map)
+                has_seq = chembl_resolved.notna()
+                fill_idx = chembl_resolved.index[has_seq]
+                df.loc[fill_idx, "Target_FASTA"] = chembl_resolved[has_seq].values
+                resolved += int(has_seq.sum())
+
+        # 3) Legacy fallback: directory-based lookup by Target_CHEMBL_ID.
+        missing_mask = df["Target_FASTA"].isna() | (df["Target_FASTA"].astype(str).str.strip() == "")
+        if missing_mask.any() and "Target_CHEMBL_ID" in df.columns:
+            legacy_ids = df.loc[missing_mask, "Target_CHEMBL_ID"].astype(str).unique()
+            legacy_map = {cid: self._get_sequence_for_id(cid) for cid in legacy_ids}
+            legacy_resolved = df.loc[missing_mask, "Target_CHEMBL_ID"].astype(str).map(legacy_map)
+            has_seq = legacy_resolved.notna()
+            fill_idx = legacy_resolved.index[has_seq]
+            df.loc[fill_idx, "Target_FASTA"] = legacy_resolved[has_seq].values
+            resolved += int(has_seq.sum())
+
+        final_missing = int((df["Target_FASTA"].isna() | (df["Target_FASTA"].astype(str).str.strip() == "")).sum())
+        self.logger.info(
+            "Target sequence resolution: resolved=%s missing=%s (initial missing=%s)",
+            resolved,
+            final_missing,
+            total_missing,
+        )
+        return df
+
+    @staticmethod
+    def _find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        """Return first matching column using exact then case-insensitive matching."""
+        lower_to_original = {str(col).lower(): col for col in df.columns}
+        for name in candidates:
+            if name in df.columns:
+                return name
+            alt = lower_to_original.get(name.lower())
+            if alt is not None:
+                return alt
+        return None
+
     def _get_sequence_for_id(self, target_id: str) -> Optional[str]:
         """
-        Look up protein sequence for a given Target CHEMBL ID.
-        Checks the data directory for existing files.
+        Legacy lookup path: use data_path directory files keyed by Target_CHEMBL_ID.
         """
         if target_id in self.sequence_cache:
             return self.sequence_cache[target_id]
@@ -207,50 +492,34 @@ class PChemblPredictor:
             device=self.device,
         )
 
-    def evaluate(self):
-        """
-        Evaluate model performance on held-out test set replicating pretrain.py split logic.
-        """
-        self.logger.info(f"Loading dataset for evaluation from: {self.config.input_file}")
-
-        # IMPORTANT: Load from preprocessed cache to match eval_pchembl.py!
-        # Try to load preprocessed dataset first
+    def _load_eval_split_dataset(self, split_mode: str, split_ratio: float, split_seed: int):
+        """Load dataset and return the validation split used for reproduction/evaluation."""
         cache_dir = os.environ.get('DATASETS_CACHE_DIR', "/gpfs/projects/etur29/atabey/datasets")
-        dataset_name = os.path.splitext(os.path.basename(self.config.input_file))[0]
-        processed_data_path = os.path.join(cache_dir, dataset_name)
 
-        if os.path.exists(processed_data_path):
+        try:
+            dataset, processed_data_path = load_processed_dataset(self.config.input_file, cache_dir=cache_dir)
             self.logger.info(f"Loading preprocessed dataset from {processed_data_path}")
-            from datasets import load_from_disk
-            dataset = load_from_disk(processed_data_path)
-        else:
-            self.logger.warning(f"Preprocessed data not found at {processed_data_path}")
-            self.logger.warning("Falling back to loading raw CSV and tokenizing on-the-fly")
-            # Load dataset using datasets library to match pretrain logic
+        except FileNotFoundError:
+            self.logger.warning("Preprocessed data not found in cache.")
+            self.logger.warning("Falling back to loading raw CSV and tokenizing on-the-fly.")
             try:
-                 dataset = load_dataset("csv", data_files=self.config.input_file)
+                dataset = load_dataset("csv", data_files=self.config.input_file)
             except Exception as e:
-                 self.logger.error(f"Failed to load dataset: {e}")
-                 return
+                self.logger.error(f"Failed to load dataset: {e}")
+                return None
 
-        # Replicate split logic from pretrain.py
-        self.logger.info("Splitting dataset (test_size=0.01, seed=42)...")
-        dataset = dataset["train"].train_test_split(test_size=0.01, seed=42)
-        test_data = dataset["test"]
-        
-        self.logger.info(f"Evaluation set size: {len(test_data)}")
-        
-        # Convert to DataFrame for easier processing with our predict primitives
-        df_test = test_data.to_pandas()
-        
-        # Calculate normalization stats from the FULL dataset (train + test) to match training distribution
-        # Note: In pretrain.py/eval_pchembl.py, stats are calc'd from the full CSV
-        # dataset variable here is the FULL dataset before splitting (if we loaded it via load_dataset("csv"))
-        # But wait, we did `dataset = dataset["train"].train_test_split(...)`
-        # So `dataset` variable was reassigned to the DictDatasetWrapper.
-        # We need access to the full original values ideally.
-        
-        # Actually, let's load the full DF securely to calc stats
+        full_data = dataset["train"]
+        _, eval_data = split_train_eval_dataset(
+            full_data=full_data,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+            logger=self.logger,
+        )
+        return eval_data
+
+    def _override_normalization_from_input_file(self):
+        """Update normalization using pChEMBL values from the full input file."""
         full_df = pd.read_csv(self.config.input_file)
         if 'pchembl_value_Median' in full_df.columns:
             valid_pchembl = full_df['pchembl_value_Median'].dropna()
@@ -265,8 +534,53 @@ class PChemblPredictor:
         else:
             self.logger.warning("Could not calculate pChEMBL stats from data (column missing). Using defaults.")
 
+    def _sanitize_output_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop internal preprocessing columns from exported CSV outputs."""
+        drop_columns = [
+            "Target_FASTA",
+            "prot_input_ids",
+            "prot_attention_mask",
+            "mol_input_ids",
+            "mol_attention_mask",
+            "labels",
+            "train_lm",
+            "train_m",  # Backward-compatible typo guard
+        ]
+        existing = [col for col in drop_columns if col in df.columns]
+        if not existing:
+            return df
+        self.logger.info("Dropping internal output columns: %s", ", ".join(existing))
+        return df.drop(columns=existing)
+
+    def _run_split_evaluation(self, split_mode: str, split_ratio: float, split_seed: int):
+        """Run prediction/evaluation on a deterministic validation split."""
+        if not (0.0 < split_ratio < 1.0):
+            raise ValueError(f"reproduce_split_ratio must be in (0, 1), got {split_ratio}")
+
+        self.logger.info(f"Loading dataset for split evaluation from: {self.config.input_file}")
+        self.logger.info(
+            "Using split strategy: mode=%s ratio=%.3f seed=%s",
+            split_mode,
+            split_ratio,
+            split_seed,
+        )
+        test_data = self._load_eval_split_dataset(
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        )
+        if test_data is None:
+            return
+
+        self.logger.info(f"Evaluation set size: {len(test_data)}")
+        if len(test_data) == 0:
+            self.logger.error("Validation split is empty. Cannot evaluate.")
+            return
+
+        self._override_normalization_from_input_file()
+
         # Check if we're using preprocessed data
-        has_preprocessed_tokens = 'prot_input_ids' in test_data.column_names
+        has_preprocessed_tokens = hasattr(test_data, "column_names") and 'prot_input_ids' in test_data.column_names
 
         if has_preprocessed_tokens:
             self.logger.info("Using preprocessed tokens (same as eval_pchembl.py)...")
@@ -275,7 +589,7 @@ class PChemblPredictor:
             self.logger.info("Using on-the-fly tokenization (may give different results)...")
             # We need to ensure we can predict for these.
             # They should have Target_FASTA and SMILES/SELFIES.
-            results_df = self._predict_dataframe(df_test)
+            results_df = self._predict_dataframe(test_data.to_pandas())
         
         # Filter for valid pChEMBL values in ground truth
         if 'pchembl_value_Median' not in results_df.columns:
@@ -335,8 +649,19 @@ class PChemblPredictor:
         self._create_plots(y_true, y_pred)
         
         # Save csv
+        output_df = self._sanitize_output_dataframe(results_df)
         self.logger.info(f"Saving evaluation results to {self.config.output_file}")
-        results_df.to_csv(self.config.output_file, index=False)
+        output_df.to_csv(self.config.output_file, index=False)
+
+    def reproduce(self, split_mode: str):
+        """Run prediction pipeline on validation split for result reproduction."""
+        split_ratio = float(getattr(self.config, "reproduce_split_ratio", 0.01))
+        split_seed = int(getattr(self.config, "reproduce_split_seed", 42))
+        self._run_split_evaluation(
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        )
 
     def _create_plots(self, y_true, y_pred):
         """Create extended distribution plots similar to eval_pchembl.py"""
@@ -494,34 +819,47 @@ class PChemblPredictor:
 
     def _predict_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Helper to run prediction on a dataframe"""
+        # Normalize expected target column names (supports lowercase variants).
+        target_fasta_col = self._find_column(df, ["Target_FASTA"])
+        uniprot_col = self._find_column(df, ["UniProt_ID", "uniprot_id"])
+        chembl_col = self._find_column(df, ["Target_CHEMBL_ID", "target_chembl_id"])
+        rename_map = {}
+        if target_fasta_col and target_fasta_col != "Target_FASTA":
+            rename_map[target_fasta_col] = "Target_FASTA"
+        if uniprot_col and uniprot_col != "UniProt_ID":
+            rename_map[uniprot_col] = "UniProt_ID"
+        if chembl_col and chembl_col != "Target_CHEMBL_ID":
+            rename_map[chembl_col] = "Target_CHEMBL_ID"
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
         mol_col, is_selfies = find_molecule_column(df.columns)
         if not mol_col:
             raise ValueError("Input file must contain a SMILES or SELFIES column")
+
+        if (
+            "Target_FASTA" not in df.columns
+            and "UniProt_ID" not in df.columns
+            and "Target_CHEMBL_ID" not in df.columns
+        ):
+            raise ValueError(
+                "Input file must contain target context via one of: "
+                "'Target_FASTA', 'UniProt_ID', or 'Target_CHEMBL_ID'."
+            )
             
-        # Ensure we have Target Sequence
-        if 'Target_FASTA' not in df.columns:
-            self.logger.info("'Target_FASTA' column missing. Attempting lookup via 'Target_CHEMBL_ID'...")
-            if 'Target_CHEMBL_ID' not in df.columns:
-                raise ValueError("Input file must contain either 'Target_FASTA' or 'Target_CHEMBL_ID'")
-            
-            # Lookup sequences
-            sequences = []
-            
-            unique_ids = df['Target_CHEMBL_ID'].unique()
-            # ... (lookup logic) ... 
-            # Reusing existing logic but applying to this DF
-            # If I modify the DF in place it should be fine as it's a copy from load_dataset or read_csv
-            
-            found_count = 0
-            for uid in tqdm(unique_ids, desc="Looking up sequences"):
-                seq = self._get_sequence_for_id(uid)
-                if seq:
-                    self.sequence_cache[uid] = seq
-                    found_count += 1
-            
-            df['Target_FASTA'] = df['Target_CHEMBL_ID'].map(self.sequence_cache)
-            df = df.dropna(subset=['Target_FASTA'])
-        
+        # Ensure we have target sequences. If missing, resolve from UniProt_ID / Target_CHEMBL_ID.
+        has_missing_fasta = (
+            "Target_FASTA" not in df.columns
+            or (df["Target_FASTA"].isna() | (df["Target_FASTA"].astype(str).str.strip() == "")).any()
+        )
+        if has_missing_fasta:
+            if "Target_FASTA" not in df.columns:
+                self.logger.info(
+                    "'Target_FASTA' missing; attempting resolution via 'UniProt_ID' and/or 'Target_CHEMBL_ID'."
+                )
+            df = self._fill_target_fasta_from_ids(df.copy())
+            df = df.dropna(subset=["Target_FASTA"])
+
         if len(df) == 0:
             return df
 
@@ -577,10 +915,11 @@ class PChemblPredictor:
         df = pd.read_csv(self.config.input_file)
         
         result_df = self._predict_dataframe(df)
+        output_df = self._sanitize_output_dataframe(result_df)
         
         # Save
         self.logger.info(f"Saving results to {self.config.output_file}")
-        result_df.to_csv(self.config.output_file, index=False)
+        output_df.to_csv(self.config.output_file, index=False)
         self.logger.info("Done.")
 
 def parse_args(argv=None):
@@ -589,7 +928,23 @@ def parse_args(argv=None):
     parser.add_argument("--input_file", required=True, help="Input CSV with molecules and targets")
     parser.add_argument("--model_path", required=True, help="Path to trained model")
     parser.add_argument("--output_file", required=True, help="Output CSV path")
-    parser.add_argument("--data_path", help="Path to dataset directory for looking up sequences (if Target_FASTA missing)")
+    parser.add_argument("--models_base", type=str, default=None, help="Base directory containing local HF model caches (models--*).")
+    parser.add_argument(
+        "--data_path",
+        help="Legacy dataset directory or file path used for sequence lookup fallback.",
+    )
+    parser.add_argument(
+        "--chembl_uniprot_mapping_path",
+        type=str,
+        default=None,
+        help="Path to CHEMBL->UniProt mapping file (e.g., chembl_uniprot_mapping.txt).",
+    )
+    parser.add_argument(
+        "--protein_targets_path",
+        type=str,
+        default=None,
+        help="Path to Papyrus protein target file (e.g., 05.5_combined_set_protein_targets.tsv).",
+    )
     
     # Model Params
     parser.add_argument("--prot_emb_model", default="prot_t5", choices=["prot_t5", "esm2", "saprot"])
@@ -604,15 +959,32 @@ def parse_args(argv=None):
     parser.add_argument("--pchembl_mean", type=float, default=5.924)
     parser.add_argument("--pchembl_std", type=float, default=1.362)
     
-    parser.add_argument("--eval", action="store_true", help="Run evaluation on held-out test set (split from input file)")
+    parser.add_argument(
+        "--reproduce_split_ratio",
+        type=float,
+        default=0.01,
+        help="Fraction of data (or AIDs) held out for validation reproduction",
+    )
+    parser.add_argument(
+        "--reproduce_split_seed",
+        type=int,
+        default=42,
+        help="Random seed for split reproducibility",
+    )
+    parser.add_argument(
+        "--reproduce",
+        choices=["random", "aid"],
+        default=None,
+        help="Load validation split from input file and run prediction pipeline.",
+    )
 
     return parse_args_with_config(parser, section="predict", argv=argv)
 
 def main():
     args = parse_args()
     predictor = PChemblPredictor(args)
-    if args.eval:
-        predictor.evaluate()
+    if args.reproduce:
+        predictor.reproduce(args.reproduce)
     else:
         predictor.predict()
 

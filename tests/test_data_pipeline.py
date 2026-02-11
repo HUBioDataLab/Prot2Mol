@@ -63,6 +63,16 @@ def test_find_molecule_column_and_to_selfies_list():
     assert passthrough == ["[C]", "[nop]"]
 
 
+def test_to_selfies_list_normalizes_whitespace_for_selfies():
+    out = to_selfies_list(
+        ["[C] [C] [=C] [Branch1] [C] [O] [C]", "[N]\t[O]\n[C]", "   "],
+        is_selfies=True,
+    )
+    assert out[0] == "[C][C][=C][Branch1][C][O][C]"
+    assert out[1] == "[N][O][C]"
+    assert out[2] == "[nop]"
+
+
 def test_tokenize_protein_batch_shapes_and_keys():
     tokenizer = DummyBatchTokenizer()
     out = tokenize_protein_batch(

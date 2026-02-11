@@ -202,10 +202,15 @@ def to_selfies_list(
 ):
     """Convert a molecule iterable into a safe SELFIES list."""
     if is_selfies:
-        return [
-            mol if isinstance(mol, str) and mol.strip() else invalid_token
-            for mol in molecules
-        ]
+        normalized = []
+        for mol in molecules:
+            if not isinstance(mol, str):
+                normalized.append(invalid_token)
+                continue
+            # Accept spaced SELFIES like "[C] [O]" by removing all whitespace.
+            compact = "".join(mol.split())
+            normalized.append(compact if compact else invalid_token)
+        return normalized
 
     converted = []
     for smiles in molecules:
