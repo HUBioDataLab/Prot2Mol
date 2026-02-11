@@ -1,0 +1,25 @@
+generate:
+  model_file: /absolute/path/to/generation_model_dir
+  prediction_model_file: null
+  prot_emb_model: prot_t5
+
+  selfies_path: /absolute/path/to/dataset_or_dir
+  prot_id: CHEMBLxxxx
+
+  mode: generation
+  input_molecules: null
+
+  pchembl_mean: 5.924
+  pchembl_std: 1.362
+
+  num_samples: 10000
+  batch_size: 100
+  prot_max_length: 1000
+  max_mol_len: 200
+
+  output_file: ./generated_molecules.csv
+  attn_output: false
+
+  n_layer: 1
+  n_head: 16
+  n_emb: 1024

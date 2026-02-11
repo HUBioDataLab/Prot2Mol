@@ -1,103 +1,157 @@
-# 🧬 Prot2Mol
+# Prot2Mol
 
-> **De novo drug design using protein language models and generative AI.**
+Prot2Mol is a protein-conditioned molecular design framework based on an encoder-decoder architecture with an auxiliary affinity head. The model maps protein sequences to molecular SELFIES and supports pChEMBL prediction for generated or external compounds.
 
-**Prot2Mol** is a state-of-the-art generative model designed to create novel drug candidates tailored to specific protein targets. By leveraging the power of deep learning and protein language models (like ESM and ProtT5), Prot2Mol translates protein embeddings into molecular structures (represented as SELFIES), enabling the discovery of new potential therapeutics for drug-resistant diseases.
+## Scientific Scope
 
-## ✨ Key Features
+- Protein encoder: `ProtT5`, `ESM2`, or `SaProt`.
+- Molecule decoder: GPT-2 with cross-attention over protein representations.
+- Molecule representation: SELFIES.
+- Auxiliary task: pChEMBL regression head.
+- Multi-task training: language-model objective + pChEMBL objective, with optional blocking of pChEMBL gradients into encoder/decoder.
 
--   **Target-Specific Generation**: Generates molecules conditioned on the specific physical properties of target proteins.
--   **Advanced Architectures**: Utilizes Transformer-based architectures (GPT-2) with Cross-Attention mechanisms.
--   **Robust Representation**: Uses SELFIES for 100% valid molecular generation.
--   **Multi-Model Support**: Compatible with various protein embeddings including ESM-2, ESM-3, ProtT5, and AlphaFold2.
--   **Dual Mode**: Supports both **De Novo Molecule Generation** and **pChEMBL Prediction** for existing compounds.
-
-## 🚀 Installation & Setup
-
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/atabeyunlu/Prot2Mol.git
-    cd Prot2Mol
-    ```
-
-2.  **Install Dependencies**
-    Ensure you have Python 3.8+ installed.
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## 💻 Usage
-
-Prot2Mol provides a unified interface for both training and molecule generation.
-
-### 1. Pre-training
-Train the model on a large dataset of protein-molecule pairs.
+## Installation
 
 ```bash
-python prot2mol/pretrain.py \
-    --selfies_path data/your_dataset.csv \
-    --prot_emb_model esm3 \
-    --epoch 30 \
-    --train_batch_size 32
+git clone https://github.com/atabeyunlu/Prot2Mol.git
+cd Prot2Mol
+pip install -r requirements.txt
 ```
 
-### 2. Inference & Generation
+## Repository Organization
 
-The `produce_molecules.py` script is your main entry point for using the trained model. It supports two modes: `generation` and `prediction`.
+```text
+prot2mol/
+  main.py                 # Single meta-entrypoint
+  configs/                # YAML templates (train/generate/predict)
+  core/                   # Core model and protein encoders
+  training/               # Training pipeline, trainer, metrics, services
+  inference/              # Generation and pChEMBL prediction pipelines
+  data/                   # Shared data/tokenization pipeline
+  io/                     # HF/model/config I/O utilities
+  chem/                   # Cheminformatics utilities and fingerprints
+data_processing/
+  preprocess_dataset.py   # One-time preprocessing into HF disk cache
+```
 
-#### 🧪 Mode 1: Molecule Generation
-Generate novel molecules for a specific target protein.
+## Unified Command Interface
+
+All operational modes are executed through a single entrypoint:
 
 ```bash
-python prot2mol/produce_molecules.py \
-    --mode generation \
-    --model_file ./saved_models/your_model \
-    --prot_emb_model esm2 \
-    --prot_id CHEMBL4282 \
-    --num_samples 1000 \
-    --output_file ./results/generated_mols.csv
+python prot2mol/main.py --help
 ```
 
-**Key Arguments:**
--   `--mode generation`: Selects generation mode.
--   `--model_file`: Path to your trained model.
--   `--prot_id`: target ID (e.g. ChEMBL ID).
--   `--num_samples`: How many molecules to generate.
+Available commands:
 
-#### 🔮 Mode 2: pChEMBL Prediction
-Predict the binding affinity (pChEMBL) of existing molecules against a target protein.
+- `train`
+- `generate`
+- `predict`
+
+Examples:
 
 ```bash
-python prot2mol/produce_molecules.py \
-    --mode prediction \
-    --model_file ./saved_models/your_model \
-    --input_molecules ./data/candidates.csv \
-    --output_file ./results/predictions.csv
+python prot2mol/main.py train --help
+python prot2mol/main.py generate --help
+python prot2mol/main.py predict --help
 ```
 
-**Key Arguments:**
--   `--mode prediction`: Selects prediction mode.
--   `--input_molecules`: CSV file containing molecules (must have `smiles` or `selfies` column) and optionally `Target_FASTA` if not inferable.
+## YAML-Based Configuration
 
-## 📂 Project Structure
+Each command supports `--config` to load arguments from YAML.
 
+- Supported template files:
+  - `prot2mol/configs/train.yaml`
+  - `prot2mol/configs/generate.yaml`
+  - `prot2mol/configs/predict.yaml`
+- Expected top-level sections in YAML:
+  - `train` for `train`
+  - `generate` for `generate`
+  - `predict` for `predict`
+
+Argument precedence is:
+
+1. CLI arguments
+2. YAML values (`--config`)
+3. parser defaults
+
+This allows concise runs with selective CLI overrides.
+
+## Recommended Workflow
+
+### 1. Preprocess Dataset (one-time per dataset)
+
+```bash
+python data_processing/preprocess_dataset.py \
+  --selfies_path /path/to/dataset.csv \
+  --prot_emb_model saprot \
+  --max_mol_len 256 \
+  --prot_max_length 1024
 ```
-Prot2Mol/
-├── prot2mol/               # Core source code
-│   ├── model.py            # Model architecture definitions
-│   ├── pretrain.py         # Training script
-│   ├── produce_molecules.py # Inference and generation script
-│   └── ...
-├── data_processing/        # Scripts for data preparation (Embeddings, etc.)
-├── data/                   # Data storage
-├── requirements.txt        # Project dependencies
-└── README.md               # This file
+
+This builds tokenized data in the HF disk cache and stores pChEMBL normalization statistics used during training/evaluation.
+
+### 2. Train
+
+```bash
+python prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml
 ```
 
-## 📜 Citation
+Override any parameter at runtime:
 
-If you use **Prot2Mol** in your research, please cite:
+```bash
+python prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --epoch 20 --learning_rate 5e-6
+```
+
+### 3. Generate Molecules
+
+```bash
+python prot2mol/main.py generate \
+  --config prot2mol/configs/generate.yaml
+```
+
+### 4. Predict pChEMBL
+
+```bash
+python prot2mol/main.py predict \
+  --config prot2mol/configs/predict.yaml
+```
+
+## Minimal Data Requirements
+
+### Training dataset CSV
+
+Required columns:
+
+- `Target_FASTA`
+- `Compound_SELFIES`
+- `pchembl_value_Median`
+
+Optional columns (used for advanced split/ranking metrics):
+
+- `AID`
+- `Target_ID`
+
+### Prediction input CSV (`predict`)
+
+Required:
+
+- molecule column (`smiles`/`Compound_SMILES`/`selfies`/`Compound_SELFIES`, etc.)
+
+Target specification:
+
+- either `Target_FASTA`
+- or `Target_CHEMBL_ID` with `--data_path` for sequence lookup
+
+## Citation
+
+If you use Prot2Mol in research, please cite:
 
 ```bibtex
-Ünlü, A., & Çevrim, E., & Doğan, T. (2024). Prot2Mol: Target based molecule generation using protein embeddings and SELFIES molecule representation. GitHub. https://github.com/HUBioDataLab/Prot2Mol
+Ünlü, A., Çevrim, E., Doğan, T. (2024).
+Prot2Mol: Target based molecule generation using protein embeddings and SELFIES molecule representation.
+GitHub. https://github.com/HUBioDataLab/Prot2Mol
 ```

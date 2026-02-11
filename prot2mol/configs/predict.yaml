@@ -1,0 +1,17 @@
+predict:
+  input_file: /absolute/path/to/input.csv
+  model_path: /absolute/path/to/model_dir
+  output_file: ./predictions.csv
+  data_path: null
+
+  prot_emb_model: prot_t5
+  n_layer: 1
+  n_head: 16
+  n_emb: 1024
+  prot_max_length: 1024
+  max_mol_len: 200
+
+  batch_size: 64
+  pchembl_mean: 5.924
+  pchembl_std: 1.362
+  eval: false

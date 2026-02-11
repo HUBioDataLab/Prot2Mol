@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, EsmForMaskedLM, EsmModel, T5EncoderModel, T5Tokenizer
 
-from .hf_utils import resolve_model_path
+from ..io.hf_utils import resolve_model_path
 
 logger = logging.getLogger(__name__)
 _NON_STD_AA = re.compile(r"[UZOB]")

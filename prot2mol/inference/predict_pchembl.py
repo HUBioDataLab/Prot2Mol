@@ -28,12 +28,17 @@ from tqdm import tqdm
 from scipy.stats import pearsonr, spearmanr
 
 # Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from prot2mol.model import Prot2MolModel
-from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequences
-from prot2mol.hf_utils import load_molgen_tokenizer
-import selfies as sf
+from prot2mol.io.config import parse_args_with_config
+from prot2mol.core.protein_encoders import get_protein_tokenizer
+from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model
+from prot2mol.data.pipeline import (
+    find_molecule_column,
+    to_selfies_list,
+    tokenize_protein_sequences_for_inference,
+    tokenize_selfies_for_inference,
+)
 from rdkit import RDLogger
 
 # Suppress warnings and logs
@@ -133,34 +138,22 @@ class PChemblPredictor:
         self.model.eval()
 
     def _load_model(self, model_path: str):
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        
-        with tqdm(desc=f"Loading model weights", unit="MB") as pbar:
-            model_state = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location=self.device)
+        with tqdm(desc="Loading model weights", unit="model") as pbar:
+            model = load_prot2mol_inference_model(
+                model_path=model_path,
+                device=self.device,
+                mol_tokenizer=self.mol_tokenizer,
+                prot_emb_model=self.config.prot_emb_model,
+                n_layer=self.config.n_layer,
+                n_head=self.config.n_head,
+                n_emb=self.config.n_emb,
+                max_mol_len=self.config.max_mol_len,
+                prot_max_length=self.config.prot_max_length,
+                strict=True,
+                allow_strict_fallback=True,
+                logger=self.logger,
+            )
             pbar.update(1)
-            
-        model_config = {
-            'prot_emb_model': self.config.prot_emb_model,
-            'n_layer': self.config.n_layer,
-            'n_head': self.config.n_head,
-            'n_emb': self.config.n_emb,
-            'max_mol_len': self.config.max_mol_len,
-            'prot_max_length': self.config.prot_max_length,
-            'train_encoder_model': False,
-            'mol_tokenizer': self.mol_tokenizer
-        }
-        
-        model = Prot2MolModel(model_config)
-        # strict=True ensures we catch architecture mismatches immediately!
-        try:
-            model.load_state_dict(model_state, strict=True)
-        except RuntimeError as e:
-            self.logger.error(f"Failed to load model state dict strictly: {e}")
-            self.logger.warning("Attempting strict=False load (NOT RECOMMENDED if architecture differs)...")
-            model.load_state_dict(model_state, strict=False)
-            
-        model.to(self.device)
         return model
 
     def _get_sequence_for_id(self, target_id: str) -> Optional[str]:
@@ -206,17 +199,13 @@ class PChemblPredictor:
 
     def _prepare_protein_embeddings(self, sequences: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Batch tokenize protein sequences."""
-        formatted_sequences = format_protein_sequences(sequences, self.config.prot_emb_model)
-        
-        prot_tokens = self.prot_tokenizer.batch_encode_plus(
-            formatted_sequences,
-            add_special_tokens=True,
-            max_length=self.config.prot_max_length,
-            padding='max_length',
-            truncation=True,
-            return_tensors='pt'
+        return tokenize_protein_sequences_for_inference(
+            sequences=sequences,
+            prot_tokenizer=self.prot_tokenizer,
+            prot_emb_model=self.config.prot_emb_model,
+            prot_max_length=self.config.prot_max_length,
+            device=self.device,
         )
-        return prot_tokens['input_ids'].to(self.device), prot_tokens['attention_mask'].to(self.device)
 
     def evaluate(self):
         """
@@ -505,22 +494,7 @@ class PChemblPredictor:
 
     def _predict_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Helper to run prediction on a dataframe"""
-        # Check required columns
-        mol_col = None
-        is_selfies = False
-        
-        # Identify molecule column
-        for col in df.columns:
-            if 'selfies' in col.lower():
-                mol_col = col
-                is_selfies = True
-                break
-        if not mol_col:
-            for col in df.columns:
-                if 'smiles' in col.lower():
-                    mol_col = col
-                    break
-        
+        mol_col, is_selfies = find_molecule_column(df.columns)
         if not mol_col:
             raise ValueError("Input file must contain a SMILES or SELFIES column")
             
@@ -552,18 +526,13 @@ class PChemblPredictor:
             return df
 
         # Prepare Molecules
-        molecules_list = df[mol_col].tolist()
-        selfies_list = []
         if not is_selfies:
             self.logger.info("Converting SMILES to SELFIES...")
-            for smi in tqdm(molecules_list, desc="SMILES->SELFIES"):
-                try:
-                    s = sf.encoder(smi)
-                    selfies_list.append(s if s else "[nop]")
-                except:
-                    selfies_list.append("[nop]")
-        else:
-            selfies_list = molecules_list
+        selfies_list = to_selfies_list(
+            molecules=df[mol_col].tolist(),
+            is_selfies=is_selfies,
+            invalid_token="[nop]",
+        )
 
         batch_size = self.config.batch_size
         all_preds = []
@@ -581,16 +550,12 @@ class PChemblPredictor:
             prot_ids, prot_mask = self._prepare_protein_embeddings(batch_prots)
             
             # 2. Tokenize Molecules
-            mol_tokens = self.mol_tokenizer.batch_encode_plus(
-                batch_selfies,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.config.max_mol_len,
-                padding='max_length',
-                return_tensors='pt'
+            mol_ids, mol_mask = tokenize_selfies_for_inference(
+                selfies_list=batch_selfies,
+                mol_tokenizer=self.mol_tokenizer,
+                max_mol_len=self.config.max_mol_len,
+                device=self.device,
             )
-            mol_ids = mol_tokens['input_ids'].to(self.device)
-            mol_mask = mol_tokens['attention_mask'].to(self.device)
             
             # 3. Predict
             with torch.no_grad():
@@ -618,7 +583,7 @@ class PChemblPredictor:
         result_df.to_csv(self.config.output_file, index=False)
         self.logger.info("Done.")
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Predict pChEMBL values")
     
     parser.add_argument("--input_file", required=True, help="Input CSV with molecules and targets")
@@ -641,7 +606,7 @@ def parse_args():
     
     parser.add_argument("--eval", action="store_true", help="Run evaluation on held-out test set (split from input file)")
 
-    return parser.parse_args()
+    return parse_args_with_config(parser, section="predict", argv=argv)
 
 def main():
     args = parse_args()

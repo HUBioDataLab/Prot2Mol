@@ -21,12 +21,18 @@ from tqdm import tqdm
 from transformers import GenerationConfig
 
 # Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from prot2mol.model import Prot2MolModel
-from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequence
-from prot2mol.hf_utils import load_molgen_tokenizer
-from prot2mol.utils import metrics_calculation, canonicalize_smiles_list, decode_selfies_list
+from prot2mol.core.protein_encoders import get_protein_tokenizer
+from prot2mol.io.config import parse_args_with_config
+from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model
+from prot2mol.data.pipeline import (
+    find_molecule_column,
+    to_selfies_list,
+    tokenize_protein_sequences_for_inference,
+    tokenize_selfies_for_inference,
+)
+from prot2mol.chem.utils import metrics_calculation, canonicalize_smiles_list, decode_selfies_list
 import selfies as sf
 from rdkit import RDLogger
 
@@ -133,30 +139,22 @@ class MoleculeGenerator:
             )        
     def _load_single_model(self, model_path: str):
         """Helper to load a single Prot2Mol model instance."""
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-        
-        # Load model state dict
-        with tqdm(desc=f"Loading model weights from {os.path.basename(model_path)}", unit="MB") as pbar:
-            model_state = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location=self.device)
+        with tqdm(desc=f"Loading model weights from {os.path.basename(model_path)}", unit="model") as pbar:
+            model = load_prot2mol_inference_model(
+                model_path=model_path,
+                device=self.device,
+                mol_tokenizer=self.mol_tokenizer,
+                prot_emb_model=self.config.prot_emb_model,
+                n_layer=getattr(self.config, 'n_layer', 1),
+                n_head=getattr(self.config, 'n_head', 16),
+                n_emb=getattr(self.config, 'n_emb', 1024),
+                max_mol_len=getattr(self.config, 'max_mol_len', 256),
+                prot_max_length=getattr(self.config, 'prot_max_length', 1024),
+                strict=False,
+                allow_strict_fallback=False,
+                logger=self.logger,
+            )
             pbar.update(1)
-            
-        # Create model config
-        model_config = {
-            'prot_emb_model': self.config.prot_emb_model,
-            'n_layer': getattr(self.config, 'n_layer', 1),
-            'n_head': getattr(self.config, 'n_head', 16),
-            'n_emb': getattr(self.config, 'n_emb', 1024),
-            'max_mol_len': getattr(self.config, 'max_mol_len', 256),
-            'prot_max_length': getattr(self.config, 'prot_max_length', 1024),
-            'train_encoder_model': False,
-            'mol_tokenizer': self.mol_tokenizer
-        }
-        
-        # Create and load model
-        model = Prot2MolModel(model_config)
-        model.load_state_dict(model_state, strict=False)
-        model.to(self.device)
         return model
     
     def _load_prediction_data(self) -> pd.DataFrame:
@@ -169,15 +167,12 @@ class MoleculeGenerator:
              raise FileNotFoundError(f"Input molecules file not found: {self.config.input_molecules}")
              
         df = pd.read_csv(self.config.input_molecules)
-        
-        # Normalize column names lower case for check
-        cols = [c.lower() for c in df.columns]
-        
-        if 'smiles' not in cols and 'selfies' not in cols and 'compound_smiles' not in cols and 'compound_selfies' not in cols and 'generated_selfies' not in cols and 'generated_smiles' not in cols:
-             # Try to find a column that might contain molecules
-             potential_cols = [c for c in df.columns if 'smiles' in c.lower() or 'selfies' in c.lower()]
-             if not potential_cols:
-                  raise ValueError("Input file must contain a column with SMILES or SELFIES (e.g., 'smiles', 'Compound_SMILES', 'selfies', 'Compound_SELFIES', 'Generated_SELFIES')")
+        molecule_column, _ = find_molecule_column(df.columns)
+        if molecule_column is None:
+            raise ValueError(
+                "Input file must contain a column with SMILES or SELFIES "
+                "(e.g., 'smiles', 'Compound_SMILES', 'selfies', 'Compound_SELFIES', 'Generated_SELFIES')"
+            )
         
         self.logger.info(f"Loaded {len(df)} molecules for prediction")
         
@@ -289,20 +284,14 @@ class MoleculeGenerator:
         Returns:
             Protein embeddings tensor
         """
-        # Prepare sequence for tokenization
-        formatted_sequence = format_protein_sequence(protein_sequence, self.config.prot_emb_model)
-        
-        # Tokenize protein sequence
-        prot_tokens = self.prot_tokenizer.encode_plus(
-            formatted_sequence,
-            add_special_tokens=True,
-            max_length=self.config.prot_max_length,
-            padding='max_length',
-            truncation=True,
-            return_tensors='pt'
+        prot_input_ids, prot_attention_mask = tokenize_protein_sequences_for_inference(
+            sequences=[protein_sequence],
+            prot_tokenizer=self.prot_tokenizer,
+            prot_emb_model=self.config.prot_emb_model,
+            prot_max_length=self.config.prot_max_length,
+            device=self.device,
         )
-        
-        return prot_tokens['input_ids'].to(self.device), prot_tokens['attention_mask'].to(self.device)
+        return prot_input_ids, prot_attention_mask
     
     def _generate_molecules_batch(self, prot_input_ids: torch.Tensor, prot_attention_mask: torch.Tensor, 
                                  num_samples: int) -> List[str]:
@@ -386,23 +375,7 @@ class MoleculeGenerator:
         """
         self.logger.info(f"Predicting pChEMBL for {len(molecules_df)} molecules...")
         
-        # Identify molecule column
-        mol_col = None
-        is_selfies = False
-        
-        # Prioritize SELFIES
-        for col in molecules_df.columns:
-            if 'selfies' in col.lower():
-                mol_col = col
-                is_selfies = True
-                break
-        
-        if not mol_col:
-            for col in molecules_df.columns:
-                if 'smiles' in col.lower():
-                    mol_col = col
-                    break
-        
+        mol_col, is_selfies = find_molecule_column(molecules_df.columns)
         if not mol_col:
             raise ValueError("Could not find SMILES or SELFIES column")
             
@@ -413,20 +386,13 @@ class MoleculeGenerator:
         batch_size = self.config.batch_size
         all_preds = []
         
-        # Convert to SELFIES if strings are SMILES
-        molecules_list = molecules_df[mol_col].tolist()
-        selfies_list = []
-        
         if not is_selfies:
             self.logger.info("Converting SMILES to SELFIES for prediction...")
-            for smi in tqdm(molecules_list, desc="SMILES->SELFIES"):
-                try:
-                    s = sf.encoder(smi)
-                    selfies_list.append(s if s else "[nop]")
-                except:
-                    selfies_list.append("[nop]")
-        else:
-            selfies_list = molecules_list
+        selfies_list = to_selfies_list(
+            molecules=molecules_df[mol_col].tolist(),
+            is_selfies=is_selfies,
+            invalid_token="[nop]",
+        )
 
         # Run prediction in batches
         num_batches = (len(selfies_list) + batch_size - 1) // batch_size
@@ -435,18 +401,12 @@ class MoleculeGenerator:
             batch_selfies = selfies_list[i*batch_size : (i+1)*batch_size]
             current_batch_len = len(batch_selfies)
             
-            # Tokenize molecules
-            mol_tokens = self.mol_tokenizer.batch_encode_plus(
-                batch_selfies,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.config.max_mol_len,
-                padding='max_length',
-                return_tensors='pt'
+            batch_mol_ids, batch_mol_mask = tokenize_selfies_for_inference(
+                selfies_list=batch_selfies,
+                mol_tokenizer=self.mol_tokenizer,
+                max_mol_len=self.config.max_mol_len,
+                device=self.device,
             )
-            
-            batch_mol_ids = mol_tokens['input_ids'].to(self.device)
-            batch_mol_mask = mol_tokens['attention_mask'].to(self.device)
             
             # Expand protein to batch size
             batch_prot_ids = prot_input_ids.repeat(current_batch_len, 1)
@@ -499,17 +459,12 @@ class MoleculeGenerator:
             # But tokenizer will handle strings.
             clean_batch = [s if s else "[nop]" for s in batch_selfies]
             
-            mol_tokens = self.mol_tokenizer.batch_encode_plus(
-                clean_batch,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.config.max_mol_len,
-                padding='max_length',
-                return_tensors='pt'
+            batch_mol_ids, batch_mol_mask = tokenize_selfies_for_inference(
+                selfies_list=clean_batch,
+                mol_tokenizer=self.mol_tokenizer,
+                max_mol_len=self.config.max_mol_len,
+                device=self.device,
             )
-            
-            batch_mol_ids = mol_tokens['input_ids'].to(self.device)
-            batch_mol_mask = mol_tokens['attention_mask'].to(self.device)
              # Expand protein to batch size
             batch_prot_ids = prot_input_ids.repeat(current_batch_len, 1)
             batch_prot_mask = prot_attention_mask.repeat(current_batch_len, 1)
@@ -785,7 +740,7 @@ class MoleculeGenerator:
             return generated_df, metrics
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv=None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Generate molecules for protein targets using Prot2Mol",
@@ -890,7 +845,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--n_head", type=int, default=16, help="Number of attention heads")
     parser.add_argument("--n_emb", type=int, default=1024, help="Embedding dimension")
     
-    return parser.parse_args()
+    return parse_args_with_config(parser, section="generate", argv=argv)
 
 
 def main():

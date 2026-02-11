@@ -25,8 +25,9 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datasets import load_dataset
-from prot2mol.protein_encoders import get_protein_tokenizer, format_protein_sequences
-from prot2mol.hf_utils import load_molgen_tokenizer
+from prot2mol.core.protein_encoders import get_protein_tokenizer
+from prot2mol.io.hf_utils import load_molgen_tokenizer
+from prot2mol.data.pipeline import tokenize_protein_batch, tokenize_molecule_batch
 import torch
 
 # Set environment variables
@@ -158,22 +159,12 @@ class DatasetPreprocessor:
     def tokenize_prot_function(self, batch):
         """Tokenize protein sequences."""
         try:
-            sequence_examples = format_protein_sequences(batch["Target_FASTA"], self.config.prot_emb_model)
-            
-            # Tokenize
-            ids = self.prot_tokenizer.batch_encode_plus(
-                sequence_examples,
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.config.prot_max_length,
-                padding="max_length",
-                return_tensors="pt"
+            return tokenize_protein_batch(
+                batch=batch,
+                prot_tokenizer=self.prot_tokenizer,
+                prot_emb_model=self.config.prot_emb_model,
+                prot_max_length=self.config.prot_max_length,
             )
-            
-            return {
-                'prot_input_ids': ids['input_ids'],
-                'prot_attention_mask': ids['attention_mask']
-            }
         except Exception as e:
             self.logger.error(f"Error in protein tokenization: {str(e)}")
             raise
@@ -181,45 +172,27 @@ class DatasetPreprocessor:
     def tokenize_mol_function(self, batch):
         """Tokenize molecule SELFIES strings."""
         try:
-            # Tokenize SELFIES
-            ids = self.mol_tokenizer.batch_encode_plus(
-                batch["Compound_SELFIES"],
-                add_special_tokens=True,
-                truncation=True,
-                max_length=self.config.max_mol_len,
-                padding="max_length",
-                return_tensors="pt"
+            tokenized = tokenize_molecule_batch(
+                batch=batch,
+                mol_tokenizer=self.mol_tokenizer,
+                max_mol_len=self.config.max_mol_len,
+                pchembl_mean=self.pchembl_mean,
+                pchembl_std=self.pchembl_std,
+                pchembl_threshold=self.pchembl_threshold,
+                train_pchembl_head=True,
             )
-            
-            pchembl_values = batch["pchembl_value_Median"]
-            labels = ids['input_ids'].clone()
-            
-            # Mask padded positions in labels
-            pad_mask = ids['input_ids'] == self.mol_tokenizer.pad_token_id
-            labels[pad_mask] = -100
-            
-            # Normalize pchembl values and determine train_lm flags
-            normalized_pchembl = []
-            train_lm_flags = []
-            
-            for val in pchembl_values:
-                train_lm_flags.append(val >= self.pchembl_threshold)
-                normalized_val = (val - self.pchembl_mean) / (self.pchembl_std + 1e-8)
-                normalized_pchembl.append(normalized_val)
 
             group_ids = None
             if self.group_id_map is not None and "AID" in batch and "Target_ID" in batch:
                 group_keys = [f"{a}__{t}" for a, t in zip(batch["AID"], batch["Target_ID"])]
                 group_ids = [self.group_id_map.get(k, -1) for k in group_keys]
-            
-            return {
-                'mol_input_ids': ids['input_ids'],
-                'mol_attention_mask': ids['attention_mask'],
-                'labels': labels,
-                'pchembl_values': torch.tensor(normalized_pchembl, dtype=torch.float),
-                'train_lm': torch.tensor(train_lm_flags, dtype=torch.bool),
-                'group_id': torch.tensor(group_ids, dtype=torch.long) if group_ids is not None else torch.tensor([-1] * len(batch["Compound_SELFIES"]), dtype=torch.long)
-            }
+
+            tokenized["group_id"] = (
+                torch.tensor(group_ids, dtype=torch.long)
+                if group_ids is not None
+                else torch.tensor([-1] * len(batch["Compound_SELFIES"]), dtype=torch.long)
+            )
+            return tokenized
         except Exception as e:
             self.logger.error(f"Error in molecule tokenization: {str(e)}")
             raise

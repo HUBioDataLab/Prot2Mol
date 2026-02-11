@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from transformers import GPT2Config, GPT2LMHeadModel
 from .protein_encoders import get_protein_encoder, get_encoder_size
 import logging
@@ -138,10 +137,19 @@ class Prot2MolModel(nn.Module):
             attn_bins=attn_bins,
             dropout=self._config.get("affinity_dropout", 0.1)
         )
+        self.logger.info(
+            "pChEMBL gradient backprop to encoder/decoder: %s",
+            "disabled" if self._config.get("stop_pchembl_gradients", True) else "enabled",
+        )
         
         # Learnable loss weighting parameters
         self.lm_weight = nn.Parameter(torch.tensor(1.0))
         self.pchembl_weight = nn.Parameter(torch.tensor(1.0))
+
+        # Track per-module trainability so global train()/eval() calls can respect freezing.
+        self._trainable_encoder = bool(self._config.get("train_encoder_model", True))
+        self._trainable_decoder = bool(self._config.get("train_decoder_model", True))
+        self._trainable_pchembl_head = bool(self._config.get("train_pchembl_head", True))
         
         # Log parameter counts separately
         encoder_params = sum(p.numel() for p in self.protein_encoder.parameters())
@@ -163,12 +171,12 @@ class Prot2MolModel(nn.Module):
         
     def forward(self, mol_input_ids, prot_input_ids, prot_attention_mask, labels=None, pchembl_values=None, train_lm=True, pchembl_only_mode=False):
         """
-        Forward pass of the model with both language modeling and pChEMBL prediction.
+        Forward pass for language modeling and pChEMBL prediction.
         
         Important behavior:
-        - LM loss is computed ONLY for positive samples (train_lm=True, pChEMBL >= threshold)
-        - pChEMBL predictions are ALWAYS computed for ALL samples (positive and negative)
-        - This allows separate optimization of molecule generation and binding affinity prediction
+        - LM labels can be masked per-sample via `train_lm`.
+        - pChEMBL predictions are computed for all samples when the head is enabled.
+        - Loss composition is handled in the custom trainer to keep responsibilities clear.
         
         Args:
             mol_input_ids: Tokenized molecule sequences
@@ -183,7 +191,7 @@ class Prot2MolModel(nn.Module):
             pchembl_only_mode: If True, only compute pChEMBL loss (for warm-up phase)
             
         Returns:
-            Dict with both language modeling and pChEMBL prediction results
+            Dict with logits, optional lm_loss, and optional pchembl_predictions
         """
         # Encode protein sequences
         with torch.set_grad_enabled(self.protein_encoder.encoder_model.training):
@@ -238,11 +246,16 @@ class Prot2MolModel(nn.Module):
         pchembl_predictions = None
         if should_run_pchembl:
             # Note: pChEMBL predictions are always computed, regardless of train_lm flag
-            head_prot = protein_embeddings.detach() if pchembl_only_mode else protein_embeddings
-            head_mol = hidden_states.detach() if pchembl_only_mode else hidden_states
+            stop_pchembl_gradients = self._config.get("stop_pchembl_gradients", True)
+            block_backprop = pchembl_only_mode or stop_pchembl_gradients
+
+            head_prot = protein_embeddings.detach() if block_backprop else protein_embeddings
+            head_mol = hidden_states.detach() if block_backprop else hidden_states
             cross_attn = None
             if decoder_outputs.cross_attentions is not None:
                 cross_attn = self._reduce_cross_attn(decoder_outputs.cross_attentions)
+                if block_backprop:
+                    cross_attn = cross_attn.detach()
             pchembl_predictions = self.pchembl_head(
                 head_prot,
                 head_mol,
@@ -250,58 +263,20 @@ class Prot2MolModel(nn.Module):
                 prot_attention_mask,
                 mol_attention_mask
             )
-        
-        # Compute losses based on training mode
-        lm_loss = None
-        pchembl_loss = None
-        total_loss = None
-        corr_loss = None
-        
-        if (not pchembl_only_mode) and (not should_run_pchembl):
-            # 1. LM Only Mode (Encoder-Decoder only)
-            lm_loss = decoder_outputs.loss
-            if lm_loss is not None:
-                total_loss = self.lm_weight * lm_loss
-                
-        elif pchembl_only_mode:
-            # 2. pChEMBL Only Mode (Stage 1)
-            # Implicit assumption: pchembl_only_mode implies train_pchembl_head is True
-            if pchembl_values is not None and pchembl_predictions is not None:
-                delta = self._config.get("pchembl_huber_delta", 1.0)
-                pchembl_loss = F.smooth_l1_loss(pchembl_predictions, pchembl_values, beta=delta)
-                corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
-                total_loss = pchembl_loss #+ corr_loss * 0.2
-                
-        else:
-            # 3. Full Training Mode (Stage 2 with pChEMBL head active)
-            # Note: train_lm is already handled in labels_for_lm above
-            lm_loss = decoder_outputs.loss
-            
-            if pchembl_values is not None and pchembl_predictions is not None:
-                delta = self._config.get("pchembl_huber_delta", 1.0)
-                pchembl_loss = F.smooth_l1_loss(pchembl_predictions, pchembl_values, beta=delta)
-                corr_loss = self.corr_loss_calculation(pchembl_predictions, pchembl_values)
-                
-                # Combine losses with learnable weights
-                if lm_loss is not None:
-                    total_loss = self.lm_weight * lm_loss + self.pchembl_weight * pchembl_loss
-                else:
-                    total_loss = self.pchembl_weight * pchembl_loss
-            elif lm_loss is not None:
-                # Fallback if pchembl values are missing but head is active
-                total_loss = self.lm_weight * lm_loss
+
+        lm_loss = decoder_outputs.loss
 
         outputs = {
-            "loss": total_loss,
             "lm_loss": lm_loss,
-            "pchembl_loss": pchembl_loss,
-            #"corr_loss": corr_loss,
             "logits": decoder_outputs.logits,
             "pchembl_predictions": pchembl_predictions,
             "hidden_states": decoder_outputs.hidden_states,
             "attentions": decoder_outputs.attentions,
             "cross_attentions": decoder_outputs.cross_attentions,
         }
+        if lm_loss is not None:
+            # Backward-compatible field for consumers expecting "loss" from the model output.
+            outputs["loss"] = lm_loss
         return {k: v for k, v in outputs.items() if v is not None}
     
     def generate(self, prot_input_ids, prot_attention_mask, **generation_kwargs):
@@ -387,10 +362,18 @@ class Prot2MolModel(nn.Module):
             trainable_pchembl_head: If True, the pChEMBL prediction head will be trainable.
         """
         self.logger.info(f"Updating trainable components: Encoder={trainable_encoder}, Decoder={trainable_decoder}, pChEMBL Head={trainable_pchembl_head}")
-        
+
+        self._trainable_encoder = bool(trainable_encoder)
+        self._trainable_decoder = bool(trainable_decoder)
+        self._trainable_pchembl_head = bool(trainable_pchembl_head)
+
         self._set_requires_grad(self.protein_encoder, trainable_encoder)
         self._set_requires_grad(self.molecule_decoder, trainable_decoder)
         self._set_requires_grad(self.pchembl_head, trainable_pchembl_head)
+
+        self.protein_encoder.train(mode=trainable_encoder)
+        self.molecule_decoder.train(mode=trainable_decoder)
+        self.pchembl_head.train(mode=trainable_pchembl_head)
         
         # The learnable loss weights should always be trainable
         self.lm_weight.requires_grad = True
@@ -411,6 +394,20 @@ class Prot2MolModel(nn.Module):
             f"pChEMBL Weight={pchembl_weight_trainable}, "
             f"Total={total_trainable:,}"
         )
+
+    def train(self, mode: bool = True):
+        """
+        Keep frozen components in eval mode even when parent code calls model.train().
+        """
+        super().train(mode)
+        if mode:
+            if not self._trainable_encoder:
+                self.protein_encoder.eval()
+            if not self._trainable_decoder:
+                self.molecule_decoder.eval()
+            if not self._trainable_pchembl_head:
+                self.pchembl_head.eval()
+        return self
 
 
 def create_prot2mol_model(config):

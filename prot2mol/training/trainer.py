@@ -43,6 +43,60 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         
         # Call parent evaluate
         return super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
+
+    def _build_model_inputs(self, inputs):
+        """Create normalized model inputs shared by train/eval/prediction paths."""
+        train_lm = inputs.get("train_lm", None)
+        if train_lm is None:
+            batch_size = inputs["mol_input_ids"].shape[0]
+            train_lm = torch.ones(batch_size, dtype=torch.bool, device=inputs["mol_input_ids"].device)
+
+        return {
+            "mol_input_ids": inputs["mol_input_ids"],
+            "prot_input_ids": inputs["prot_input_ids"],
+            "prot_attention_mask": inputs["prot_attention_mask"],
+            "labels": inputs.get("labels", inputs["mol_input_ids"]),
+            "pchembl_values": inputs.get("pchembl_values", None),
+            "train_lm": train_lm,
+            "pchembl_only_mode": self.pchembl_only_mode,
+        }
+
+    def _compose_total_loss(self, model, outputs, inputs):
+        """
+        Compose the final multi-task loss in one place.
+        Keeping this logic centralized avoids model/trainer duplication.
+        """
+        lm_loss = outputs.get("lm_loss", None)
+        pchembl_preds = outputs.get("pchembl_predictions", None)
+        pchembl_values = inputs.get("pchembl_values", None)
+        group_ids = inputs.get("group_id", None)
+
+        pchembl_loss = None
+        pair_loss = None
+        if pchembl_preds is not None and pchembl_values is not None:
+            delta = model._config.get("pchembl_huber_delta", 1.0)
+            pchembl_loss = F.smooth_l1_loss(pchembl_preds, pchembl_values, beta=delta)
+            if group_ids is not None:
+                pair_loss = self._pairwise_huber(pchembl_preds, pchembl_values, group_ids, delta=delta)
+
+        loss = None
+        if self.pchembl_only_mode:
+            if pchembl_loss is not None:
+                total_pair = pair_loss if pair_loss is not None else 0.0
+                loss = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+        else:
+            if lm_loss is not None:
+                loss = model.lm_weight * lm_loss
+            if pchembl_loss is not None:
+                total_pair = pair_loss if pair_loss is not None else 0.0
+                pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+                loss = pchembl_term if loss is None else loss + pchembl_term
+
+        if loss is None:
+            # Keep backward compatibility if model provides a direct scalar loss.
+            loss = outputs.get("loss", None)
+
+        return loss, lm_loss, pchembl_loss, pair_loss
         
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -60,60 +114,20 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         Returns:
             Loss tensor, optionally with model outputs
         """
-        # Extract inputs
-        mol_input_ids = inputs["mol_input_ids"]
-        prot_input_ids = inputs["prot_input_ids"]
-        prot_attention_mask = inputs["prot_attention_mask"]
-        
-        # Use labels if provided, otherwise use mol_input_ids
-        labels = inputs.get("labels", mol_input_ids)
-        
-        # Extract pChEMBL values and training flags
-        pchembl_values = inputs.get("pchembl_values", None)
-        train_lm = inputs.get("train_lm", True)  # Per-sample flags: True for positive, False for negative samples
-        
-        # Forward pass through the unified model
-        outputs = model(
-            mol_input_ids=mol_input_ids,
-            prot_input_ids=prot_input_ids,
-            prot_attention_mask=prot_attention_mask,
-            labels=labels,
-            pchembl_values=pchembl_values,
-            train_lm=train_lm,
-            pchembl_only_mode=self.pchembl_only_mode
-        )
+        model_inputs = self._build_model_inputs(inputs)
+        outputs = model(**model_inputs)
+        loss, lm_loss, pchembl_loss, pair_loss = self._compose_total_loss(model, outputs, inputs)
 
-        lm_loss = outputs.get("lm_loss", None)
-        pchembl_preds = outputs.get("pchembl_predictions", None)
-        group_ids = inputs.get("group_id", None)
-
-        pchembl_loss = None
-        pair_loss = None
-
-        if pchembl_preds is not None and pchembl_values is not None:
-            delta = model._config.get("pchembl_huber_delta", 1.0)
-            pchembl_loss = F.smooth_l1_loss(pchembl_preds, pchembl_values, beta=delta)
-            if group_ids is not None:
-                pair_loss = self._pairwise_huber(pchembl_preds, pchembl_values, group_ids, delta=delta)
-
-        # Combine losses
-        loss = None
-        if self.pchembl_only_mode:
-            if pchembl_loss is not None:
-                total_pair = pair_loss if pair_loss is not None else 0.0
-                loss = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
-        else:
-            if lm_loss is not None:
-                loss = model.lm_weight * lm_loss
-            if pchembl_loss is not None:
-                total_pair = pair_loss if pair_loss is not None else 0.0
-                pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
-                loss = pchembl_term if loss is None else loss + pchembl_term
-
-        # Fallback to model loss if something is missing
         if loss is None:
-            loss = outputs["loss"]
+            raise RuntimeError(
+                "Loss is None. Check whether labels/pchembl_values are present for the selected training mode."
+            )
 
+        outputs["lm_loss"] = lm_loss
+        if pchembl_loss is not None:
+            outputs["pchembl_loss"] = pchembl_loss
+        if pair_loss is not None:
+            outputs["pchembl_pair_loss"] = pair_loss
         outputs["loss"] = loss
         outputs["inputs"] = inputs
         return (loss, outputs) if return_outputs else loss
@@ -184,23 +198,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         try:
             has_labels = "labels" in inputs
             
-            # Prepare model inputs
-            # NOTE: train_lm should be a tensor from tokenization, not a Python boolean
-            train_lm = inputs.get("train_lm", None)
-            if train_lm is None:
-                # Create a tensor of all True values if not provided
-                batch_size = inputs["mol_input_ids"].shape[0]
-                train_lm = torch.ones(batch_size, dtype=torch.bool, device=inputs["mol_input_ids"].device)
-            
-            model_inputs = {
-                "mol_input_ids": inputs["mol_input_ids"],
-                "prot_input_ids": inputs["prot_input_ids"],
-                "prot_attention_mask": inputs["prot_attention_mask"],
-                "labels": inputs.get("labels", inputs["mol_input_ids"]),
-                "pchembl_values": inputs.get("pchembl_values", None),
-                "train_lm": train_lm,
-                "pchembl_only_mode": self.pchembl_only_mode
-            }
+            model_inputs = self._build_model_inputs(inputs)
             
             # Forward pass through model
             with torch.no_grad():
@@ -209,7 +207,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             # Extract only tensor outputs to avoid padding issues
             # The model returns a dict, but we need loss, logits, and pchembl predictions
             if isinstance(outputs, dict):
-                loss = outputs.get("loss", None)
+                loss, _, _, _ = self._compose_total_loss(model, outputs, inputs)
                 logits = outputs.get("logits", None)
                 pchembl_preds = outputs.get("pchembl_predictions", None)
                 
@@ -221,13 +219,6 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                     self.pchembl_targets_list.append(model_inputs["pchembl_values"].detach().cpu())
                     if "group_id" in inputs:
                         self.pchembl_group_ids_list.append(inputs["group_id"].detach().cpu())
-                
-                # Debug: check loss value
-                if loss is not None:
-                    if torch.isnan(loss).any():
-                        print(f"WARNING: NaN loss detected in prediction_step!")
-                    if torch.isinf(loss).any():
-                        print(f"WARNING: Inf loss detected in prediction_step!")
             else:
                 # Handle tuple outputs
                 loss = outputs[0] if len(outputs) > 0 else None
