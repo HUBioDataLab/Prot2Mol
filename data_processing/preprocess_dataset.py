@@ -155,6 +155,21 @@ class DatasetPreprocessor:
         self.prot_tokenizer = get_protein_tokenizer(self.config.prot_emb_model)
         
         self.logger.info("Tokenizers initialized successfully")
+
+    def _has_processed_dataset_cache(self) -> bool:
+        """Return True only when a full HF dataset cache already exists."""
+        if not os.path.isdir(self.processed_data_path):
+            return False
+
+        # DatasetDict.save_to_disk writes this marker at the root.
+        dataset_dict_marker = os.path.join(self.processed_data_path, "dataset_dict.json")
+        if os.path.exists(dataset_dict_marker):
+            return True
+
+        # Backward-compatible fallback for train-only caches.
+        train_dir = os.path.join(self.processed_data_path, "train")
+        train_state_marker = os.path.join(train_dir, "state.json")
+        return os.path.isdir(train_dir) and os.path.exists(train_state_marker)
     
     def tokenize_prot_function(self, batch):
         """Tokenize protein sequences."""
@@ -199,8 +214,8 @@ class DatasetPreprocessor:
     
     def preprocess(self):
         """Main preprocessing function."""
-        # Check if already processed
-        if os.path.exists(self.processed_data_path):
+        # Check if a full tokenized dataset cache already exists.
+        if self._has_processed_dataset_cache():
             self.logger.warning(f"Processed dataset already exists at: {self.processed_data_path}")
             response = input("Do you want to reprocess? (yes/no): ").lower()
             if response != 'yes':
@@ -210,6 +225,12 @@ class DatasetPreprocessor:
                 self.logger.info("Removing existing cache and reprocessing...")
                 import shutil
                 shutil.rmtree(self.processed_data_path)
+        elif os.path.isdir(self.processed_data_path):
+            # Stats/group metadata may be present from initialization; continue preprocessing.
+            self.logger.info(
+                "Found metadata directory at %s, continuing preprocessing.",
+                self.processed_data_path,
+            )
         
         # Load raw dataset
         self.logger.info(f"Loading dataset from: {self.config.selfies_path}")

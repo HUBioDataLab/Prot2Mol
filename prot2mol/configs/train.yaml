@@ -14,6 +14,7 @@ train:
   gradient_accumulation_steps: 1
   dataloader_num_workers: 4
   weight_decay: 0.01
+  training_mode: auto
   eval_split: random
   eval_split_ratio: 0.01
   split_seed: 42

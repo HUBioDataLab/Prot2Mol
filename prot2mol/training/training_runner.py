@@ -1,5 +1,6 @@
 import math
 import os
+import inspect
 
 import torch
 from torch.distributed import init_process_group
@@ -120,11 +121,10 @@ class TrainingRunner:
 
     def _create_training_args(self, run_name: str, output_dir: str, training_config: dict):
         overwrite_output = training_config.get("resume_from_checkpoint") is None
-        return TrainingArguments(
+        args_kwargs = dict(
             run_name=run_name,
             output_dir=output_dir,
             overwrite_output_dir=overwrite_output,
-            evaluation_strategy="epoch",
             save_strategy="epoch",
             num_train_epochs=training_config["epochs"],
             learning_rate=training_config["learning_rate"],
@@ -143,10 +143,18 @@ class TrainingRunner:
             remove_unused_columns=False,
             include_inputs_for_metrics=False,
             save_safetensors=False,
-            local_rank=self.local_rank,
-            ddp_backend="nccl",
-            ddp_find_unused_parameters=True,
         )
+        is_distributed = self.local_rank != -1 or int(os.environ.get("WORLD_SIZE", "1")) > 1
+        if is_distributed:
+            args_kwargs["local_rank"] = self.local_rank
+            args_kwargs["ddp_backend"] = "nccl"
+            args_kwargs["ddp_find_unused_parameters"] = True
+        init_params = inspect.signature(TrainingArguments.__init__).parameters
+        if "evaluation_strategy" in init_params:
+            args_kwargs["evaluation_strategy"] = "epoch"
+        else:
+            args_kwargs["eval_strategy"] = "epoch"
+        return TrainingArguments(**args_kwargs)
 
     @staticmethod
     def _is_pchembl_only_training(model_config: dict) -> bool:

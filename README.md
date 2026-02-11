@@ -106,6 +106,46 @@ python prot2mol/main.py train \
   --epoch 20 --learning_rate 5e-6
 ```
 
+### 2.1 Selectable Training Execution Mode
+
+`train` supports explicit execution mode control through `--training_mode` (or `train.training_mode` in YAML):
+
+- `auto`: infer from launcher environment (`WORLD_SIZE`, `LOCAL_WORLD_SIZE`)
+- `single_gpu`: one-process training (no distributed process group)
+- `multi_gpu`: single-node distributed training (multi-GPU)
+- `multi_node`: multi-node distributed training (HPC)
+
+Single GPU:
+
+```bash
+python prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --training_mode single_gpu
+```
+
+Multi-GPU (single node):
+
+```bash
+torchrun --standalone --nproc_per_node=4 \
+  prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --training_mode multi_gpu
+```
+
+Multi-node (example with 2 nodes, 4 GPUs/node):
+
+```bash
+torchrun \
+  --nnodes=2 \
+  --nproc_per_node=4 \
+  --node_rank=$NODE_RANK \
+  --master_addr=$MASTER_ADDR \
+  --master_port=$MASTER_PORT \
+  prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --training_mode multi_node
+```
+
 ### 3. Generate Molecules
 
 ```bash

@@ -45,6 +45,19 @@ def parse_arguments(argv=None):
     training_group.add_argument("--dataloader_num_workers", type=int, default=4, help="Number of dataloader workers")
     training_group.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimization")
     training_group.add_argument(
+        "--training_mode",
+        type=str,
+        default="auto",
+        choices=["auto", "single_gpu", "multi_gpu", "multi_node"],
+        help=(
+            "Training execution mode. "
+            "'auto' infers from launch environment; "
+            "'single_gpu' runs one process; "
+            "'multi_gpu' expects single-node torchrun; "
+            "'multi_node' expects multi-node torchrun."
+        ),
+    )
+    training_group.add_argument(
         "--eval_split",
         type=str,
         default="random",
@@ -195,6 +208,7 @@ def create_run_name(config, dataset_name):
         f"prot_max_length_{config.prot_max_length}",
         f"lr_{config.learning_rate}",
         f"bs_{config.train_batch_size}",
+        f"mode_{config.training_mode}",
     ]
     run_components.append(f"layers_{config.n_layer}")
     run_components.append(f"heads_{config.n_head}")

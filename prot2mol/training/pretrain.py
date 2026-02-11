@@ -27,6 +27,7 @@ from prot2mol.training.entry import (
     setup_logging,
     validate_and_process_paths,
 )
+from prot2mol.training.distributed import resolve_distributed_context
 from prot2mol.training.metrics import (
     compute_lm_metrics,
     compute_pchembl_metrics,
@@ -45,10 +46,11 @@ os.environ["WANDB_DIR"] = "/gpfs/projects/etur29/atabey/"
 class TrainingScript:
     """Trainer orchestrator for the Prot2Mol model."""
 
-    def __init__(self, config, selfies_path, pretrain_save_to, dataset_name, run_name):
+    def __init__(self, config, selfies_path, pretrain_save_to, dataset_name, run_name, distributed_context):
         self.logger = logging.getLogger(__name__)
-        self.local_rank = int(os.environ["LOCAL_RANK"])
-        self.global_rank = int(os.environ["RANK"])
+        self.distributed_context = distributed_context
+        self.local_rank = distributed_context.local_rank
+        self.global_rank = distributed_context.global_rank
 
         # Organize configurations into logical groups
         self.model_config = {
@@ -75,6 +77,7 @@ class TrainingScript:
             "resume_from_checkpoint": config.resume_from_checkpoint,
             "load_pretrained_model": config.load_pretrained_model,
             "ignore_mismatched_optimizer": config.ignore_mismatched_optimizer,
+            "training_mode": config.training_mode,
             "eval_split": config.eval_split,
             "eval_split_ratio": config.eval_split_ratio,
             "split_seed": config.split_seed,
@@ -363,6 +366,8 @@ class TrainingScript:
                             "dataset_name": self.run_name.split("_")[0],
                             "global_rank": self.global_rank,
                             "local_rank": self.local_rank,
+                            "world_size": self.distributed_context.world_size,
+                            "effective_training_mode": self.distributed_context.effective_mode,
                         },
                     )
                     self.logger.info("Wandb initialized successfully on rank 0")
@@ -417,6 +422,8 @@ def main():
     setup_logging(config.log_level)
     logger = logging.getLogger(__name__)
     logger.info("Starting Prot2Mol training")
+    distributed_context = resolve_distributed_context(config.training_mode)
+    logger.info("Distributed context: %s", distributed_context.to_log_fields())
 
     dataset_name = validate_and_process_paths(config)
     run_name = create_run_name(config, dataset_name)
@@ -430,10 +437,21 @@ def main():
         pretrain_save_to=save_dir,
         dataset_name=dataset_name,
         run_name=run_name,
+        distributed_context=distributed_context,
     )
-    trainer.ddp_setup()
-    trainer.model_training()
-    destroy_process_group()
+    try:
+        if distributed_context.is_distributed:
+            trainer.ddp_setup()
+        else:
+            logger.info("Running non-distributed training mode: %s", distributed_context.effective_mode)
+        trainer.model_training()
+    finally:
+        if (
+            distributed_context.is_distributed
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            destroy_process_group()
 
 
 if __name__ == "__main__":
