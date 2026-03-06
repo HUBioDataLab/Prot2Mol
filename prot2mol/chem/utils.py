@@ -15,7 +15,6 @@ RDLogger.DisableLog('rdApp.*')
 from multiprocessing import Pool
 import torch
 import numpy as np
-import wandb
 import logging
 
 logger = logging.getLogger(__name__)
@@ -230,7 +229,7 @@ def qed_calculation(mols):
 def logp_calculation(mols):
     return [Chem.Crippen.MolLogP(mol) if mol is not None else None for mol in mols]
 
-def metrics_calculation(predictions, references, train_data, train_vec=None,training=True):
+def metrics_calculation(predictions, references, train_data, train_vec=None, training=True, return_details=False):
     
     # `predictions` are decoded SELFIES from the model.
     predictions = [(x or "").replace(" ", "") for x in predictions]
@@ -396,16 +395,9 @@ def metrics_calculation(predictions, references, train_data, train_vec=None,trai
             metrics["logp_score"] = 0
             prediction_logp_score_list = []
     
-    if training: 
-        # Only log to wandb if it has been initialized
-        try:
-            if wandb.run is not None:
-                wandb.log(metrics)
-        except Exception as e:
-            logging.warning(f"Failed to log metrics to wandb: {e}")
-    if training:
+    if training and not return_details:
         return metrics
-    elif training == False:
+    elif training is False or return_details:
         # Get the number of predictions to ensure all arrays have the same length
         num_predictions = len(prediction_smiles["smiles"])
         
@@ -472,4 +464,6 @@ def metrics_calculation(predictions, references, train_data, train_vec=None,trai
             # Fallback: return only SMILES
             results = pd.DataFrame({"smiles": prediction_smiles["smiles"]})
         
-        return metrics, results
+        if return_details:
+            return metrics, results
+        return metrics

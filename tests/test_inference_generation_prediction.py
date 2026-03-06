@@ -52,12 +52,30 @@ def _predictor_config(**overrides):
         n_emb=8,
         prot_max_length=16,
         max_mol_len=8,
+        pchembl_tf_hidden_dim=768,
+        pchembl_tf_num_heads=8,
+        pchembl_tf_group_size=1,
+        pchembl_tf_agg_mode="mean",
+        pchembl_tf_dropout=0.1,
         batch_size=2,
         pchembl_mean=5.0,
         pchembl_std=2.0,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+class _PredictOnlyModel:
+    def eval(self):
+        return self
+
+    def encode_protein(self, prot_input_ids, prot_attention_mask):
+        batch = prot_input_ids.shape[0]
+        seq = prot_input_ids.shape[1]
+        return torch.ones(batch, seq, 4, dtype=torch.float32)
+
+    def predict_pchembl_from_protein_embeddings(self, mol_input_ids, protein_embeddings, prot_attention_mask):
+        return torch.arange(mol_input_ids.shape[0], dtype=torch.float32)
 
 
 def test_generate_molecules_dataframe_shape(monkeypatch):
@@ -82,7 +100,15 @@ def test_generate_molecules_dataframe_shape(monkeypatch):
 
     monkeypatch.setattr(MoleculeGenerator, "_load_components", _fake_load_components)
     monkeypatch.setattr(MoleculeGenerator, "_get_protein_embeddings", lambda self, seq: (torch.ones(1, 4, dtype=torch.long), torch.ones(1, 4, dtype=torch.long)))
-    monkeypatch.setattr(MoleculeGenerator, "_generate_molecules_batch", lambda self, ids, mask, n: ["[C]", "", "[O]", "[N]", "[C][O]"][:n])
+    monkeypatch.setattr(MoleculeGenerator, "_encode_protein_for_model", lambda self, model, ids, mask: torch.ones(1, 4, 4))
+    monkeypatch.setattr(
+        MoleculeGenerator,
+        "_generate_molecules_batch_with_tokens",
+        lambda self, emb, mask, n: (
+            ["[C]", "", "[O]", "[N]", "[C][O]"][:n],
+            torch.ones(n, 8, dtype=torch.long),
+        ),
+    )
     monkeypatch.setattr(
         "prot2mol.inference.produce_molecules.tokenize_selfies_for_inference",
         lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
@@ -113,6 +139,7 @@ def test_generator_predict_pchembl_for_all_rows(monkeypatch):
 
     monkeypatch.setattr(MoleculeGenerator, "_load_components", _fake_load_components)
     monkeypatch.setattr(MoleculeGenerator, "_get_protein_embeddings", lambda self, seq: (torch.ones(1, 4, dtype=torch.long), torch.ones(1, 4, dtype=torch.long)))
+    monkeypatch.setattr(MoleculeGenerator, "_encode_protein_for_model", lambda self, model, ids, mask: torch.ones(1, 4, 4))
     monkeypatch.setattr(
         "prot2mol.inference.produce_molecules.tokenize_selfies_for_inference",
         lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
@@ -138,16 +165,7 @@ def test_predictor_dataframe_prediction(monkeypatch):
 
         self.mol_tokenizer = DummyBatchTokenizer()
         self.prot_tokenizer = DummyBatchTokenizer()
-
-        class _FakeModel:
-            def eval(self):
-                return self
-
-            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
-                b = mol_input_ids.shape[0]
-                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
-
-        self.model = _FakeModel()
+        self.model = _PredictOnlyModel()
 
     monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
     monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
@@ -281,16 +299,7 @@ def test_predictor_resolves_target_fasta_from_chembl_mapping(tmp_path, monkeypat
 
         self.mol_tokenizer = DummyBatchTokenizer()
         self.prot_tokenizer = DummyBatchTokenizer()
-
-        class _FakeModel:
-            def eval(self):
-                return self
-
-            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
-                b = mol_input_ids.shape[0]
-                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
-
-        self.model = _FakeModel()
+        self.model = _PredictOnlyModel()
 
     monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
     monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
@@ -331,16 +340,7 @@ def test_predictor_resolves_target_fasta_from_uniprot_id(tmp_path, monkeypatch):
 
         self.mol_tokenizer = DummyBatchTokenizer()
         self.prot_tokenizer = DummyBatchTokenizer()
-
-        class _FakeModel:
-            def eval(self):
-                return self
-
-            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
-                b = mol_input_ids.shape[0]
-                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
-
-        self.model = _FakeModel()
+        self.model = _PredictOnlyModel()
 
     monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
     monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
@@ -381,16 +381,7 @@ def test_predictor_resolves_target_fasta_from_lowercase_uniprot_id(tmp_path, mon
 
         self.mol_tokenizer = DummyBatchTokenizer()
         self.prot_tokenizer = DummyBatchTokenizer()
-
-        class _FakeModel:
-            def eval(self):
-                return self
-
-            def __call__(self, mol_input_ids, prot_input_ids, prot_attention_mask, train_lm=False):
-                b = mol_input_ids.shape[0]
-                return {"pchembl_predictions": torch.arange(b, dtype=torch.float32)}
-
-        self.model = _FakeModel()
+        self.model = _PredictOnlyModel()
 
     monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
     monkeypatch.setattr(PChemblPredictor, "_load_components", _fake_load_components)
@@ -429,6 +420,11 @@ def test_predictor_auto_configure_uses_parent_checkpoint_config(tmp_path, monkey
                 "prot_emb_model": "esm2",
                 "max_mol_len": 200,
                 "prot_max_length": 1000,
+                "pchembl_tf_hidden_dim": 640,
+                "pchembl_tf_num_heads": 10,
+                "pchembl_tf_group_size": 3,
+                "pchembl_tf_agg_mode": "cls",
+                "pchembl_tf_dropout": 0.25,
             }
         )
     )
@@ -441,6 +437,11 @@ def test_predictor_auto_configure_uses_parent_checkpoint_config(tmp_path, monkey
     assert pred.config.n_head == 16
     assert pred.config.n_emb == 1024
     assert pred.config.prot_emb_model == "esm2"
+    assert pred.config.pchembl_tf_hidden_dim == 640
+    assert pred.config.pchembl_tf_num_heads == 10
+    assert pred.config.pchembl_tf_group_size == 3
+    assert pred.config.pchembl_tf_agg_mode == "cls"
+    assert pred.config.pchembl_tf_dropout == 0.25
 
 
 def test_predictor_load_components_uses_project_models_fallback(monkeypatch):

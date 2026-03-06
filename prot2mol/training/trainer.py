@@ -1,6 +1,10 @@
+import math
+import time
+
 from transformers import Trainer
 import torch
 import torch.nn.functional as F
+
 
 class GPT2_w_crs_attn_Trainer(Trainer):
     """
@@ -10,22 +14,129 @@ class GPT2_w_crs_attn_Trainer(Trainer):
     protein encoder and molecule decoder.
     """
     
-    def __init__(self, *args, pchembl_only_mode=False, ignore_mismatched_optimizer=False, pchembl_pair_weight=1.0, **kwargs):
+    def __init__(
+        self,
+        *args,
+        training_stage="multitask",
+        compute_generation_metrics=None,
+        ignore_mismatched_optimizer=False,
+        pchembl_pair_weight=1.0,
+        **kwargs,
+    ):
         """
-        Initialize the trainer with support for two-stage training.
+        Initialize the trainer with explicit objective-stage support.
         
         Args:
-            pchembl_only_mode: If True, only train pChEMBL head (Stage 1)
+            training_stage: Objective family used for this run.
             ignore_mismatched_optimizer: If True, skip loading optimizer state when it doesn't match
         """
         super().__init__(*args, **kwargs)
-        self.pchembl_only_mode = pchembl_only_mode
+        self.training_stage = training_stage
+        self.compute_generation_metrics = compute_generation_metrics
         self.ignore_mismatched_optimizer = ignore_mismatched_optimizer
         self.pchembl_pair_weight = pchembl_pair_weight
         # Storage for pChEMBL predictions during evaluation
         self.pchembl_predictions_list = []
         self.pchembl_targets_list = []
         self.pchembl_group_ids_list = []
+        self._reset_train_component_accumulator()
+        self._reset_eval_component_accumulator()
+
+    def _stage_has_lm(self):
+        return self.training_stage in {"lm_only", "multitask"}
+
+    def _stage_has_pchembl(self):
+        return self.training_stage in {"pchembl_only", "multitask"}
+
+    def _reset_train_component_accumulator(self):
+        self._train_component_sums = {
+            "lm_loss": 0.0,
+            "pchembl_loss": 0.0,
+            "pair_loss": 0.0,
+            "total_loss": 0.0,
+        }
+        self._train_component_count = 0
+
+    def _reset_eval_component_accumulator(self):
+        self._eval_component_sums = {
+            "lm_loss": 0.0,
+            "pchembl_loss": 0.0,
+            "pair_loss": 0.0,
+            "total_loss": 0.0,
+        }
+        self._eval_component_count = 0
+
+    @staticmethod
+    def _to_log_scalar(value):
+        if value is None:
+            return 0.0
+        if isinstance(value, torch.Tensor):
+            return float(value.detach().mean().cpu().item())
+        return float(value)
+
+    def _record_train_components(self, lm_loss, pchembl_loss, pair_loss, total_loss):
+        self._train_component_sums["lm_loss"] += self._to_log_scalar(lm_loss)
+        self._train_component_sums["pchembl_loss"] += self._to_log_scalar(pchembl_loss)
+        self._train_component_sums["pair_loss"] += self._to_log_scalar(pair_loss)
+        self._train_component_sums["total_loss"] += self._to_log_scalar(total_loss)
+        self._train_component_count += 1
+
+    def _record_eval_components(self, lm_loss, pchembl_loss, pair_loss, total_loss):
+        self._eval_component_sums["lm_loss"] += self._to_log_scalar(lm_loss)
+        self._eval_component_sums["pchembl_loss"] += self._to_log_scalar(pchembl_loss)
+        self._eval_component_sums["pair_loss"] += self._to_log_scalar(pair_loss)
+        self._eval_component_sums["total_loss"] += self._to_log_scalar(total_loss)
+        self._eval_component_count += 1
+
+    def _consume_train_component_logs(self):
+        if self._train_component_count == 0:
+            return {}
+        denom = float(self._train_component_count)
+        logs = {
+            "lm_loss": self._train_component_sums["lm_loss"] / denom,
+            "pchembl_loss": self._train_component_sums["pchembl_loss"] / denom,
+            "pair_loss": self._train_component_sums["pair_loss"] / denom,
+            "total_loss": self._train_component_sums["total_loss"] / denom,
+        }
+        self._reset_train_component_accumulator()
+        return logs
+
+    def _consume_eval_component_logs(self, metric_key_prefix):
+        if self._eval_component_count == 0:
+            return {}
+
+        sums = torch.tensor(
+            [
+                self._eval_component_sums["lm_loss"],
+                self._eval_component_sums["pchembl_loss"],
+                self._eval_component_sums["pair_loss"],
+                self._eval_component_sums["total_loss"],
+                float(self._eval_component_count),
+            ],
+            device=self.args.device,
+            dtype=torch.float64,
+        )
+
+        if self.args.local_rank != -1:
+            import torch.distributed as dist
+
+            dist.all_reduce(sums)
+
+        denom = float(sums[-1].item()) if sums[-1].item() > 0 else 1.0
+        logs = {
+            f"{metric_key_prefix}_lm_loss": float(sums[0].item() / denom),
+            f"{metric_key_prefix}_pchembl_loss": float(sums[1].item() / denom),
+            f"{metric_key_prefix}_pair_loss": float(sums[2].item() / denom),
+            f"{metric_key_prefix}_total_loss": float(sums[3].item() / denom),
+        }
+        if self._stage_has_lm():
+            try:
+                logs[f"{metric_key_prefix}_perplexity"] = float(math.exp(logs[f"{metric_key_prefix}_lm_loss"]))
+            except OverflowError:
+                logs[f"{metric_key_prefix}_perplexity"] = float("inf")
+
+        self._reset_eval_component_accumulator()
+        return logs
         
     def clear_pchembl_predictions(self):
         """Clear accumulated pChEMBL predictions. Called at the start of each evaluation."""
@@ -40,9 +151,36 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         """
         # Clear any accumulated predictions from previous evaluations
         self.clear_pchembl_predictions()
-        
-        # Call parent evaluate
-        return super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
+        self._reset_eval_component_accumulator()
+
+        eval_start = time.perf_counter()
+        metrics = super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
+        component_metrics = self._consume_eval_component_logs(metric_key_prefix)
+        metrics.update(component_metrics)
+        if component_metrics:
+            self.log(component_metrics)
+
+        if self.compute_generation_metrics is not None and self._stage_has_lm():
+            generation_start = time.perf_counter()
+            generation_metrics = self.compute_generation_metrics(eval_dataset or self.eval_dataset)
+            prefixed_generation_metrics = {
+                f"{metric_key_prefix}_{key}": value for key, value in generation_metrics.items()
+            }
+            prefixed_generation_metrics[f"{metric_key_prefix}_generation_metrics_time_sec"] = (
+                time.perf_counter() - generation_start
+            )
+            metrics.update(prefixed_generation_metrics)
+            self.log(prefixed_generation_metrics)
+
+        metrics[f"{metric_key_prefix}_evaluation_time_sec"] = time.perf_counter() - eval_start
+        self.log({f"{metric_key_prefix}_evaluation_time_sec": metrics[f"{metric_key_prefix}_evaluation_time_sec"]})
+        return metrics
+
+    def log(self, logs, start_time=None):
+        logs = dict(logs)
+        if "loss" in logs:
+            logs.update(self._consume_train_component_logs())
+        return super().log(logs, start_time=start_time)
 
     def _build_model_inputs(self, inputs):
         """Create normalized model inputs shared by train/eval/prediction paths."""
@@ -58,7 +196,8 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             "labels": inputs.get("labels", inputs["mol_input_ids"]),
             "pchembl_values": inputs.get("pchembl_values", None),
             "train_lm": train_lm,
-            "pchembl_only_mode": self.pchembl_only_mode,
+            "pchembl_only_mode": self.training_stage == "pchembl_only",
+            "compute_pchembl": self._stage_has_pchembl(),
         }
 
     def _compose_total_loss(self, model, outputs, inputs):
@@ -80,17 +219,12 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                 pair_loss = self._pairwise_huber(pchembl_preds, pchembl_values, group_ids, delta=delta)
 
         loss = None
-        if self.pchembl_only_mode:
-            if pchembl_loss is not None:
-                total_pair = pair_loss if pair_loss is not None else 0.0
-                loss = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
-        else:
-            if lm_loss is not None:
-                loss = model.lm_weight * lm_loss
-            if pchembl_loss is not None:
-                total_pair = pair_loss if pair_loss is not None else 0.0
-                pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
-                loss = pchembl_term if loss is None else loss + pchembl_term
+        if self._stage_has_lm() and lm_loss is not None:
+            loss = model.lm_weight * lm_loss
+        if self._stage_has_pchembl() and pchembl_loss is not None:
+            total_pair = pair_loss if pair_loss is not None else 0.0
+            pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+            loss = pchembl_term if loss is None else loss + pchembl_term
 
         if loss is None:
             # Keep backward compatibility if model provides a direct scalar loss.
@@ -122,6 +256,9 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             raise RuntimeError(
                 "Loss is None. Check whether labels/pchembl_values are present for the selected training mode."
             )
+
+        if getattr(model, "training", False):
+            self._record_train_components(lm_loss, pchembl_loss, pair_loss, loss)
 
         outputs["lm_loss"] = lm_loss
         if pchembl_loss is not None:
@@ -207,9 +344,10 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             # Extract only tensor outputs to avoid padding issues
             # The model returns a dict, but we need loss, logits, and pchembl predictions
             if isinstance(outputs, dict):
-                loss, _, _, _ = self._compose_total_loss(model, outputs, inputs)
+                loss, lm_loss, pchembl_loss, pair_loss = self._compose_total_loss(model, outputs, inputs)
                 logits = outputs.get("logits", None)
                 pchembl_preds = outputs.get("pchembl_predictions", None)
+                self._record_eval_components(lm_loss, pchembl_loss, pair_loss, loss)
                 
                 # Store pChEMBL predictions for ALL samples (positive and negative)
                 # We do this here because we can't return them from prediction_step (DDP padding issues)

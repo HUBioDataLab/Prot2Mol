@@ -7,7 +7,7 @@ Prot2Mol is a protein-conditioned molecular design framework based on an encoder
 - Protein encoder: `ProtT5`, `ESM2`, or `SaProt`.
 - Molecule decoder: GPT-2 with cross-attention over protein representations.
 - Molecule representation: SELFIES.
-- Auxiliary task: pChEMBL regression head.
+- Auxiliary task: pChEMBL regression head built with FusionDTI-style token fusion plus an MLP regressor.
 - Multi-task training: language-model objective + pChEMBL objective, with optional blocking of pChEMBL gradients into encoder/decoder.
 
 ## Installation
@@ -105,6 +105,20 @@ python prot2mol/main.py train \
   --config prot2mol/configs/train.yaml \
   --epoch 20 --learning_rate 5e-6
 ```
+
+Frozen encoder-decoder fine-tuning for pChEMBL only:
+
+```bash
+python prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --train_encoder_model false \
+  --train_decoder_model false \
+  --train_pchembl_head true \
+  --stop_pchembl_gradients true \
+  --load_pretrained_model /path/to/encoder_decoder_checkpoint
+```
+
+The pChEMBL head uses protein token embeddings from the frozen encoder and decoder last hidden states from the frozen molecule decoder, then applies FusionDTI-style token fusion followed by an MLP regressor. The trained checkpoint writes a `config.json` with the full head architecture so `predict` and generation-time pChEMBL scoring can reload the same setup automatically.
 
 ### 2.1 Selectable Training Execution Mode
 

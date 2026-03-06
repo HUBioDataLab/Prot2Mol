@@ -16,6 +16,7 @@ import json
 import logging
 import argparse
 import warnings
+import time
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -23,7 +24,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from datasets import load_dataset
 from tqdm import tqdm
 from scipy.stats import pearsonr, spearmanr
@@ -33,7 +33,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from prot2mol.io.config import parse_args_with_config
 from prot2mol.core.protein_encoders import get_protein_tokenizer
-from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model
+from prot2mol.io.hf_utils import (
+    find_model_config_path,
+    load_molgen_tokenizer,
+    load_prot2mol_inference_model,
+    load_saved_model_config,
+)
 from prot2mol.data.pipeline import (
     find_molecule_column,
     load_processed_dataset,
@@ -42,6 +47,7 @@ from prot2mol.data.pipeline import (
     tokenize_protein_sequences_for_inference,
     tokenize_selfies_for_inference,
 )
+from prot2mol.training.metrics import compute_pchembl_metrics
 from rdkit import RDLogger
 
 # Suppress warnings and logs
@@ -76,20 +82,7 @@ class PChemblPredictor:
 
     def _resolve_model_config_path(self) -> Optional[str]:
         """Find config.json in checkpoint dir or its parents."""
-        model_path = os.path.abspath(self.config.model_path)
-        candidate_dirs = [model_path]
-        parent = os.path.dirname(model_path)
-        if parent and parent not in candidate_dirs:
-            candidate_dirs.append(parent)
-        grandparent = os.path.dirname(parent)
-        if grandparent and grandparent not in candidate_dirs:
-            candidate_dirs.append(grandparent)
-
-        for directory in candidate_dirs:
-            config_path = os.path.join(directory, "config.json")
-            if os.path.exists(config_path):
-                return config_path
-        return None
+        return find_model_config_path(self.config.model_path)
 
     def _auto_configure_model(self):
         """Attempt to load model configuration from config.json to override defaults."""
@@ -97,26 +90,15 @@ class PChemblPredictor:
         if config_path is not None:
              self.logger.info(f"Found config.json at {config_path}, loading configuration...")
              try:
-                 with open(config_path, 'r') as f:
-                     json_config = json.load(f)
-                 
-                 # Key parameters to sync
-                 param_map = {
-                     'n_layer': 'n_layer',
-                     'n_head': 'n_head', 
-                     'n_emb': 'n_emb',
-                     'prot_emb_model': 'prot_emb_model',
-                     'max_mol_len': 'max_mol_len',
-                     'prot_max_length': 'prot_max_length'
-                 }
-                 
-                 for json_key, arg_key in param_map.items():
-                     if json_key in json_config:
-                         json_val = json_config[json_key]
-                         curr_val = getattr(self.config, arg_key)
-                         if json_val != curr_val:
-                             self.logger.info(f"Overriding default {arg_key}={curr_val} with config value {json_val}")
-                             setattr(self.config, arg_key, json_val)
+                 json_config = load_saved_model_config(self.config.model_path, logger=self.logger)
+
+                 for arg_key, json_val in json_config.items():
+                     if not hasattr(self.config, arg_key):
+                         continue
+                     curr_val = getattr(self.config, arg_key)
+                     if json_val != curr_val:
+                         self.logger.info(f"Overriding default {arg_key}={curr_val} with config value {json_val}")
+                         setattr(self.config, arg_key, json_val)
              except Exception as e:
                  self.logger.warning(f"Failed to load config.json: {e}")
         else:
@@ -130,12 +112,15 @@ class PChemblPredictor:
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
+            force=True,
             handlers=[
                 logging.StreamHandler(sys.stdout),
                 logging.FileHandler(f'pchembl_prediction_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.log')
             ]
         )
-        return logging.getLogger(__name__)
+        logger = logging.getLogger(__name__)
+        logger.propagate = False
+        return logger
 
     def _load_components(self):
         """Load tokenizers and model."""
@@ -191,6 +176,11 @@ class PChemblPredictor:
                 n_emb=self.config.n_emb,
                 max_mol_len=self.config.max_mol_len,
                 prot_max_length=self.config.prot_max_length,
+                pchembl_tf_hidden_dim=self.config.pchembl_tf_hidden_dim,
+                pchembl_tf_num_heads=self.config.pchembl_tf_num_heads,
+                pchembl_tf_group_size=self.config.pchembl_tf_group_size,
+                pchembl_tf_agg_mode=self.config.pchembl_tf_agg_mode,
+                pchembl_tf_dropout=self.config.pchembl_tf_dropout,
                 strict=True,
                 allow_strict_fallback=True,
                 logger=self.logger,
@@ -552,8 +542,51 @@ class PChemblPredictor:
         self.logger.info("Dropping internal output columns: %s", ", ".join(existing))
         return df.drop(columns=existing)
 
+    def _summarize_prediction_metrics(self, y_true, y_pred) -> Dict[str, float]:
+        metrics = compute_pchembl_metrics(
+            pchembl_predictions=np.asarray(y_pred, dtype=np.float32),
+            pchembl_targets=np.asarray(y_true, dtype=np.float32),
+            pchembl_mean=float(self.config.pchembl_mean),
+            pchembl_std=float(self.config.pchembl_std),
+            inputs_are_normalized=False,
+            logger=self.logger,
+        )
+        summary = {
+            "MSE": float(metrics["pchembl_mse_raw"]),
+            "RMSE": float(metrics["pchembl_rmse_raw"]),
+            "MAE": float(metrics["pchembl_mae_raw"]),
+            "R2": float(metrics["pchembl_r2"]),
+            "Count": int(metrics["pchembl_valid_count"]),
+        }
+        if "pchembl_pearson_raw" in metrics:
+            summary["Pearson_r"] = float(metrics["pchembl_pearson_raw"])
+        if "pchembl_spearman_raw" in metrics:
+            summary["Spearman_rho"] = float(metrics["pchembl_spearman_raw"])
+        return summary
+
+    def _log_metric_summary(self, metrics: Dict[str, float], include_significance: bool = False, y_true=None, y_pred=None):
+        self.logger.info("-" * 40)
+        self.logger.info("Evaluation Metrics:")
+        for key in ["MSE", "RMSE", "MAE", "R2", "Pearson_r", "Spearman_rho", "Count"]:
+            if key not in metrics:
+                continue
+            value = metrics[key]
+            if key == "Count":
+                self.logger.info("%s: %s", key, value)
+            else:
+                self.logger.info("%s: %.4f", key, value)
+        if include_significance and y_true is not None and y_pred is not None:
+            pearson_corr, pearson_pval = pearsonr(y_true, y_pred)
+            spearman_corr, spearman_pval = spearmanr(y_true, y_pred)
+            metrics["Pearson_pval"] = float(pearson_pval)
+            metrics["Spearman_pval"] = float(spearman_pval)
+            self.logger.info("Pearson p-value: %.4e", pearson_pval)
+            self.logger.info("Spearman p-value: %.4e", spearman_pval)
+        self.logger.info("-" * 40)
+
     def _run_split_evaluation(self, split_mode: str, split_ratio: float, split_seed: int):
         """Run prediction/evaluation on a deterministic validation split."""
+        eval_start = time.perf_counter()
         if not (0.0 < split_ratio < 1.0):
             raise ValueError(f"reproduce_split_ratio must be in (0, 1), got {split_ratio}")
 
@@ -577,7 +610,11 @@ class PChemblPredictor:
             self.logger.error("Validation split is empty. Cannot evaluate.")
             return
 
-        self._override_normalization_from_input_file()
+        self.logger.info(
+            "Using checkpoint normalization for reproduction: mean=%.4f std=%.4f",
+            self.config.pchembl_mean,
+            self.config.pchembl_std,
+        )
 
         # Check if we're using preprocessed data
         has_preprocessed_tokens = hasattr(test_data, "column_names") and 'prot_input_ids' in test_data.column_names
@@ -605,53 +642,20 @@ class PChemblPredictor:
              
         y_true = eval_df['pchembl_value_Median'].values
         y_pred = eval_df['Predicted_pChEMBL'].values
-        
-        # metrics
-        # metrics
-        mse = mean_squared_error(y_true, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_true, y_pred)
-        try:
-            r2 = r2_score(y_true, y_pred)
-        except:
-            r2 = float('nan')
-            
-        pearson_corr, pearson_pval = pearsonr(y_true, y_pred)
-        spearman_corr, spearman_pval = spearmanr(y_true, y_pred)
-
-        self.logger.info("-" * 40)
-        self.logger.info("Evaluation Metrics:")
-        self.logger.info(f"MSE:  {mse:.4f}")
-        self.logger.info(f"RMSE: {rmse:.4f}")
-        self.logger.info(f"MAE:  {mae:.4f}")
-        self.logger.info(f"R2:   {r2:.4f}")
-        self.logger.info(f"Pearson: {pearson_corr:.4f} (p={pearson_pval:.4e})")
-        self.logger.info(f"Spearman: {spearman_corr:.4f} (p={spearman_pval:.4e})")
-        self.logger.info("-" * 40)
-        
-        # Save metrics (convert numpy types to Python native types for JSON serialization)
-        metrics = {
-            'MSE': float(mse),
-            'RMSE': float(rmse),
-            'MAE': float(mae),
-            'R2': float(r2),
-            'Pearson_r': float(pearson_corr),
-            'Pearson_pval': float(pearson_pval),
-            'Spearman_rho': float(spearman_corr),
-            'Spearman_pval': float(spearman_pval),
-            'Count': int(len(eval_df))
-        }
+        metrics = self._summarize_prediction_metrics(y_true, y_pred)
+        self._log_metric_summary(metrics, include_significance=True, y_true=y_true, y_pred=y_pred)
         metrics_file = self.config.output_file.replace('.csv', '_metrics.json')
         with open(metrics_file, 'w') as f:
             json.dump(metrics, f, indent=2)
             
         # Plotting
-        self._create_plots(y_true, y_pred)
+        self._create_plots(y_true, y_pred, metrics)
         
         # Save csv
         output_df = self._sanitize_output_dataframe(results_df)
         self.logger.info(f"Saving evaluation results to {self.config.output_file}")
         output_df.to_csv(self.config.output_file, index=False)
+        self.logger.info("Split evaluation finished in %.2fs", time.perf_counter() - eval_start)
 
     def reproduce(self, split_mode: str):
         """Run prediction pipeline on validation split for result reproduction."""
@@ -663,17 +667,20 @@ class PChemblPredictor:
             split_seed=split_seed,
         )
 
-    def _create_plots(self, y_true, y_pred):
+    def _create_plots(self, y_true, y_pred, metrics: Optional[Dict[str, float]] = None):
         """Create extended distribution plots similar to eval_pchembl.py"""
         out_base = os.path.splitext(self.config.output_file)[0]
         
-        # Calculate metrics for plot titles
-        mse = mean_squared_error(y_true, y_pred)
-        mae = mean_absolute_error(y_true, y_pred)
-        rmse = np.sqrt(mse)
-        r2 = r2_score(y_true, y_pred)
-        pearson_corr, pearson_pval = pearsonr(y_true, y_pred)
-        spearman_corr, spearman_pval = spearmanr(y_true, y_pred)
+        if metrics is None:
+            metrics = self._summarize_prediction_metrics(y_true, y_pred)
+        mse = metrics["MSE"]
+        mae = metrics["MAE"]
+        rmse = metrics["RMSE"]
+        r2 = metrics["R2"]
+        pearson_corr = metrics.get("Pearson_r", float("nan"))
+        spearman_corr = metrics.get("Spearman_rho", float("nan"))
+        pearson_pval = metrics.get("Pearson_pval", float("nan"))
+        spearman_pval = metrics.get("Spearman_pval", float("nan"))
 
         # Create figure with multiple subplots
         fig = plt.figure(figsize=(20, 12))
@@ -768,6 +775,7 @@ class PChemblPredictor:
 
     def _predict_from_preprocessed(self, eval_dataset):
         """Run prediction using preprocessed tokens (same as eval_pchembl.py)."""
+        prediction_start = time.perf_counter()
         batch_size = self.config.batch_size
         all_preds = []
         all_true_values = []
@@ -788,15 +796,13 @@ class PChemblPredictor:
                 prot_attention_mask = torch.tensor(batch['prot_attention_mask']).to(self.device)
                 mol_input_ids = torch.tensor(batch['mol_input_ids']).to(self.device)
                 pchembl_values = torch.tensor(batch['pchembl_values']).to(self.device)
-                labels = torch.tensor(batch['labels']).to(self.device)
 
-                # Forward pass (EXACTLY like eval_pchembl.py - including labels!)
+                # Forward pass for pChEMBL prediction only.
                 outputs = self.model(
                     prot_input_ids=prot_input_ids,
                     prot_attention_mask=prot_attention_mask,
                     mol_input_ids=mol_input_ids,
-                    labels=labels,                    # ← CRITICAL: Must pass labels like eval_pchembl.py
-                    pchembl_values=pchembl_values     # ← Also pass pchembl_values
+                    train_lm=False,
                 )
 
                 # Extract predictions
@@ -814,11 +820,13 @@ class PChemblPredictor:
         results_df = eval_dataset.to_pandas()
         results_df['Predicted_pChEMBL'] = predictions_denorm
         results_df['pchembl_value_Median'] = true_values_denorm  # Add ground truth
+        self.logger.info("Preprocessed prediction finished in %.2fs", time.perf_counter() - prediction_start)
 
         return results_df
 
     def _predict_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Helper to run prediction on a dataframe"""
+        prediction_start = time.perf_counter()
         # Normalize expected target column names (supports lowercase variants).
         target_fasta_col = self._find_column(df, ["Target_FASTA"])
         uniprot_col = self._find_column(df, ["UniProt_ID", "uniprot_id"])
@@ -872,42 +880,45 @@ class PChemblPredictor:
             invalid_token="[nop]",
         )
 
+        df = df.copy()
+        df["_selfies_input"] = selfies_list
+        predictions = np.zeros(len(df), dtype=np.float32)
         batch_size = self.config.batch_size
-        all_preds = []
-        protein_sequences = df['Target_FASTA'].tolist()
-        num_batches = (len(df) + batch_size - 1) // batch_size
-        
+
         self.logger.info(f"Starting prediction on {len(df)} samples...")
-        
-        for i in tqdm(range(num_batches), desc="Predicting Batches"):
-            batch_slice = slice(i*batch_size, (i+1)*batch_size)
-            batch_selfies = selfies_list[batch_slice]
-            batch_prots = protein_sequences[batch_slice]
-            
-            # 1. Tokenize Proteins
-            prot_ids, prot_mask = self._prepare_protein_embeddings(batch_prots)
-            
-            # 2. Tokenize Molecules
-            mol_ids, mol_mask = tokenize_selfies_for_inference(
-                selfies_list=batch_selfies,
-                mol_tokenizer=self.mol_tokenizer,
-                max_mol_len=self.config.max_mol_len,
+        grouped = df.groupby("Target_FASTA", sort=False).indices
+        for sequence, row_indices in tqdm(grouped.items(), desc="Predicting Targets"):
+            prot_ids, prot_mask = tokenize_protein_sequences_for_inference(
+                sequences=[sequence],
+                prot_tokenizer=self.prot_tokenizer,
+                prot_emb_model=self.config.prot_emb_model,
+                prot_max_length=self.config.prot_max_length,
                 device=self.device,
             )
-            
-            # 3. Predict
             with torch.no_grad():
-                outputs = self.model(
-                    mol_input_ids=mol_ids,
-                    prot_input_ids=prot_ids,
-                    prot_attention_mask=prot_mask,
-                    train_lm=False
-                )
-                preds = outputs['pchembl_predictions'].cpu().numpy()
-                denorm_preds = preds * self.config.pchembl_std + self.config.pchembl_mean
-                all_preds.extend(denorm_preds)
+                protein_embeddings = self.model.encode_protein(prot_ids, prot_mask)
 
-        df['Predicted_pChEMBL'] = all_preds
+            row_indices = list(row_indices)
+            for start in range(0, len(row_indices), batch_size):
+                batch_indices = row_indices[start : start + batch_size]
+                batch_selfies = df.iloc[batch_indices]["_selfies_input"].tolist()
+                mol_ids, _ = tokenize_selfies_for_inference(
+                    selfies_list=batch_selfies,
+                    mol_tokenizer=self.mol_tokenizer,
+                    max_mol_len=self.config.max_mol_len,
+                    device=self.device,
+                )
+                with torch.no_grad():
+                    preds = self.model.predict_pchembl_from_protein_embeddings(
+                        mol_input_ids=mol_ids,
+                        protein_embeddings=protein_embeddings.repeat(len(batch_indices), 1, 1),
+                        prot_attention_mask=prot_mask.repeat(len(batch_indices), 1),
+                    ).cpu().numpy()
+                predictions[batch_indices] = preds * self.config.pchembl_std + self.config.pchembl_mean
+
+        df['Predicted_pChEMBL'] = predictions.tolist()
+        df = df.drop(columns=["_selfies_input"])
+        self.logger.info("Dataframe prediction finished in %.2fs", time.perf_counter() - prediction_start)
         return df
 
     def predict(self):
@@ -916,6 +927,29 @@ class PChemblPredictor:
         
         result_df = self._predict_dataframe(df)
         output_df = self._sanitize_output_dataframe(result_df)
+        metrics = None
+        if "pchembl_value_Median" in result_df.columns:
+            eval_df = result_df.dropna(subset=["pchembl_value_Median", "Predicted_pChEMBL"])
+            if len(eval_df) > 0:
+                metrics = self._summarize_prediction_metrics(
+                    eval_df["pchembl_value_Median"].values,
+                    eval_df["Predicted_pChEMBL"].values,
+                )
+                self._log_metric_summary(
+                    metrics,
+                    include_significance=True,
+                    y_true=eval_df["pchembl_value_Median"].values,
+                    y_pred=eval_df["Predicted_pChEMBL"].values,
+                )
+                metrics_path = self.config.output_file.replace(".csv", "_metrics.json")
+                with open(metrics_path, "w") as handle:
+                    json.dump(metrics, handle, indent=2)
+                self.logger.info("Saved prediction metrics to %s", metrics_path)
+                self._create_plots(
+                    eval_df["pchembl_value_Median"].values,
+                    eval_df["Predicted_pChEMBL"].values,
+                    metrics,
+                )
         
         # Save
         self.logger.info(f"Saving results to {self.config.output_file}")
@@ -953,6 +987,11 @@ def parse_args(argv=None):
     parser.add_argument("--n_emb", type=int, default=1024)
     parser.add_argument("--prot_max_length", type=int, default=1024)
     parser.add_argument("--max_mol_len", type=int, default=200)
+    parser.add_argument("--pchembl_tf_hidden_dim", type=int, default=768)
+    parser.add_argument("--pchembl_tf_num_heads", type=int, default=8)
+    parser.add_argument("--pchembl_tf_group_size", type=int, default=1)
+    parser.add_argument("--pchembl_tf_agg_mode", type=str, choices=["cls", "mean", "mean_all_tok"], default="mean")
+    parser.add_argument("--pchembl_tf_dropout", type=float, default=0.1)
     
     # Prediction Params
     parser.add_argument("--batch_size", type=int, default=64)

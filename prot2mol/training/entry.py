@@ -58,6 +58,13 @@ def parse_arguments(argv=None):
         ),
     )
     training_group.add_argument(
+        "--training_stage",
+        type=str,
+        default="pchembl_only",
+        choices=["lm_only", "pchembl_only", "multitask"],
+        help="Objective family to optimize during training.",
+    )
+    training_group.add_argument(
         "--eval_split",
         type=str,
         default="random",
@@ -100,6 +107,37 @@ def parse_arguments(argv=None):
         action=argparse.BooleanOptionalAction,
         default=True,
         help="If True, pChEMBL loss will not backpropagate into encoder/decoder.",
+    )
+    training_group.add_argument(
+        "--pchembl_tf_hidden_dim",
+        type=int,
+        default=768,
+        help="Hidden dimension used by the FusionDTI-style token-fusion pChEMBL head.",
+    )
+    training_group.add_argument(
+        "--pchembl_tf_num_heads",
+        type=int,
+        default=8,
+        help="Number of attention heads in the token-fusion pChEMBL head.",
+    )
+    training_group.add_argument(
+        "--pchembl_tf_group_size",
+        type=int,
+        default=1,
+        help="Token grouping size used before token fusion in the pChEMBL head.",
+    )
+    training_group.add_argument(
+        "--pchembl_tf_agg_mode",
+        type=str,
+        default="mean",
+        choices=["cls", "mean", "mean_all_tok"],
+        help="Aggregation mode for fused protein and molecule tokens.",
+    )
+    training_group.add_argument(
+        "--pchembl_tf_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout applied in the FusionDTI-style pChEMBL regression MLP.",
     )
 
     output_group = parser.add_argument_group("Output Options")
@@ -201,6 +239,7 @@ def create_run_name(config, dataset_name):
         f"dec_{config.train_decoder_model}",
         f"pchembl_{config.train_pchembl_head}",
         f"stop_pchembl_grad_{config.stop_pchembl_gradients}",
+        f"tf_{config.pchembl_tf_hidden_dim}_{config.pchembl_tf_num_heads}_{config.pchembl_tf_group_size}_{config.pchembl_tf_agg_mode}",
         f"n_layer_{config.n_layer}",
         f"n_head_{config.n_head}",
         f"n_emb_{config.n_emb}",
@@ -209,6 +248,7 @@ def create_run_name(config, dataset_name):
         f"lr_{config.learning_rate}",
         f"bs_{config.train_batch_size}",
         f"mode_{config.training_mode}",
+        f"stage_{config.training_stage}",
     ]
     run_components.append(f"layers_{config.n_layer}")
     run_components.append(f"heads_{config.n_head}")
@@ -226,6 +266,7 @@ def setup_logging(log_level):
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        force=True,
         handlers=handlers,
     )
     logging.getLogger("transformers").setLevel(logging.WARNING)

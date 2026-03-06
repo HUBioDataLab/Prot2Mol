@@ -1,4 +1,3 @@
-import math
 import os
 import inspect
 
@@ -6,6 +5,7 @@ import torch
 from torch.distributed import init_process_group
 from transformers import TrainingArguments
 
+from ..io.hf_utils import save_model_config
 from .trainer import GPT2_w_crs_attn_Trainer
 
 
@@ -55,6 +55,7 @@ class TrainingRunner:
         train_dataset,
         eval_dataset,
         compute_metrics,
+        compute_generation_metrics,
         preprocess_logits_for_metrics,
         run_name: str,
         output_dir: str,
@@ -63,11 +64,10 @@ class TrainingRunner:
     ):
         """Create configured HF Trainer for current run."""
         training_args = self._create_training_args(run_name, output_dir, training_config)
-        pchembl_only_training = self._is_pchembl_only_training(model_config)
+        training_stage = training_config.get("training_stage", model_config.get("training_stage", "multitask"))
 
         if self.logger is not None:
-            mode = "pChEMBL head only (Stage 1)" if pchembl_only_training else "Full training (Stage 2)"
-            self.logger.info("Training mode: %s", mode)
+            self.logger.info("Training stage: %s", training_stage)
             self.logger.info("Initializing trainer...")
 
         trainer = GPT2_w_crs_attn_Trainer(
@@ -76,8 +76,9 @@ class TrainingRunner:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             compute_metrics=compute_metrics,
+            compute_generation_metrics=compute_generation_metrics,
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-            pchembl_only_mode=pchembl_only_training,
+            training_stage=training_stage,
             ignore_mismatched_optimizer=training_config.get("ignore_mismatched_optimizer", False),
         )
 
@@ -91,7 +92,7 @@ class TrainingRunner:
         return trainer
 
     def run(self, trainer, training_config: dict, output_dir: str):
-        """Execute training, evaluation, and model save."""
+        """Execute training and model save."""
         resume_from_checkpoint = training_config.get("resume_from_checkpoint")
         if resume_from_checkpoint:
             if self.logger is not None:
@@ -104,19 +105,25 @@ class TrainingRunner:
 
         if self.logger is not None:
             self.logger.info("Training finished successfully")
-            self.logger.info("Evaluating model...")
-
-        eval_results = trainer.evaluate()
-        eval_loss = eval_results.get("eval_loss")
-        if eval_loss is not None and self.logger is not None:
-            self.logger.info("Perplexity: %.2f", math.exp(eval_loss))
 
         if self.logger is not None:
             self.logger.info("Saving model to %s", output_dir)
         trainer.save_model(output_dir)
+        model_config = getattr(trainer.model, "_config", None)
+        if model_config is None:
+            model_config = getattr(getattr(trainer, "model_wrapped", None), "_config", None)
+        if model_config is not None:
+            save_model_config(output_dir, model_config, logger=self.logger)
         if self.logger is not None:
             self.logger.info("Model saved successfully")
 
+        eval_results = {}
+        for entry in reversed(trainer.state.log_history):
+            entry_eval = {key: value for key, value in entry.items() if key.startswith("eval_")}
+            if entry_eval:
+                eval_results.update(entry_eval)
+            elif eval_results:
+                break
         return eval_results
 
     def _create_training_args(self, run_name: str, output_dir: str, training_config: dict):
@@ -155,11 +162,3 @@ class TrainingRunner:
         else:
             args_kwargs["eval_strategy"] = "epoch"
         return TrainingArguments(**args_kwargs)
-
-    @staticmethod
-    def _is_pchembl_only_training(model_config: dict) -> bool:
-        return (
-            not model_config.get("train_encoder_model", False)
-            and not model_config.get("train_decoder_model", False)
-            and model_config.get("train_pchembl_head", True)
-        )

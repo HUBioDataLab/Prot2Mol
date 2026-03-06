@@ -1,11 +1,14 @@
 # Standard library imports
+from collections import Counter
 import logging
 import os
 import sys
+from typing import Dict
 
 from torch.distributed import destroy_process_group
 
 # Third-party library imports
+import numpy as np
 import torch
 import wandb
 
@@ -17,8 +20,14 @@ from prot2mol.data.pipeline import (
     get_processed_data_path,
     load_processed_dataset,
     split_train_eval_dataset,
+    tokenize_protein_sequences_for_inference,
 )
-from prot2mol.io.hf_utils import load_molgen_tokenizer
+from prot2mol.chem import generate_morgan_fingerprints_parallel
+from prot2mol.io.hf_utils import (
+    filter_legacy_pchembl_head_state,
+    load_molgen_tokenizer,
+    load_saved_model_config,
+)
 from prot2mol.core.model import create_prot2mol_model
 from prot2mol.core.protein_encoders import get_protein_tokenizer
 from prot2mol.training.entry import (
@@ -29,13 +38,11 @@ from prot2mol.training.entry import (
 )
 from prot2mol.training.distributed import resolve_distributed_context
 from prot2mol.training.metrics import (
-    compute_lm_metrics,
+    compute_generation_metrics,
     compute_pchembl_metrics,
     preprocess_logits_for_metrics as preprocess_logits_for_metrics_fn,
 )
-from prot2mol.training.normalization_service import NormalizationService
 from prot2mol.training.training_runner import TrainingRunner
-from prot2mol.training.vector_service import VectorService
 
 # Set environment variables
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -63,8 +70,14 @@ class TrainingScript:
             "train_encoder_model": config.train_encoder_model,
             "train_decoder_model": config.train_decoder_model,
             "train_pchembl_head": config.train_pchembl_head,
+            "training_stage": config.training_stage,
             "pchembl_huber_delta": config.pchembl_huber_delta,
             "stop_pchembl_gradients": config.stop_pchembl_gradients,
+            "pchembl_tf_hidden_dim": config.pchembl_tf_hidden_dim,
+            "pchembl_tf_num_heads": config.pchembl_tf_num_heads,
+            "pchembl_tf_group_size": config.pchembl_tf_group_size,
+            "pchembl_tf_agg_mode": config.pchembl_tf_agg_mode,
+            "pchembl_tf_dropout": config.pchembl_tf_dropout,
         }
         self.training_config = {
             "train_batch_size": config.train_batch_size,
@@ -82,6 +95,7 @@ class TrainingScript:
             "eval_split_ratio": config.eval_split_ratio,
             "split_seed": config.split_seed,
         }
+        self._validate_training_stage()
 
         self.selfies_path = selfies_path
         self.pretrain_save_to = pretrain_save_to
@@ -89,7 +103,12 @@ class TrainingScript:
         self.run_name = run_name
         self.train_smiles_list = []
         self.eval_reference_smiles = []
+        self.dataset_stats: Dict[str, object] = {}
         self.trainer = None
+        self.training_vec = None
+        self.pchembl_mean = 0.0
+        self.pchembl_std = 1.0
+        self.pchembl_threshold = 6.0
 
         if self.training_config["resume_from_checkpoint"]:
             self.logger.info(
@@ -109,19 +128,6 @@ class TrainingScript:
                     "or --load_pretrained_model to fine-tune on a new dataset."
                 )
 
-        norm_stats = NormalizationService(
-            selfies_path=self.selfies_path,
-            train_pchembl_head=self.model_config["train_pchembl_head"],
-            pchembl_huber_delta_raw=config.pchembl_huber_delta,
-            logger=self.logger,
-        ).load_or_compute()
-        self.pchembl_mean = norm_stats.pchembl_mean
-        self.pchembl_std = norm_stats.pchembl_std
-        self.pchembl_threshold = norm_stats.pchembl_threshold
-        self.model_config["pchembl_huber_delta"] = norm_stats.pchembl_huber_delta_norm
-
-        self.training_vec = VectorService(selfies_path=self.selfies_path, logger=self.logger).load_or_generate()
-
         self._init_tokenizers()
         self._init_models()
         self.training_runner = TrainingRunner(
@@ -135,6 +141,161 @@ class TrainingScript:
     def _extract_smiles_list(self, data_source, drop_invalid=False):
         """Extract canonical SMILES using shared data-pipeline helpers."""
         return extract_smiles_list(data_source, drop_invalid=drop_invalid, logger=self.logger)
+
+    def _validate_training_stage(self):
+        stage = self.training_config["training_stage"]
+        if stage in {"pchembl_only", "multitask"} and not self.model_config["train_pchembl_head"]:
+            raise ValueError(
+                f"training_stage={stage} requires --train_pchembl_head to be enabled."
+            )
+        if stage in {"lm_only", "multitask"} and not (
+            self.model_config["train_encoder_model"] or self.model_config["train_decoder_model"]
+        ):
+            raise ValueError(
+                f"training_stage={stage} requires at least one of encoder/decoder to be trainable."
+            )
+
+    def _stage_has_lm(self) -> bool:
+        return self.training_config["training_stage"] in {"lm_only", "multitask"}
+
+    def _stage_has_pchembl(self) -> bool:
+        return self.training_config["training_stage"] in {"pchembl_only", "multitask"}
+
+    def _apply_split_targets(self, dataset_split):
+        if not self._stage_has_pchembl():
+            def _neutralize(batch):
+                size = len(batch["pchembl_value_Median"])
+                return {
+                    "pchembl_values": [0.0] * size,
+                    "train_lm": [True] * size,
+                }
+
+            return dataset_split.map(
+                _neutralize,
+                batched=True,
+                num_proc=self.training_config.get("dataloader_num_workers"),
+                desc="Applying neutral LM-only targets",
+            )
+
+        def _normalize(batch):
+            raw_values = batch["pchembl_value_Median"]
+            normalized = [
+                (float(val) - self.pchembl_mean) / (self.pchembl_std + 1e-8)
+                for val in raw_values
+            ]
+            if self.training_config["training_stage"] == "multitask":
+                train_lm = [float(val) >= self.pchembl_threshold for val in raw_values]
+            else:
+                train_lm = [False] * len(raw_values)
+            return {
+                "pchembl_values": normalized,
+                "train_lm": train_lm,
+            }
+
+        return dataset_split.map(
+            _normalize,
+            batched=True,
+            num_proc=self.training_config.get("dataloader_num_workers"),
+            desc="Applying split-specific pChEMBL normalization",
+        )
+
+    def _compute_split_normalization(self):
+        if not self._stage_has_pchembl():
+            self.pchembl_mean = 0.0
+            self.pchembl_std = 1.0
+            self.pchembl_threshold = 6.0
+            self.model_config["pchembl_huber_delta"] = self.model._config["pchembl_huber_delta"]
+            self.model._config["pchembl_mean"] = self.pchembl_mean
+            self.model._config["pchembl_std"] = self.pchembl_std
+            self.model._config["pchembl_threshold"] = self.pchembl_threshold
+            return
+
+        values = np.asarray(self.train_data["pchembl_value_Median"], dtype=np.float32)
+        values = values[~np.isnan(values)]
+        if values.size == 0:
+            raise ValueError("Training split does not contain valid pChEMBL values.")
+
+        self.pchembl_mean = float(values.mean())
+        self.pchembl_std = float(values.std(ddof=0))
+        self.pchembl_threshold = 6.0
+        normalized_delta = (
+            self.training_config["pchembl_huber_delta"] / self.pchembl_std
+            if self.pchembl_std > 0
+            else self.training_config["pchembl_huber_delta"]
+        )
+        self.model._config["pchembl_huber_delta"] = normalized_delta
+        self.model._config["pchembl_mean"] = self.pchembl_mean
+        self.model._config["pchembl_std"] = self.pchembl_std
+        self.model._config["pchembl_threshold"] = self.pchembl_threshold
+        self.model_config["pchembl_huber_delta"] = normalized_delta
+
+        self.logger.info(
+            "Train-split pChEMBL stats: mean=%.4f std=%.4f threshold=%.1f delta_norm=%.4f",
+            self.pchembl_mean,
+            self.pchembl_std,
+            self.pchembl_threshold,
+            normalized_delta,
+        )
+
+    def _build_train_vectors(self):
+        if not self.train_smiles_list:
+            self.training_vec = None
+            return
+        self.logger.info(
+            "Generating train-split Morgan fingerprints for %s molecules",
+            len(self.train_smiles_list),
+        )
+        self.training_vec = generate_morgan_fingerprints_parallel(
+            smiles=self.train_smiles_list,
+            radius=2,
+            nBits=1024,
+            n_jobs=None,
+        )
+
+    def _count_unique_proteins(self, dataset_split) -> int:
+        if hasattr(dataset_split, "column_names"):
+            if "Target_CHEMBL_ID" in dataset_split.column_names:
+                return len(set(str(v) for v in dataset_split["Target_CHEMBL_ID"]))
+            if "Target_FASTA" in dataset_split.column_names:
+                return len(set(str(v) for v in dataset_split["Target_FASTA"]))
+        return 0
+
+    def _update_dataset_stats(self, total_samples: int):
+        train_lm_flags = self.train_data["train_lm"] if "train_lm" in self.train_data.column_names else []
+        train_lm_positive = int(sum(bool(flag) for flag in train_lm_flags))
+        self.dataset_stats = {
+            "dataset_name": self.dataset_name,
+            "dataset_source_path": os.path.abspath(self.selfies_path),
+            "dataset_total_samples": int(total_samples),
+            "train_samples": int(len(self.train_data)),
+            "eval_samples": int(len(self.test_data)),
+            "train_lm_positive_samples": train_lm_positive,
+            "train_unique_proteins": self._count_unique_proteins(self.train_data),
+            "eval_unique_proteins": self._count_unique_proteins(self.test_data),
+            "train_unique_molecules": len(set(self.train_smiles_list)),
+            "eval_unique_molecules": len(set(self.eval_reference_smiles)),
+            "eval_split": self.training_config["eval_split"],
+            "eval_split_ratio": float(self.training_config["eval_split_ratio"]),
+            "split_seed": int(self.training_config["split_seed"]),
+            "pchembl_mean": float(self.pchembl_mean),
+            "pchembl_std": float(self.pchembl_std),
+            "pchembl_threshold": float(self.pchembl_threshold),
+        }
+        self.model._config.update(self.dataset_stats)
+        self.model_config.update(self.dataset_stats)
+
+        self.logger.info(
+            "Dataset stats: total=%s train=%s eval=%s train_unique_proteins=%s eval_unique_proteins=%s "
+            "train_unique_molecules=%s eval_unique_molecules=%s train_lm_positive=%s",
+            self.dataset_stats["dataset_total_samples"],
+            self.dataset_stats["train_samples"],
+            self.dataset_stats["eval_samples"],
+            self.dataset_stats["train_unique_proteins"],
+            self.dataset_stats["eval_unique_proteins"],
+            self.dataset_stats["train_unique_molecules"],
+            self.dataset_stats["eval_unique_molecules"],
+            self.dataset_stats["train_lm_positive_samples"],
+        )
 
     def _init_tokenizers(self):
         """Initialize tokenizers for proteins and molecules."""
@@ -185,6 +346,9 @@ class TrainingScript:
             state_dict = load_file(model_file)
         else:
             state_dict = torch.load(model_file, map_location="cpu")
+
+        saved_model_config = load_saved_model_config(pretrained_model_path, logger=self.logger)
+        state_dict = filter_legacy_pchembl_head_state(state_dict, saved_model_config, logger=self.logger)
 
         missing_keys, unexpected_keys = self.model.load_state_dict(state_dict, strict=False)
         if missing_keys:
@@ -238,6 +402,9 @@ class TrainingScript:
             num_proc=self.training_config.get("dataloader_num_workers"),
             logger=self.logger,
         )
+        self._compute_split_normalization()
+        self.train_data = self._apply_split_targets(self.train_data)
+        self.test_data = self._apply_split_targets(self.test_data)
 
         self.logger.info(
             "Dataset split: %s train, %s test samples",
@@ -253,6 +420,8 @@ class TrainingScript:
             self.logger.warning("Training data does not contain valid SMILES entries")
         if not self.eval_reference_smiles:
             self.logger.warning("Evaluation data does not contain valid SMILES entries")
+        self._build_train_vectors()
+        self._update_dataset_stats(total_samples=len(full_data))
 
     def ddp_setup(self):
         """Initialize DDP with proper error handling and device setup."""
@@ -261,17 +430,74 @@ class TrainingScript:
     def preprocess_logits_for_metrics(self, logits, labels):
         return preprocess_logits_for_metrics_fn(logits, labels, logger=self.logger)
 
-    def _compute_lm_metrics(self, predictions, labels):
-        return compute_lm_metrics(
-            predictions=predictions,
-            labels=labels,
+    def compute_generation_eval_metrics(self, eval_dataset=None):
+        """Compute real generation metrics on the evaluation proteins."""
+        if not self._stage_has_lm():
+            return {}
+        if self.global_rank != 0:
+            return {}
+
+        target_dataset = eval_dataset or self.test_data
+        if target_dataset is None or len(target_dataset) == 0:
+            return {}
+        if "Target_FASTA" not in target_dataset.column_names:
+            self.logger.warning("Evaluation dataset missing Target_FASTA; skipping generation metrics.")
+            return {}
+
+        model = getattr(self.trainer.model, "module", self.trainer.model)
+        model_device = next(model.parameters()).device
+        sequences = list(target_dataset["Target_FASTA"])
+        sequence_counts = Counter(str(sequence) for sequence in sequences)
+        generated_batches = []
+        batch_size = self.training_config["valid_batch_size"]
+        generation_kwargs = {
+            "max_length": self.model_config["max_mol_len"],
+            "do_sample": True,
+            "temperature": 1.0,
+            "top_p": 0.9,
+            "pad_token_id": 1,
+            "bos_token_id": 1,
+            "eos_token_id": self.mol_tokenizer.eos_token_id,
+        }
+
+        cuda_devices = [model_device.index] if model_device.type == "cuda" and model_device.index is not None else []
+        with torch.no_grad():
+            with torch.random.fork_rng(devices=cuda_devices):
+                torch.manual_seed(self.training_config["split_seed"])
+                for sequence, count in sequence_counts.items():
+                    prot_input_ids, prot_attention_mask = tokenize_protein_sequences_for_inference(
+                        sequences=[sequence],
+                        prot_tokenizer=self.prot_tokenizer,
+                        prot_emb_model=self.model_config["prot_emb_model"],
+                        prot_max_length=self.model_config["prot_max_length"],
+                        device=model_device,
+                    )
+                    protein_embeddings = model.encode_protein(prot_input_ids, prot_attention_mask)
+                    remaining = count
+                    while remaining > 0:
+                        current_batch = min(batch_size, remaining)
+                        generated = model.generate_from_protein_embeddings(
+                            protein_embeddings=protein_embeddings.repeat(current_batch, 1, 1),
+                            prot_attention_mask=prot_attention_mask.repeat(current_batch, 1),
+                            **generation_kwargs,
+                        )
+                        generated_batches.append(generated.detach().cpu())
+                        remaining -= current_batch
+
+        if not generated_batches:
+            return {}
+
+        generated_token_ids = torch.cat(generated_batches, dim=0).numpy()
+        metrics = compute_generation_metrics(
+            generated_token_ids=generated_token_ids,
             mol_tokenizer=self.mol_tokenizer,
-            eval_reference_smiles=getattr(self, "eval_reference_smiles", None),
+            eval_reference_smiles=self.eval_reference_smiles,
             train_smiles_list=self.train_smiles_list,
             training_vec=self.training_vec,
-            global_rank=self.global_rank,
             logger=self.logger,
         )
+        metrics["lm_generated_count"] = int(generated_token_ids.shape[0])
+        return metrics
 
     def _compute_pchembl_metrics(self, pchembl_predictions, pchembl_targets, group_ids=None):
         return compute_pchembl_metrics(
@@ -280,52 +506,18 @@ class TrainingScript:
             pchembl_mean=self.pchembl_mean,
             pchembl_std=self.pchembl_std,
             group_ids=group_ids,
+            inputs_are_normalized=True,
             logger=self.logger,
         )
 
     def compute_metrics(self, eval_pred):
-        """Compute evaluation metrics for language modeling and pChEMBL prediction."""
+        """Compute evaluation metrics for pChEMBL prediction."""
         try:
-            predictions = eval_pred.predictions
-            labels = eval_pred.label_ids
             metrics = {}
-
-            if predictions is None:
-                self.logger.warning(
-                    "Rank %s: Predictions is None, skipping metrics computation",
-                    self.global_rank,
-                )
-                return {}
-
-            if predictions is not None and labels is not None:
-                if hasattr(predictions, "cpu"):
-                    predictions_np = predictions.cpu().numpy()
-                elif hasattr(predictions, "numpy"):
-                    predictions_np = predictions.numpy()
-                else:
-                    predictions_np = predictions
-
-                lm_metrics = self._compute_lm_metrics(predictions_np, labels)
-                if lm_metrics:
-                    metrics.update(lm_metrics)
-                else:
-                    self.logger.info(
-                        "Rank %s: No LM metrics (batch had no positive samples)",
-                        self.global_rank,
-                    )
 
             if self.trainer is not None:
                 pchembl_preds, pchembl_targets, group_ids = self.trainer.get_pchembl_predictions()
                 if pchembl_preds is not None and pchembl_targets is not None:
-                    if predictions is not None:
-                        lm_sample_count = len(predictions_np) if "predictions_np" in locals() else predictions.shape[0]
-                        pchembl_sample_count = len(pchembl_preds)
-                        if lm_sample_count != pchembl_sample_count:
-                            pchembl_preds = pchembl_preds[:lm_sample_count]
-                            pchembl_targets = pchembl_targets[:lm_sample_count]
-                            if group_ids is not None:
-                                group_ids = group_ids[:lm_sample_count]
-
                     pchembl_metrics = self._compute_pchembl_metrics(pchembl_preds, pchembl_targets, group_ids)
                     metrics.update(pchembl_metrics)
                     self.trainer.clear_pchembl_predictions()
@@ -380,6 +572,7 @@ class TrainingScript:
                 train_dataset=self.train_data,
                 eval_dataset=self.test_data,
                 compute_metrics=self.compute_metrics,
+                compute_generation_metrics=self.compute_generation_eval_metrics,
                 preprocess_logits_for_metrics=self.preprocess_logits_for_metrics,
                 run_name=self.run_name,
                 output_dir=self.pretrain_save_to,

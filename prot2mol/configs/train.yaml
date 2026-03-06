@@ -15,6 +15,7 @@ train:
   dataloader_num_workers: 4
   weight_decay: 0.01
   training_mode: auto
+  training_stage: pchembl_only
   eval_split: random
   eval_split_ratio: 0.01
   split_seed: 42
@@ -24,6 +25,11 @@ train:
   train_decoder_model: false
   train_pchembl_head: true
   stop_pchembl_gradients: true
+  pchembl_tf_hidden_dim: 768
+  pchembl_tf_num_heads: 8
+  pchembl_tf_group_size: 1
+  pchembl_tf_agg_mode: mean
+  pchembl_tf_dropout: 0.1
 
   save_dir: /gpfs/projects/etur29/atabey/saved_models
   run_name_suffix: null

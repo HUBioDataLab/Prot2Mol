@@ -104,6 +104,38 @@ def compute_lm_metrics(
         return {}
 
 
+def compute_generation_metrics(
+    generated_token_ids,
+    mol_tokenizer,
+    eval_reference_smiles,
+    train_smiles_list,
+    training_vec,
+    logger=None,
+):
+    """Compute chemistry/generation metrics from real generated token ids."""
+    try:
+        if hasattr(generated_token_ids, "tolist"):
+            generated_token_ids = generated_token_ids.tolist()
+        decoded_preds = mol_tokenizer.batch_decode(
+            generated_token_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+        generation_metrics = metrics_calculation(
+            predictions=decoded_preds,
+            references=eval_reference_smiles,
+            train_data=train_smiles_list,
+            train_vec=training_vec,
+            training=False,
+            return_details=False,
+        )
+        return {f"lm_{key}": value for key, value in generation_metrics.items()}
+    except Exception as exc:
+        if logger is not None:
+            logger.error("Error computing real generation metrics: %s", exc, exc_info=True)
+        return {}
+
+
 def _pairwise_accuracy(y_pred, y_true, group_ids, max_pairs_per_group=200):
     """Estimate pairwise ranking accuracy within groups."""
     correct = 0
@@ -161,6 +193,7 @@ def compute_pchembl_metrics(
     pchembl_mean: float,
     pchembl_std: float,
     group_ids: Optional[np.ndarray] = None,
+    inputs_are_normalized: bool = True,
     logger=None,
 ):
     """Compute regression/ranking metrics for pChEMBL predictions."""
@@ -181,19 +214,27 @@ def compute_pchembl_metrics(
                 logger.warning("No valid pChEMBL predictions/targets found (all NaN)")
             return {}
 
-        valid_preds = pchembl_predictions[valid_mask]
-        valid_true = pchembl_targets[valid_mask]
-        pred_raw = valid_preds * (pchembl_std + 1e-8) + pchembl_mean
-        true_raw = valid_true * (pchembl_std + 1e-8) + pchembl_mean
+        valid_preds = np.asarray(pchembl_predictions[valid_mask], dtype=np.float32)
+        valid_true = np.asarray(pchembl_targets[valid_mask], dtype=np.float32)
+        if inputs_are_normalized:
+            pred_norm = valid_preds
+            true_norm = valid_true
+            pred_raw = pred_norm * (pchembl_std + 1e-8) + pchembl_mean
+            true_raw = true_norm * (pchembl_std + 1e-8) + pchembl_mean
+        else:
+            pred_raw = valid_preds
+            true_raw = valid_true
+            pred_norm = (pred_raw - pchembl_mean) / (pchembl_std + 1e-8)
+            true_norm = (true_raw - pchembl_mean) / (pchembl_std + 1e-8)
 
-        mse = mean_squared_error(valid_true, valid_preds)
-        mae = mean_absolute_error(valid_true, valid_preds)
+        mse = mean_squared_error(true_norm, pred_norm)
+        mae = mean_absolute_error(true_norm, pred_norm)
         rmse = np.sqrt(mse)
         mse_raw = mean_squared_error(true_raw, pred_raw)
         mae_raw = mean_absolute_error(true_raw, pred_raw)
         rmse_raw = np.sqrt(mse_raw)
         try:
-            r2 = r2_score(valid_true, valid_preds)
+            r2 = r2_score(true_norm, pred_norm)
         except ValueError:
             r2 = float("nan")
 
@@ -202,11 +243,11 @@ def compute_pchembl_metrics(
             "pchembl_mae": mae,
             "pchembl_rmse": rmse,
             "pchembl_r2": r2,
-            "pchembl_valid_count": len(valid_preds),
-            "pchembl_mean_pred": np.mean(valid_preds),
-            "pchembl_std_pred": np.std(valid_preds),
-            "pchembl_mean_true": np.mean(valid_true),
-            "pchembl_std_true": np.std(valid_true),
+            "pchembl_valid_count": len(pred_norm),
+            "pchembl_mean_pred": np.mean(pred_norm),
+            "pchembl_std_pred": np.std(pred_norm),
+            "pchembl_mean_true": np.mean(true_norm),
+            "pchembl_std_true": np.std(true_norm),
             "pchembl_mse_raw": mse_raw,
             "pchembl_mae_raw": mae_raw,
             "pchembl_rmse_raw": rmse_raw,

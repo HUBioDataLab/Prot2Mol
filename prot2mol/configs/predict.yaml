@@ -13,6 +13,11 @@ predict:
   n_emb: 1024
   prot_max_length: 1024
   max_mol_len: 200
+  pchembl_tf_hidden_dim: 768
+  pchembl_tf_num_heads: 8
+  pchembl_tf_group_size: 1
+  pchembl_tf_agg_mode: mean
+  pchembl_tf_dropout: 0.1
 
   batch_size: 64
   pchembl_mean: 5.924

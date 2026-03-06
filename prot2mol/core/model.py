@@ -1,8 +1,13 @@
+import logging
+import math
+from typing import Tuple
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers import GPT2Config, GPT2LMHeadModel
-from .protein_encoders import get_protein_encoder, get_encoder_size
-import logging
+
+from .protein_encoders import get_encoder_size, get_protein_encoder
 
 
 
@@ -121,21 +126,15 @@ class Prot2MolModel(nn.Module):
         self.molecule_decoder = GPT2LMHeadModel(self.gpt_config)
         
         # Initialize auxiliary pChEMBL prediction head
-        self.logger.info("Initializing auxiliary pChEMBL prediction head")
-        hidden_size = encoder_dim  # Use same dimension as decoder hidden states
-        pair_dim = self._config.get("affinity_pair_dim", min(256, hidden_size))
-        pair_heads = self._config.get("affinity_pair_heads", min(8, self._config['n_head']))
-        pair_layers = self._config.get("affinity_pair_layers", 2)
-        max_prot_tokens = self._config.get("affinity_max_prot_tokens", 256)
-        attn_bins = self._config.get("affinity_attn_bins", 16)
-        self.pchembl_head = AffinityHead(
+        self.logger.info("Initializing FusionDTI-style pChEMBL prediction head")
+        hidden_size = encoder_dim
+        self.pchembl_head = FusionDTIPChemblHead(
             d_model=hidden_size,
-            d_pair=pair_dim,
-            n_heads=pair_heads,
-            n_layers=pair_layers,
-            max_prot_tokens=max_prot_tokens,
-            attn_bins=attn_bins,
-            dropout=self._config.get("affinity_dropout", 0.1)
+            hidden_dim=self._config.get("pchembl_tf_hidden_dim", 768),
+            num_heads=self._config.get("pchembl_tf_num_heads", 8),
+            group_size=self._config.get("pchembl_tf_group_size", 1),
+            agg_mode=self._config.get("pchembl_tf_agg_mode", "mean"),
+            dropout=self._config.get("pchembl_tf_dropout", 0.1),
         )
         self.logger.info(
             "pChEMBL gradient backprop to encoder/decoder: %s",
@@ -168,8 +167,122 @@ class Prot2MolModel(nn.Module):
     def config(self):
         """Return the GPT2 configuration for compatibility with Transformers library."""
         return self.gpt_config
-        
-    def forward(self, mol_input_ids, prot_input_ids, prot_attention_mask, labels=None, pchembl_values=None, train_lm=True, pchembl_only_mode=False):
+
+    def encode_protein(self, prot_input_ids, prot_attention_mask):
+        """Encode protein tokens once so callers can reuse embeddings across batches."""
+        with torch.set_grad_enabled(self.protein_encoder.encoder_model.training):
+            return self.protein_encoder.encode(
+                sequences=prot_input_ids,
+                attention_mask=prot_attention_mask,
+            )
+
+    def _prepare_lm_labels(self, labels=None, train_lm=True, pchembl_only_mode=False):
+        labels_for_lm = None
+        if labels is not None and not pchembl_only_mode:
+            if isinstance(train_lm, torch.Tensor):
+                labels_for_lm = labels.clone()
+                labels_for_lm[~train_lm] = -100
+                if (labels_for_lm == -100).all():
+                    labels_for_lm = None
+            elif train_lm:
+                labels_for_lm = labels
+        return labels_for_lm
+
+    def _compute_lm_loss(self, logits, labels):
+        if labels is None:
+            return None
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+        return loss_fct(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+        )
+
+    def _decode_from_protein_embeddings(
+        self,
+        mol_input_ids,
+        protein_embeddings,
+        prot_attention_mask,
+        labels=None,
+        train_lm=True,
+        pchembl_only_mode=False,
+        compute_pchembl=True,
+    ):
+        labels_for_lm = self._prepare_lm_labels(
+            labels=labels,
+            train_lm=train_lm,
+            pchembl_only_mode=pchembl_only_mode,
+        )
+
+        if hasattr(self.molecule_decoder, "transformer") and hasattr(self.molecule_decoder, "lm_head"):
+            with torch.set_grad_enabled(self.molecule_decoder.training):
+                decoder_outputs = self.molecule_decoder.transformer(
+                    input_ids=mol_input_ids,
+                    attention_mask=(mol_input_ids != self._config["mol_tokenizer"].pad_token_id).float(),
+                    encoder_hidden_states=protein_embeddings.detach() if pchembl_only_mode else protein_embeddings,
+                    encoder_attention_mask=prot_attention_mask,
+                    output_hidden_states=False,
+                    output_attentions=False,
+                    return_dict=True,
+                )
+
+            hidden_states = decoder_outputs.last_hidden_state
+            logits = self.molecule_decoder.lm_head(hidden_states)
+            lm_loss = self._compute_lm_loss(logits, labels_for_lm)
+        else:
+            with torch.set_grad_enabled(self.molecule_decoder.training):
+                decoder_outputs = self.molecule_decoder(
+                    input_ids=mol_input_ids,
+                    attention_mask=(mol_input_ids != self._config["mol_tokenizer"].pad_token_id).float(),
+                    encoder_hidden_states=protein_embeddings.detach() if pchembl_only_mode else protein_embeddings,
+                    encoder_attention_mask=prot_attention_mask,
+                    labels=labels_for_lm,
+                    output_hidden_states=True,
+                    output_attentions=False,
+                    return_dict=True,
+                )
+            hidden_states = decoder_outputs.hidden_states[-1]
+            logits = decoder_outputs.logits
+            lm_loss = decoder_outputs.loss
+
+        mol_attention_mask = (mol_input_ids != self._config["mol_tokenizer"].pad_token_id).float()
+        pchembl_predictions = None
+        should_run_pchembl = compute_pchembl and self._config.get("train_pchembl_head", True)
+        if should_run_pchembl:
+            stop_pchembl_gradients = self._config.get("stop_pchembl_gradients", True)
+            block_backprop = pchembl_only_mode or stop_pchembl_gradients
+
+            head_prot = protein_embeddings.detach() if block_backprop else protein_embeddings
+            head_mol = hidden_states.detach() if block_backprop else hidden_states
+            pchembl_predictions = self.pchembl_head(
+                head_prot,
+                head_mol,
+                prot_attention_mask,
+                mol_attention_mask,
+            )
+
+        outputs = {
+            "lm_loss": lm_loss,
+            "logits": logits,
+            "pchembl_predictions": pchembl_predictions,
+            "last_hidden_state": hidden_states,
+        }
+        if lm_loss is not None:
+            outputs["loss"] = lm_loss
+        return {key: value for key, value in outputs.items() if value is not None}
+
+    def forward(
+        self,
+        mol_input_ids,
+        prot_input_ids,
+        prot_attention_mask,
+        labels=None,
+        pchembl_values=None,
+        train_lm=True,
+        pchembl_only_mode=False,
+        compute_pchembl=True,
+    ):
         """
         Forward pass for language modeling and pChEMBL prediction.
         
@@ -193,93 +306,38 @@ class Prot2MolModel(nn.Module):
         Returns:
             Dict with logits, optional lm_loss, and optional pchembl_predictions
         """
-        # Encode protein sequences
-        with torch.set_grad_enabled(self.protein_encoder.encoder_model.training):
-            protein_embeddings = self.protein_encoder.encode(
-                sequences=prot_input_ids,
-                attention_mask=prot_attention_mask
-            )
-        
-        # Handle train_lm as either boolean or per-sample tensor
-        # If train_lm is a tensor, we need to mask labels for samples where train_lm is False
-        labels_for_lm = None
-        if labels is not None and not pchembl_only_mode:
-            if isinstance(train_lm, torch.Tensor):
-                # Per-sample train_lm: mask labels for samples where train_lm is False
-                labels_for_lm = labels.clone()
-                # For samples where train_lm is False, set all labels to -100
-                labels_for_lm[~train_lm] = -100
-                
-                # If ALL labels are -100 (all negative samples), don't compute LM loss
-                if (labels_for_lm == -100).all():
-                    labels_for_lm = None
-            elif train_lm:  # train_lm is a boolean True
-                labels_for_lm = labels
-            # else: train_lm is False, labels_for_lm stays None
-        
-        # Determine if we need cross-attention weights for the pChEMBL head
-        should_run_pchembl = self._config.get('train_pchembl_head', True)
-        output_attentions = bool(should_run_pchembl)
-        
-        # Forward pass through GPT2 decoder with cross-attention
-        with torch.set_grad_enabled(self.molecule_decoder.training):
-            decoder_outputs = self.molecule_decoder(
-                input_ids=mol_input_ids,
-                attention_mask=(mol_input_ids != self._config['mol_tokenizer'].pad_token_id).float(),
-                encoder_hidden_states=protein_embeddings.detach() if pchembl_only_mode else protein_embeddings,
-                encoder_attention_mask=prot_attention_mask,
-                labels=labels_for_lm,
-                output_hidden_states=True,
-                output_attentions=output_attentions,
-                return_dict=True
-            )
-        
-        # Extract final hidden states for pChEMBL prediction
-        # Use mean pooling over sequence length (excluding padding tokens)
-        hidden_states = decoder_outputs.hidden_states[-1]  # [batch_size, seq_len, hidden_size]
-        
-        # Create attention mask for molecule tokens to exclude padding
-        mol_attention_mask = (mol_input_ids != self._config['mol_tokenizer'].pad_token_id).float()
-        
-        # Predict pChEMBL values for ALL samples (positive and negative)
-        # Only compute if the head is active/trainable
-        pchembl_predictions = None
-        if should_run_pchembl:
-            # Note: pChEMBL predictions are always computed, regardless of train_lm flag
-            stop_pchembl_gradients = self._config.get("stop_pchembl_gradients", True)
-            block_backprop = pchembl_only_mode or stop_pchembl_gradients
-
-            head_prot = protein_embeddings.detach() if block_backprop else protein_embeddings
-            head_mol = hidden_states.detach() if block_backprop else hidden_states
-            cross_attn = None
-            if decoder_outputs.cross_attentions is not None:
-                cross_attn = self._reduce_cross_attn(decoder_outputs.cross_attentions)
-                if block_backprop:
-                    cross_attn = cross_attn.detach()
-            pchembl_predictions = self.pchembl_head(
-                head_prot,
-                head_mol,
-                cross_attn,
-                prot_attention_mask,
-                mol_attention_mask
-            )
-
-        lm_loss = decoder_outputs.loss
-
-        outputs = {
-            "lm_loss": lm_loss,
-            "logits": decoder_outputs.logits,
-            "pchembl_predictions": pchembl_predictions,
-            "hidden_states": decoder_outputs.hidden_states,
-            "attentions": decoder_outputs.attentions,
-            "cross_attentions": decoder_outputs.cross_attentions,
-        }
-        if lm_loss is not None:
-            # Backward-compatible field for consumers expecting "loss" from the model output.
-            outputs["loss"] = lm_loss
-        return {k: v for k, v in outputs.items() if v is not None}
+        protein_embeddings = self.encode_protein(prot_input_ids, prot_attention_mask)
+        return self._decode_from_protein_embeddings(
+            mol_input_ids=mol_input_ids,
+            protein_embeddings=protein_embeddings,
+            prot_attention_mask=prot_attention_mask,
+            labels=labels,
+            train_lm=train_lm,
+            pchembl_only_mode=pchembl_only_mode,
+            compute_pchembl=compute_pchembl,
+        )
     
-    def generate(self, prot_input_ids, prot_attention_mask, **generation_kwargs):
+    def predict_pchembl_from_protein_embeddings(self, mol_input_ids, protein_embeddings, prot_attention_mask):
+        outputs = self._decode_from_protein_embeddings(
+            mol_input_ids=mol_input_ids,
+            protein_embeddings=protein_embeddings,
+            prot_attention_mask=prot_attention_mask,
+            labels=None,
+            train_lm=False,
+            pchembl_only_mode=False,
+            compute_pchembl=True,
+        )
+        return outputs["pchembl_predictions"]
+
+    def generate_from_protein_embeddings(self, protein_embeddings, prot_attention_mask, **generation_kwargs):
+        """Generate molecules from cached protein embeddings."""
+        return self.molecule_decoder.generate(
+            encoder_hidden_states=protein_embeddings,
+            encoder_attention_mask=prot_attention_mask,
+            **generation_kwargs,
+        )
+
+    def generate(self, prot_input_ids, prot_attention_mask, protein_embeddings=None, **generation_kwargs):
         """
         Generate molecule sequences given protein sequences.
         
@@ -291,46 +349,23 @@ class Prot2MolModel(nn.Module):
         Returns:
             Generated molecule token sequences
         """
-        # Encode protein sequences
-        protein_embeddings = self.protein_encoder.encode(
-            sequences=prot_input_ids,
-            attention_mask=prot_attention_mask
-        )
-        
-        # Generate using GPT2
-        return self.molecule_decoder.generate(
-            encoder_hidden_states=protein_embeddings,
-            encoder_attention_mask=prot_attention_mask,
-            **generation_kwargs
+        if protein_embeddings is None:
+            protein_embeddings = self.encode_protein(prot_input_ids, prot_attention_mask)
+        return self.generate_from_protein_embeddings(
+            protein_embeddings=protein_embeddings,
+            prot_attention_mask=prot_attention_mask,
+            **generation_kwargs,
         )
 
     def corr_loss_calculation(self, pchembl_predictions, pchembl_values, eps=1e-8):
         x = pchembl_predictions - pchembl_predictions.mean(); v = pchembl_values - pchembl_values.mean()
         return 1 - (x*v).mean() / (x.pow(2).mean().sqrt()*v.pow(2).mean().sqrt()+eps)
-
-    def _reduce_cross_attn(self, cross_attentions):
-        """Average cross-attention over layers and heads to get [B, Lm, Lp]."""
-        if cross_attentions is None:
-            return None
-        if isinstance(cross_attentions, (list, tuple)):
-            attn = torch.stack(cross_attentions, dim=0)
-        else:
-            attn = cross_attentions
-        if attn.dim() == 5:
-            # [layers, B, heads, Lm, Lp]
-            attn = attn.mean(dim=0).mean(dim=1)
-        elif attn.dim() == 4:
-            # [B, heads, Lm, Lp]
-            attn = attn.mean(dim=1)
-        return attn
     
     def get_encoder_hidden_states(self, prot_input_ids, prot_attention_mask):
         """
         Get the hidden states from the protein encoder.
         """
-        return self.protein_encoder.encode(
-            sequences=prot_input_ids,
-            attention_mask=prot_attention_mask)
+        return self.encode_protein(prot_input_ids, prot_attention_mask)
 
     def num_parameters(self):
         """Return the total number of parameters in the model."""
@@ -423,161 +458,177 @@ def create_prot2mol_model(config):
     return Prot2MolModel(config)
 
 
-class PairFormerLiteBlock(nn.Module):
-    def __init__(self, d_pair, n_heads=4, dropout=0.1):
+class FusionDTITokenFusion(nn.Module):
+    def __init__(self, hidden_dim: int, num_heads: int):
         super().__init__()
-        self.row_attn = nn.MultiheadAttention(d_pair, n_heads, dropout=dropout, batch_first=True)
-        self.col_attn = nn.MultiheadAttention(d_pair, n_heads, dropout=dropout, batch_first=True)
-        self.ln_row = nn.LayerNorm(d_pair)
-        self.ln_col = nn.LayerNorm(d_pair)
-        self.ffn = nn.Sequential(
-            nn.Linear(d_pair, d_pair * 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_pair * 2, d_pair)
-        )
-        self.ln_ffn = nn.LayerNorm(d_pair)
+        if hidden_dim % num_heads != 0:
+            raise ValueError(f"hidden_dim ({hidden_dim}) must be divisible by num_heads ({num_heads})")
+
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_size = hidden_dim // num_heads
+
+        self.query_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.key_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.value_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        self.query_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.key_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.value_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+    def _apply_heads(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, seq_len, _ = x.shape
+        return x.reshape(batch_size, seq_len, self.num_heads, self.head_size)
+
+    def _masked_softmax(self, logits: torch.Tensor, row_mask: torch.Tensor, col_mask: torch.Tensor) -> torch.Tensor:
+        valid_pairs = row_mask.unsqueeze(2).unsqueeze(-1) & col_mask.unsqueeze(1).unsqueeze(-1)
+        masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, -1e9))
+        alpha = torch.softmax(masked_logits, dim=2)
+        return torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
+
+    def forward(
+        self,
+        protein_tokens: torch.Tensor,
+        molecule_tokens: torch.Tensor,
+        protein_mask: torch.Tensor,
+        molecule_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        protein_q = self._apply_heads(self.query_p(protein_tokens))
+        protein_k = self._apply_heads(self.key_p(protein_tokens))
+        protein_v = self._apply_heads(self.value_p(protein_tokens))
+
+        molecule_q = self._apply_heads(self.query_m(molecule_tokens))
+        molecule_k = self._apply_heads(self.key_m(molecule_tokens))
+        molecule_v = self._apply_heads(self.value_m(molecule_tokens))
+
+        logits_pp = torch.einsum("blhd,bkhd->blkh", protein_q, protein_k) / math.sqrt(self.head_size)
+        logits_pm = torch.einsum("blhd,bkhd->blkh", protein_q, molecule_k) / math.sqrt(self.head_size)
+        logits_mp = torch.einsum("blhd,bkhd->blkh", molecule_q, protein_k) / math.sqrt(self.head_size)
+        logits_mm = torch.einsum("blhd,bkhd->blkh", molecule_q, molecule_k) / math.sqrt(self.head_size)
+
+        alpha_pp = self._masked_softmax(logits_pp, protein_mask, protein_mask)
+        alpha_pm = self._masked_softmax(logits_pm, protein_mask, molecule_mask)
+        alpha_mp = self._masked_softmax(logits_mp, molecule_mask, protein_mask)
+        alpha_mm = self._masked_softmax(logits_mm, molecule_mask, molecule_mask)
+
+        fused_protein = (
+            torch.einsum("blkh,bkhd->blhd", alpha_pp, protein_v).flatten(-2)
+            + torch.einsum("blkh,bkhd->blhd", alpha_pm, molecule_v).flatten(-2)
+        ) / 2.0
+        fused_molecule = (
+            torch.einsum("blkh,bkhd->blhd", alpha_mp, protein_v).flatten(-2)
+            + torch.einsum("blkh,bkhd->blhd", alpha_mm, molecule_v).flatten(-2)
+        ) / 2.0
+
+        fused_protein = fused_protein * protein_mask.unsqueeze(-1)
+        fused_molecule = fused_molecule * molecule_mask.unsqueeze(-1)
+        return fused_protein, fused_molecule
+
+
+class FusionDTIRegressionMLP(nn.Module):
+    def __init__(self, input_dim: int, dropout: float):
+        super().__init__()
+        hidden_mid = max(input_dim // 2, 1)
+        hidden_low = max(input_dim // 4, 1)
+        self.fc1 = nn.Linear(input_dim, input_dim)
+        self.ln1 = nn.LayerNorm(input_dim)
+        self.fc2 = nn.Linear(input_dim, hidden_mid)
+        self.ln2 = nn.LayerNorm(hidden_mid)
+        self.fc3 = nn.Linear(hidden_mid, hidden_low)
+        self.ln3 = nn.LayerNorm(hidden_low)
         self.dropout = nn.Dropout(dropout)
+        self.output = nn.Linear(hidden_low, 1)
 
-    def forward(self, z, prot_mask, mol_mask):
-        # z: [B, Lm, Lp, d]
-        B, Lm, Lp, d = z.shape
-
-        # Row attention (ligand token attends over protein tokens)
-        z_row = z.reshape(B * Lm, Lp, d)
-        kpm = None
-        if prot_mask is not None:
-            kpm = ~(prot_mask.bool())
-            kpm = kpm.unsqueeze(1).expand(B, Lm, Lp).reshape(B * Lm, Lp)
-        row_out, _ = self.row_attn(z_row, z_row, z_row, key_padding_mask=kpm, need_weights=False)
-        z_row = self.ln_row(z_row + self.dropout(row_out))
-        z = z_row.reshape(B, Lm, Lp, d)
-
-        # Column attention (protein token attends over ligand tokens)
-        z_col = z.permute(0, 2, 1, 3).reshape(B * Lp, Lm, d)
-        kpm = None
-        if mol_mask is not None:
-            kpm = ~(mol_mask.bool())
-            kpm = kpm.unsqueeze(1).expand(B, Lp, Lm).reshape(B * Lp, Lm)
-        col_out, _ = self.col_attn(z_col, z_col, z_col, key_padding_mask=kpm, need_weights=False)
-        z_col = self.ln_col(z_col + self.dropout(col_out))
-        z = z_col.reshape(B, Lp, Lm, d).permute(0, 2, 1, 3)
-
-        # Feed-forward
-        z = self.ln_ffn(z + self.dropout(self.ffn(z)))
-        return z
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.dropout(self.ln1(F.gelu(self.fc1(x))))
+        x = self.dropout(self.ln2(F.gelu(self.fc2(x))))
+        x = self.dropout(self.ln3(F.gelu(self.fc3(x))))
+        return self.output(x).squeeze(-1)
 
 
-class AffinityHead(nn.Module):
+class FusionDTIPChemblHead(nn.Module):
     def __init__(
         self,
-        d_model,
-        d_pair=256,
-        n_heads=4,
-        n_layers=2,
-        max_prot_tokens=256,
-        attn_bins=16,
-        dropout=0.1
+        d_model: int,
+        hidden_dim: int = 768,
+        num_heads: int = 8,
+        group_size: int = 1,
+        agg_mode: str = "mean",
+        dropout: float = 0.1,
     ):
         super().__init__()
-        self.d_pair = d_pair
-        self.max_prot_tokens = max_prot_tokens
-        self.attn_bins = attn_bins
-        self.attn_eps = 1e-6
-        self.attn_dmax = 8.0
+        if group_size < 1:
+            raise ValueError(f"group_size must be >= 1, got {group_size}")
+        if agg_mode not in {"cls", "mean", "mean_all_tok"}:
+            raise ValueError(f"Unsupported agg_mode: {agg_mode}")
 
-        self.proj_p = nn.Linear(d_model, d_pair)
-        self.proj_m = nn.Linear(d_model, d_pair)
-        self.ln_p = nn.LayerNorm(d_pair)
-        self.ln_m = nn.LayerNorm(d_pair)
+        self.group_size = group_size
+        self.agg_mode = agg_mode
+        self.proj_p = nn.Linear(d_model, hidden_dim)
+        self.proj_m = nn.Linear(d_model, hidden_dim)
+        self.ln_p = nn.LayerNorm(hidden_dim)
+        self.ln_m = nn.LayerNorm(hidden_dim)
+        self.fusion = FusionDTITokenFusion(hidden_dim=hidden_dim, num_heads=num_heads)
+        self.regression = FusionDTIRegressionMLP(input_dim=hidden_dim * 2, dropout=dropout)
 
-        self.bias_p = nn.Linear(d_pair, d_pair, bias=False)
-        self.bias_m = nn.Linear(d_pair, d_pair, bias=False)
+    def _normalize_mask(self, mask: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if mask is None:
+            return torch.ones(x.size(0), x.size(1), device=x.device, dtype=torch.bool)
+        return mask.to(device=x.device).bool()
 
-        self.pair_mlp = nn.Sequential(
-            nn.Linear(4 * d_pair, d_pair),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_pair, d_pair)
+    def _group_embeddings(self, x: torch.Tensor, mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.group_size == 1:
+            return x, mask
+
+        batch_size, seq_len, hidden_dim = x.shape
+        pad_len = (-seq_len) % self.group_size
+        if pad_len:
+            x = torch.cat([x, torch.zeros(batch_size, pad_len, hidden_dim, device=x.device, dtype=x.dtype)], dim=1)
+            mask = torch.cat([mask, torch.zeros(batch_size, pad_len, device=mask.device, dtype=mask.dtype)], dim=1)
+
+        grouped_len = x.size(1) // self.group_size
+        x_grouped = x.reshape(batch_size, grouped_len, self.group_size, hidden_dim)
+        mask_grouped = mask.reshape(batch_size, grouped_len, self.group_size)
+
+        counts = mask_grouped.sum(dim=2, keepdim=True).clamp(min=1)
+        grouped_embeddings = (x_grouped * mask_grouped.unsqueeze(-1)).sum(dim=2) / counts
+        grouped_mask = mask_grouped.any(dim=2)
+        return grouped_embeddings, grouped_mask
+
+    def _aggregate(self, tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        if self.agg_mode == "cls":
+            return tokens[:, 0]
+        if self.agg_mode == "mean_all_tok":
+            return tokens.mean(dim=1)
+
+        weights = mask.unsqueeze(-1).to(tokens.dtype)
+        denom = weights.sum(dim=1).clamp(min=1.0)
+        return (tokens * weights).sum(dim=1) / denom
+
+    def forward(
+        self,
+        protein_embeddings: torch.Tensor,
+        molecule_embeddings: torch.Tensor,
+        prot_mask: torch.Tensor,
+        mol_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        prot_mask = self._normalize_mask(prot_mask, protein_embeddings)
+        mol_mask = self._normalize_mask(mol_mask, molecule_embeddings)
+
+        protein_tokens = self.ln_p(self.proj_p(protein_embeddings))
+        molecule_tokens = self.ln_m(self.proj_m(molecule_embeddings))
+
+        protein_tokens, prot_mask = self._group_embeddings(protein_tokens, prot_mask)
+        molecule_tokens, mol_mask = self._group_embeddings(molecule_tokens, mol_mask)
+
+        fused_protein, fused_molecule = self.fusion(
+            protein_tokens=protein_tokens,
+            molecule_tokens=molecule_tokens,
+            protein_mask=prot_mask,
+            molecule_mask=mol_mask,
         )
 
-        self.bin_embed = nn.Embedding(attn_bins, d_pair)
-
-        self.blocks = nn.ModuleList([
-            PairFormerLiteBlock(d_pair, n_heads=n_heads, dropout=dropout)
-            for _ in range(n_layers)
-        ])
-
-        self.out = nn.Sequential(
-            nn.LayerNorm(d_pair),
-            nn.Linear(d_pair, d_pair),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_pair, 1)
-        )
-
-    def _crop_protein(self, E, A, prot_mask):
-        if A is None or self.max_prot_tokens is None:
-            return E, A, prot_mask
-        B, Lp, d = E.shape
-        if Lp <= self.max_prot_tokens:
-            return E, A, prot_mask
-
-        if prot_mask is None:
-            prot_mask = torch.ones(B, Lp, device=E.device, dtype=torch.float)
-
-        # Importance from attention mass
-        importance = A.sum(dim=1)  # [B, Lp]
-        importance = importance.masked_fill(~prot_mask.bool(), float("-inf"))
-        k = min(self.max_prot_tokens, Lp)
-        topk = torch.topk(importance, k=k, dim=1).indices  # [B, k]
-
-        E = torch.gather(E, dim=1, index=topk.unsqueeze(-1).expand(B, k, d))
-        prot_mask = torch.gather(prot_mask, dim=1, index=topk)
-        A = torch.gather(A, dim=2, index=topk.unsqueeze(1).expand(B, A.size(1), k))
-        return E, A, prot_mask
-
-    def forward(self, E, D, A, prot_mask, mol_mask):
-        # E: [B, Lp, d_model], D: [B, Lm, d_model], A: [B, Lm, Lp]
-        if prot_mask is None:
-            prot_mask = torch.ones(E.size(0), E.size(1), device=E.device, dtype=torch.float)
-        if mol_mask is None:
-            mol_mask = torch.ones(D.size(0), D.size(1), device=D.device, dtype=torch.float)
-
-        E, A, prot_mask = self._crop_protein(E, A, prot_mask)
-
-        Ep = self.ln_p(self.proj_p(E))
-        Dm = self.ln_m(self.proj_m(D))
-
-        B, Lm, _ = Dm.shape
-        Lp = Ep.shape[1]
-
-        Dm_i = Dm.unsqueeze(2).expand(B, Lm, Lp, self.d_pair)
-        Ep_j = Ep.unsqueeze(1).expand(B, Lm, Lp, self.d_pair)
-        pair_input = torch.cat(
-            [Dm_i, Ep_j, Dm_i * Ep_j, (Dm_i - Ep_j).abs()],
-            dim=-1
-        )
-
-        z = self.pair_mlp(pair_input)
-        z = z + self.bias_m(Dm).unsqueeze(2) + self.bias_p(Ep).unsqueeze(1)
-
-        if A is not None:
-            A_clamped = A.clamp(min=self.attn_eps)
-            dtilde = (-torch.log(A_clamped)).clamp(max=self.attn_dmax)
-            bin_width = self.attn_dmax / self.attn_bins
-            bin_idx = torch.clamp((dtilde / bin_width).long(), max=self.attn_bins - 1)
-            z = z + self.bin_embed(bin_idx)
-
-        for blk in self.blocks:
-            z = blk(z, prot_mask, mol_mask)
-
-        # Attention-weighted pooling
-        if A is None:
-            w = mol_mask.unsqueeze(2) * prot_mask.unsqueeze(1)
-        else:
-            w = A * mol_mask.unsqueeze(2) * prot_mask.unsqueeze(1)
-        w_sum = w.sum(dim=(1, 2)).clamp(min=1e-6).unsqueeze(-1)
-        g = (z * w.unsqueeze(-1)).sum(dim=(1, 2)) / w_sum
-
-        return self.out(g).squeeze(-1)
+        pooled_protein = self._aggregate(fused_protein, prot_mask)
+        pooled_molecule = self._aggregate(fused_molecule, mol_mask)
+        joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
+        return self.regression(joint_embedding)

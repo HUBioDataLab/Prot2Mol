@@ -12,6 +12,7 @@ import json
 import logging
 import argparse
 import warnings
+import time
 from typing import List, Dict, Optional, Tuple
 
 import torch
@@ -25,7 +26,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from prot2mol.core.protein_encoders import get_protein_tokenizer
 from prot2mol.io.config import parse_args_with_config
-from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model
+from prot2mol.io.hf_utils import load_molgen_tokenizer, load_prot2mol_inference_model, load_saved_model_config
 from prot2mol.data.pipeline import (
     find_molecule_column,
     to_selfies_list,
@@ -84,16 +85,30 @@ class MoleculeGenerator:
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
+            force=True,
             handlers=[
                 logging.StreamHandler(sys.stdout),
                 logging.FileHandler(f'molecule_generation_{pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")}.log')
             ]
         )
-        return logging.getLogger(__name__)
+        logger = logging.getLogger(__name__)
+        logger.propagate = False
+        return logger
+
+    def _apply_saved_config_overrides(self, model_path: str):
+        saved_config = load_saved_model_config(model_path, logger=self.logger)
+        for key, value in saved_config.items():
+            if not hasattr(self.config, key):
+                continue
+            current_value = getattr(self.config, key)
+            if current_value != value:
+                self.logger.info("Overriding %s=%s with checkpoint value %s", key, current_value, value)
+                setattr(self.config, key, value)
     
     def _load_components(self):
         """Load tokenizers and model."""
         self.logger.info("Loading tokenizers and model...")
+        self._apply_saved_config_overrides(self.config.prediction_model_file or self.config.model_file)
         
         # Load molecule tokenizer
         self.logger.info("Loading molecule tokenizer...")
@@ -150,6 +165,11 @@ class MoleculeGenerator:
                 n_emb=getattr(self.config, 'n_emb', 1024),
                 max_mol_len=getattr(self.config, 'max_mol_len', 256),
                 prot_max_length=getattr(self.config, 'prot_max_length', 1024),
+                pchembl_tf_hidden_dim=getattr(self.config, "pchembl_tf_hidden_dim", 768),
+                pchembl_tf_num_heads=getattr(self.config, "pchembl_tf_num_heads", 8),
+                pchembl_tf_group_size=getattr(self.config, "pchembl_tf_group_size", 1),
+                pchembl_tf_agg_mode=getattr(self.config, "pchembl_tf_agg_mode", "mean"),
+                pchembl_tf_dropout=getattr(self.config, "pchembl_tf_dropout", 0.1),
                 strict=False,
                 allow_strict_fallback=False,
                 logger=self.logger,
@@ -283,9 +303,17 @@ class MoleculeGenerator:
             device=self.device,
         )
         return prot_input_ids, prot_attention_mask
-    
-    def _generate_molecules_batch(self, prot_input_ids: torch.Tensor, prot_attention_mask: torch.Tensor, 
-                                 num_samples: int) -> List[str]:
+
+    def _encode_protein_for_model(self, model, prot_input_ids: torch.Tensor, prot_attention_mask: torch.Tensor):
+        with torch.no_grad():
+            return model.encode_protein(prot_input_ids, prot_attention_mask)
+
+    def _generate_molecules_batch_with_tokens(
+        self,
+        protein_embeddings: torch.Tensor,
+        prot_attention_mask: torch.Tensor,
+        num_samples: int,
+    ) -> Tuple[List[str], torch.Tensor]:
         """
         Generate molecules for a batch of protein sequences.
         
@@ -298,6 +326,7 @@ class MoleculeGenerator:
             List of generated SELFIES strings
         """
         generated_molecules = []
+        generated_token_batches = []
         
         # Generate in batches to manage memory
         batch_size = min(self.config.batch_size, num_samples)
@@ -307,14 +336,13 @@ class MoleculeGenerator:
             for batch_idx in tqdm(range(num_batches), desc="Generating molecules"):
                 current_batch_size = min(batch_size, num_samples - batch_idx * batch_size)
                 
-                # Repeat protein embeddings for the batch
-                batch_prot_input_ids = prot_input_ids.repeat(current_batch_size, 1)
+                batch_protein_embeddings = protein_embeddings.repeat(current_batch_size, 1, 1)
                 batch_prot_attention_mask = prot_attention_mask.repeat(current_batch_size, 1)
                 
                 # Generate molecules
                 try:
-                    generated_tokens = self.generation_model.generate(
-                        prot_input_ids=batch_prot_input_ids,
+                    generated_tokens = self.generation_model.generate_from_protein_embeddings(
+                        protein_embeddings=batch_protein_embeddings,
                         prot_attention_mask=batch_prot_attention_mask,
                         num_return_sequences=1,
                         max_length=self.generation_config.max_length,
@@ -334,27 +362,52 @@ class MoleculeGenerator:
                     ]
                     
                     generated_molecules.extend(batch_selfies)
+                    generated_token_batches.append(generated_tokens.detach().cpu())
                     
                 except Exception as e:
                     self.logger.error(f"Error generating batch {batch_idx}: {str(e)}")
                     # Add empty strings for failed generations
                     generated_molecules.extend([''] * current_batch_size)
-        
+                    fallback_tokens, _ = tokenize_selfies_for_inference(
+                        selfies_list=["[nop]"] * current_batch_size,
+                        mol_tokenizer=self.mol_tokenizer,
+                        max_mol_len=self.config.max_mol_len,
+                        device=torch.device("cpu"),
+                    )
+                    generated_token_batches.append(fallback_tokens.cpu())
+
+        generated_token_ids = torch.cat(generated_token_batches, dim=0) if generated_token_batches else torch.empty(0)
+        return generated_molecules, generated_token_ids
+
+    def _generate_molecules_batch(
+        self,
+        protein_embeddings: torch.Tensor,
+        prot_attention_mask: torch.Tensor,
+        num_samples: int,
+    ) -> List[str]:
+        generated_molecules, _ = self._generate_molecules_batch_with_tokens(
+            protein_embeddings=protein_embeddings,
+            prot_attention_mask=prot_attention_mask,
+            num_samples=num_samples,
+        )
         return generated_molecules
     
-    def _predict_pchembl_batch(self, prot_input_ids: torch.Tensor, prot_attention_mask: torch.Tensor, 
-                               mol_input_ids: torch.Tensor, mol_attention_mask: torch.Tensor) -> np.ndarray:
+    def _predict_pchembl_batch(
+        self,
+        protein_embeddings: torch.Tensor,
+        prot_attention_mask: torch.Tensor,
+        mol_input_ids: torch.Tensor,
+        mol_attention_mask: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
         """
         Predict pChEMBL values for a batch of molecules.
         """
         with torch.no_grad():
-            outputs = self.prediction_model(
+            predictions = self.prediction_model.predict_pchembl_from_protein_embeddings(
                 mol_input_ids=mol_input_ids,
-                prot_input_ids=prot_input_ids,
+                protein_embeddings=protein_embeddings,
                 prot_attention_mask=prot_attention_mask,
-                train_lm=False # No need to calculate LM loss during inference
-            )
-            predictions = outputs['pchembl_predictions'].cpu().numpy()
+            ).cpu().numpy()
             
             # Denormalize
             denormalized_preds = predictions * self.config.pchembl_std + self.config.pchembl_mean
@@ -365,6 +418,7 @@ class MoleculeGenerator:
         Predict pChEMBL values for a dataframe of molecules against a target protein.
         """
         self.logger.info(f"Predicting pChEMBL for {len(molecules_df)} molecules...")
+        start_time = time.perf_counter()
         
         mol_col, is_selfies = find_molecule_column(molecules_df.columns)
         if not mol_col:
@@ -372,6 +426,7 @@ class MoleculeGenerator:
             
         # Get protein embeddings (prepare once)
         prot_input_ids, prot_attention_mask = self._get_protein_embeddings(protein_sequence)
+        protein_embeddings = self._encode_protein_for_model(self.prediction_model, prot_input_ids, prot_attention_mask)
         
         # Batch processing
         batch_size = self.config.batch_size
@@ -392,23 +447,23 @@ class MoleculeGenerator:
             batch_selfies = selfies_list[i*batch_size : (i+1)*batch_size]
             current_batch_len = len(batch_selfies)
             
-            batch_mol_ids, batch_mol_mask = tokenize_selfies_for_inference(
+            batch_mol_ids, _ = tokenize_selfies_for_inference(
                 selfies_list=batch_selfies,
                 mol_tokenizer=self.mol_tokenizer,
                 max_mol_len=self.config.max_mol_len,
                 device=self.device,
             )
             
-            # Expand protein to batch size
-            batch_prot_ids = prot_input_ids.repeat(current_batch_len, 1)
+            batch_protein_embeddings = protein_embeddings.repeat(current_batch_len, 1, 1)
             batch_prot_mask = prot_attention_mask.repeat(current_batch_len, 1)
             
             # Predict
-            preds = self._predict_pchembl_batch(batch_prot_ids, batch_prot_mask, batch_mol_ids, batch_mol_mask)
+            preds = self._predict_pchembl_batch(batch_protein_embeddings, batch_prot_mask, batch_mol_ids, None)
             all_preds.extend(preds)
             
         # Add predictions to dataframe
         molecules_df['Predicted_pChEMBL'] = all_preds
+        self.logger.info("pChEMBL prediction finished in %.2fs", time.perf_counter() - start_time)
         return molecules_df
 
     def generate_molecules(self, protein_sequence: str, num_samples: int) -> pd.DataFrame:
@@ -423,44 +478,48 @@ class MoleculeGenerator:
             DataFrame with generated molecules
         """
         self.logger.info(f"Generating {num_samples} molecules for protein sequence...")
+        generation_start = time.perf_counter()
         
         # Get protein embeddings
         prot_input_ids, prot_attention_mask = self._get_protein_embeddings(protein_sequence)
+        generation_protein_embeddings = self._encode_protein_for_model(
+            self.generation_model,
+            prot_input_ids,
+            prot_attention_mask,
+        )
         
         # Generate molecules
-        generated_selfies = self._generate_molecules_batch(
-            prot_input_ids, prot_attention_mask, num_samples
+        generated_output = self._generate_molecules_batch_with_tokens(
+            generation_protein_embeddings,
+            prot_attention_mask,
+            num_samples,
         )
+        generated_selfies, generated_token_ids = generated_output
         
         # Calcuate pChEMBL for generated molecules
         self.logger.info("Predicting pChEMBL for generated molecules...")
+        scoring_start = time.perf_counter()
         
-        # Reuse prediction batch logic but we already have SELFIES
-        # Prepare batches
+        prediction_protein_embeddings = generation_protein_embeddings
+        prediction_protein_mask = prot_attention_mask
+        if self.prediction_model is not self.generation_model:
+            prediction_protein_embeddings = self._encode_protein_for_model(
+                self.prediction_model,
+                prot_input_ids,
+                prot_attention_mask,
+            )
+
         batch_size = self.config.batch_size
         all_preds = []
         
-        num_batches = (len(generated_selfies) + batch_size - 1) // batch_size
+        num_batches = (generated_token_ids.shape[0] + batch_size - 1) // batch_size if generated_token_ids.numel() else 0
         
         for i in tqdm(range(num_batches), desc="Predicting pChEMBL"):
-            batch_selfies = generated_selfies[i*batch_size : (i+1)*batch_size]
-            current_batch_len = len(batch_selfies)
-            
-            # Handle empty/invalid generation by replacing with padding token equivalent or simple "[nop]"
-            # But tokenizer will handle strings.
-            clean_batch = [s if s else "[nop]" for s in batch_selfies]
-            
-            batch_mol_ids, batch_mol_mask = tokenize_selfies_for_inference(
-                selfies_list=clean_batch,
-                mol_tokenizer=self.mol_tokenizer,
-                max_mol_len=self.config.max_mol_len,
-                device=self.device,
-            )
-             # Expand protein to batch size
-            batch_prot_ids = prot_input_ids.repeat(current_batch_len, 1)
-            batch_prot_mask = prot_attention_mask.repeat(current_batch_len, 1)
-            
-            preds = self._predict_pchembl_batch(batch_prot_ids, batch_prot_mask, batch_mol_ids, batch_mol_mask)
+            batch_mol_ids = generated_token_ids[i * batch_size : (i + 1) * batch_size].to(self.device)
+            current_batch_len = batch_mol_ids.shape[0]
+            batch_protein_embeddings = prediction_protein_embeddings.repeat(current_batch_len, 1, 1)
+            batch_prot_mask = prediction_protein_mask.repeat(current_batch_len, 1)
+            preds = self._predict_pchembl_batch(batch_protein_embeddings, batch_prot_mask, batch_mol_ids, None)
             all_preds.extend(preds)
         
         # Extract model name from model file path
@@ -485,6 +544,11 @@ class MoleculeGenerator:
         })
         
         self.logger.info(f"Generated {len(generated_selfies)} molecules")
+        self.logger.info(
+            "Generation time: %.2fs, pChEMBL scoring time: %.2fs",
+            scoring_start - generation_start,
+            time.perf_counter() - scoring_start,
+        )
         
         return results_df
     
@@ -500,6 +564,7 @@ class MoleculeGenerator:
             Dictionary with calculated metrics
         """
         self.logger.info("Calculating metrics...")
+        metrics_start = time.perf_counter()
         
         try:
             metrics, results_df = metrics_calculation(
@@ -507,7 +572,8 @@ class MoleculeGenerator:
                 references=reference_smiles,
                 train_data=self.train_data,
                 train_vec=self.train_vec,
-                training=False
+                training=False,
+                return_details=True,
             )
             
             # Extract SMILES from results DataFrame and add to main DataFrame
@@ -544,6 +610,7 @@ class MoleculeGenerator:
                     self.logger.info(f"{key}: {value:.4f}")
                 else:
                     self.logger.info(f"{key}: {value}")
+            self.logger.info("Metric calculation finished in %.2fs", time.perf_counter() - metrics_start)
             
             return metrics
             

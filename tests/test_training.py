@@ -19,8 +19,10 @@ def _dummy_inputs(batch=3, seq=4):
 
 def _make_light_trainer(pchembl_only=False):
     tr = GPT2_w_crs_attn_Trainer.__new__(GPT2_w_crs_attn_Trainer)
-    tr.pchembl_only_mode = pchembl_only
+    tr.training_stage = "pchembl_only" if pchembl_only else "multitask"
     tr.pchembl_pair_weight = 1.0
+    tr._train_component_sums = {"lm_loss": 0.0, "pchembl_loss": 0.0, "pair_loss": 0.0, "total_loss": 0.0}
+    tr._train_component_count = 0
     return tr
 
 
@@ -97,13 +99,6 @@ def test_compute_loss_raises_when_no_loss_terms():
 
 def test_training_runner_mode_detection_and_args():
     runner = TrainingRunner(local_rank=-1, global_rank=0)
-
-    assert runner._is_pchembl_only_training(
-        {"train_encoder_model": False, "train_decoder_model": False, "train_pchembl_head": True}
-    )
-    assert not runner._is_pchembl_only_training(
-        {"train_encoder_model": True, "train_decoder_model": False, "train_pchembl_head": True}
-    )
 
     args = runner._create_training_args(
         run_name="run",
