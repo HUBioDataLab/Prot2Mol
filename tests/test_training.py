@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import torch
 
+from prot2mol.training.entry import create_run_name
 from prot2mol.training.trainer import GPT2_w_crs_attn_Trainer
 from prot2mol.training.training_runner import TrainingRunner
 
@@ -123,3 +124,41 @@ def test_training_runner_mode_detection_and_args():
     eval_field = getattr(args, "evaluation_strategy", getattr(args, "eval_strategy", None))
     assert eval_field is not None
     assert str(eval_field).lower().endswith("epoch")
+
+
+def test_create_run_name_is_compact_and_stable():
+    config = SimpleNamespace(
+        prot_emb_model="saprot",
+        training_stage="pchembl_only",
+        train_encoder_model=False,
+        train_decoder_model=False,
+        train_pchembl_head=True,
+        stop_pchembl_gradients=True,
+        pchembl_tf_hidden_dim=768,
+        pchembl_tf_num_heads=8,
+        pchembl_tf_group_size=1,
+        pchembl_tf_agg_mode="mean",
+        n_layer=1,
+        n_head=16,
+        n_emb=1024,
+        max_mol_len=200,
+        prot_max_length=1000,
+        learning_rate=1e-5,
+        train_batch_size=4,
+        training_mode="auto",
+        run_name_suffix="Phase_IIIa",
+    )
+
+    run_name_a = create_run_name(
+        config,
+        "prot_comp_set_pchembl_6_protlen_1000_human_False",
+    )
+    run_name_b = create_run_name(
+        config,
+        "prot_comp_set_pchembl_6_protlen_1000_human_False",
+    )
+
+    assert run_name_a == run_name_b
+    assert len(run_name_a) <= 200
+    assert "Phase_IIIa" in run_name_a
+    assert "stg-pchembl_only" in run_name_a

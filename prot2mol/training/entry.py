@@ -1,7 +1,9 @@
 import argparse
 import datetime
+import hashlib
 import os
 import logging
+import re
 import sys
 
 from ..io.config import parse_args_with_config
@@ -230,30 +232,85 @@ def validate_and_process_paths(config):
     return dataset_name
 
 
+def _slugify_run_component(value, max_length=None):
+    """Normalize a run-name component for filesystem-safe directory names."""
+    text = str(value).strip().replace(os.sep, "-")
+    text = re.sub(r"[^A-Za-z0-9._-]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("._-")
+    if not text:
+        text = "na"
+    if max_length is not None and len(text) > max_length:
+        text = text[:max_length].rstrip("._-")
+    return text or "na"
+
+
 def create_run_name(config, dataset_name):
-    """Create a unique run name based on configuration parameters."""
-    run_components = [
-        dataset_name,
-        f"emb_{config.prot_emb_model}",
-        f"enc_{config.train_encoder_model}",
-        f"dec_{config.train_decoder_model}",
-        f"pchembl_{config.train_pchembl_head}",
-        f"stop_pchembl_grad_{config.stop_pchembl_gradients}",
-        f"tf_{config.pchembl_tf_hidden_dim}_{config.pchembl_tf_num_heads}_{config.pchembl_tf_group_size}_{config.pchembl_tf_agg_mode}",
-        f"n_layer_{config.n_layer}",
-        f"n_head_{config.n_head}",
-        f"n_emb_{config.n_emb}",
-        f"max_mol_len_{config.max_mol_len}",
-        f"prot_max_length_{config.prot_max_length}",
-        f"lr_{config.learning_rate}",
-        f"bs_{config.train_batch_size}",
-        f"mode_{config.training_mode}",
-        f"stage_{config.training_stage}",
-    ]
-    run_components.append(f"layers_{config.n_layer}")
-    run_components.append(f"heads_{config.n_head}")
+    """Create a compact unique run name that stays below filesystem limits."""
     run_suffix = _resolve_run_suffix(config)
-    return "_".join(run_components + [run_suffix])
+    full_descriptor = "|".join(
+        [
+            dataset_name,
+            str(config.prot_emb_model),
+            str(config.training_stage),
+            str(config.train_encoder_model),
+            str(config.train_decoder_model),
+            str(config.train_pchembl_head),
+            str(config.stop_pchembl_gradients),
+            str(config.pchembl_tf_hidden_dim),
+            str(config.pchembl_tf_num_heads),
+            str(config.pchembl_tf_group_size),
+            str(config.pchembl_tf_agg_mode),
+            str(config.n_layer),
+            str(config.n_head),
+            str(config.n_emb),
+            str(config.max_mol_len),
+            str(config.prot_max_length),
+            str(config.learning_rate),
+            str(config.train_batch_size),
+            str(config.training_mode),
+            str(run_suffix),
+        ]
+    )
+    run_hash = hashlib.sha1(full_descriptor.encode("utf-8")).hexdigest()[:10]
+
+    run_components = [
+        _slugify_run_component(dataset_name, max_length=40),
+        f"emb-{_slugify_run_component(config.prot_emb_model, max_length=12)}",
+        f"stg-{_slugify_run_component(config.training_stage, max_length=16)}",
+        f"enc{int(bool(config.train_encoder_model))}",
+        f"dec{int(bool(config.train_decoder_model))}",
+        f"pc{int(bool(config.train_pchembl_head))}",
+        f"spg{int(bool(config.stop_pchembl_gradients))}",
+        f"tf{config.pchembl_tf_hidden_dim}h{config.pchembl_tf_num_heads}g{config.pchembl_tf_group_size}-{_slugify_run_component(config.pchembl_tf_agg_mode, max_length=10)}",
+        f"L{config.n_layer}",
+        f"H{config.n_head}",
+        f"E{config.n_emb}",
+        f"ml{config.max_mol_len}",
+        f"pl{config.prot_max_length}",
+        f"lr{_slugify_run_component(config.learning_rate, max_length=12)}",
+        f"bs{config.train_batch_size}",
+        f"mode-{_slugify_run_component(config.training_mode, max_length=10)}",
+        _slugify_run_component(run_suffix, max_length=24),
+        run_hash,
+    ]
+    run_name = "_".join(run_components)
+    if len(run_name) <= 200:
+        return run_name
+
+    fallback_components = [
+        _slugify_run_component(dataset_name, max_length=24),
+        f"emb-{_slugify_run_component(config.prot_emb_model, max_length=10)}",
+        f"stg-{_slugify_run_component(config.training_stage, max_length=12)}",
+        f"enc{int(bool(config.train_encoder_model))}",
+        f"dec{int(bool(config.train_decoder_model))}",
+        f"pc{int(bool(config.train_pchembl_head))}",
+        f"tf{config.pchembl_tf_hidden_dim}h{config.pchembl_tf_num_heads}",
+        f"lr{_slugify_run_component(config.learning_rate, max_length=10)}",
+        f"bs{config.train_batch_size}",
+        _slugify_run_component(run_suffix, max_length=20),
+        run_hash,
+    ]
+    return "_".join(fallback_components)
 
 
 def setup_logging(log_level):
