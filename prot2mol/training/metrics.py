@@ -97,7 +97,7 @@ def compute_lm_metrics(
             train_vec=training_vec,
             training=True,
         )
-        return {f"lm_{k}": v for k, v in lm_metrics.items()}
+        return {f"gen_{k}": v for k, v in lm_metrics.items()}
     except Exception as exc:
         if logger is not None:
             logger.error("Error computing LM metrics: %s", exc, exc_info=True)
@@ -129,7 +129,7 @@ def compute_generation_metrics(
             training=False,
             return_details=False,
         )
-        return {f"lm_{key}": value for key, value in generation_metrics.items()}
+        return {f"gen_{key}": value for key, value in generation_metrics.items()}
     except Exception as exc:
         if logger is not None:
             logger.error("Error computing real generation metrics: %s", exc, exc_info=True)
@@ -239,18 +239,18 @@ def compute_pchembl_metrics(
             r2 = float("nan")
 
         metrics = {
-            "pchembl_mse": mse,
-            "pchembl_mae": mae,
-            "pchembl_rmse": rmse,
+            "pchembl_norm_mse": mse,
+            "pchembl_norm_mae": mae,
+            "pchembl_norm_rmse": rmse,
             "pchembl_r2": r2,
-            "pchembl_valid_count": len(pred_norm),
-            "pchembl_mean_pred": np.mean(pred_norm),
-            "pchembl_std_pred": np.std(pred_norm),
-            "pchembl_mean_true": np.mean(true_norm),
-            "pchembl_std_true": np.std(true_norm),
-            "pchembl_mse_raw": mse_raw,
-            "pchembl_mae_raw": mae_raw,
-            "pchembl_rmse_raw": rmse_raw,
+            "pchembl_count": len(pred_norm),
+            "pchembl_norm_mean_pred": np.mean(pred_norm),
+            "pchembl_norm_std_pred": np.std(pred_norm),
+            "pchembl_norm_mean_true": np.mean(true_norm),
+            "pchembl_norm_std_true": np.std(true_norm),
+            "pchembl_raw_mse": mse_raw,
+            "pchembl_raw_mae": mae_raw,
+            "pchembl_raw_rmse": rmse_raw,
         }
 
         try:
@@ -258,8 +258,8 @@ def compute_pchembl_metrics(
 
             pearson_corr, _ = pearsonr(true_raw, pred_raw)
             spearman_corr, _ = spearmanr(true_raw, pred_raw)
-            metrics["pchembl_pearson_raw"] = float(pearson_corr)
-            metrics["pchembl_spearman_raw"] = float(spearman_corr)
+            metrics["pchembl_raw_pearson"] = float(pearson_corr)
+            metrics["pchembl_raw_spearman"] = float(spearman_corr)
         except Exception as exc:
             if logger is not None:
                 logger.warning("Could not compute Pearson/Spearman correlations: %s", exc)

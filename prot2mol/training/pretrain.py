@@ -496,7 +496,7 @@ class TrainingScript:
             training_vec=self.training_vec,
             logger=self.logger,
         )
-        metrics["lm_generated_count"] = int(generated_token_ids.shape[0])
+        metrics["gen_count"] = int(generated_token_ids.shape[0])
         return metrics
 
     def _compute_pchembl_metrics(self, pchembl_predictions, pchembl_targets, group_ids=None):

@@ -242,14 +242,14 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
     # Initialize all metrics to 0
     metrics = {"validity": 0,
                "uniqueness": 0,
-               "novelty_against_training_samples": 0,
-               "novelty_against_reference_samples": 0,
+               "novelty_train": 0,
+               "novelty_eval": 0,
                "intdiv": 0,
-               "similarity_to_training_samples": 0,
-               "similarity_to_reference_samples": 0,
-               "sa_score": 0,
-               "qed_score": 0,
-               "logp_score": 0}
+               "similarity_train": 0,
+               "similarity_eval": 0,
+               "sa": 0,
+               "qed": 0,
+               "logp": 0}
     
     # Try validity calculation
     try:
@@ -300,17 +300,17 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
         # Try novelty calculations
         try:
             prediction_smiles_novelty_against_training_samples = novelty(list(prediction_smiles["smiles"]), training_data_smiles)
-            metrics["novelty_against_training_samples"] = prediction_smiles_novelty_against_training_samples
+            metrics["novelty_train"] = prediction_smiles_novelty_against_training_samples
         except (ZeroDivisionError, ValueError) as e:
             logging.warning(f"Zero division at novelty_against_training_samples calculation: {e}")
-            metrics["novelty_against_training_samples"] = 0
+            metrics["novelty_train"] = 0
             
         try:
             prediction_smiles_novelty_against_reference_samples = novelty(list(prediction_smiles["smiles"]), reference_smiles)
-            metrics["novelty_against_reference_samples"] = prediction_smiles_novelty_against_reference_samples
+            metrics["novelty_eval"] = prediction_smiles_novelty_against_reference_samples
         except (ZeroDivisionError, ValueError) as e:
             logging.warning(f"Zero division at novelty_against_reference_samples calculation: {e}")
-            metrics["novelty_against_reference_samples"] = 0
+            metrics["novelty_eval"] = 0
         
         # Try similarity calculations
         try:
@@ -321,25 +321,25 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
             if reference_mols:
                 reference_vec = generate_vecs(reference_mols)
                 predicted_vs_reference_sim_mean, predicted_vs_reference_sim_list, _ = average_agg_tanimoto(reference_vec,prediction_vecs, no_list=False)
-                metrics["similarity_to_reference_samples"] = predicted_vs_reference_sim_mean
+                metrics["similarity_eval"] = predicted_vs_reference_sim_mean
             else:
                 predicted_vs_reference_sim_list = []
-                metrics["similarity_to_reference_samples"] = 0
+                metrics["similarity_eval"] = 0
         except (ZeroDivisionError, ValueError, RuntimeError) as e:
             logging.warning(f"Zero division at similarity_to_reference_samples calculation: {e}")
-            metrics["similarity_to_reference_samples"] = 0
+            metrics["similarity_eval"] = 0
             predicted_vs_reference_sim_list = []
             
         try:
             if train_vec is not None:
                 predicted_vs_training_sim_mean, predicted_vs_training_sim_list, _ = average_agg_tanimoto(train_vec,prediction_vecs, no_list=False)
-                metrics["similarity_to_training_samples"] = predicted_vs_training_sim_mean
+                metrics["similarity_train"] = predicted_vs_training_sim_mean
             else:
                 predicted_vs_training_sim_mean, predicted_vs_training_sim_list = 0, []
-                metrics["similarity_to_training_samples"] = 0
+                metrics["similarity_train"] = 0
         except (ZeroDivisionError, ValueError, RuntimeError) as e:
             logging.warning(f"Zero division at similarity_to_training_samples calculation: {e}")
-            metrics["similarity_to_training_samples"] = 0
+            metrics["similarity_train"] = 0
             predicted_vs_training_sim_list = []
         
         # Try internal diversity calculation
@@ -359,10 +359,10 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
                 prediction_sa_score = np.mean(valid_sa_scores)
             else:
                 prediction_sa_score = 0
-            metrics["sa_score"] = prediction_sa_score
+            metrics["sa"] = prediction_sa_score
         except (ZeroDivisionError, ValueError) as e:
             logging.warning(f"Zero division at sa_score calculation: {e}")
-            metrics["sa_score"] = 0
+            metrics["sa"] = 0
             prediction_sa_score_list = []
         
         # Try QED score calculation
@@ -374,10 +374,10 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
                 prediction_qed_score = np.mean(valid_qed_scores)
             else:
                 prediction_qed_score = 0
-            metrics["qed_score"] = prediction_qed_score
+            metrics["qed"] = prediction_qed_score
         except (ZeroDivisionError, ValueError) as e:
             logging.warning(f"Zero division at qed_score calculation: {e}")
-            metrics["qed_score"] = 0
+            metrics["qed"] = 0
             prediction_qed_score_list = []
         
         # Try LogP score calculation
@@ -389,10 +389,10 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
                 prediction_logp_score = np.mean(valid_logp_scores)
             else:
                 prediction_logp_score = 0
-            metrics["logp_score"] = prediction_logp_score
+            metrics["logp"] = prediction_logp_score
         except (ZeroDivisionError, ValueError) as e:
             logging.warning(f"Zero division at logp_score calculation: {e}")
-            metrics["logp_score"] = 0
+            metrics["logp"] = 0
             prediction_logp_score_list = []
     
     if training and not return_details:
@@ -430,11 +430,11 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
         # Verify all arrays have the same length before creating DataFrame
         arrays_info = {
             "smiles": len(prediction_smiles["smiles"]),
-            "test_sim": len(predicted_vs_reference_sim_list),
-            "train_sim": len(predicted_vs_training_sim_list),
-            "sa_score": len(prediction_sa_score_list),
-            "qed_score": len(prediction_qed_score_list),
-            "logp_score": len(prediction_logp_score_list)
+            "similarity_eval": len(predicted_vs_reference_sim_list),
+            "similarity_train": len(predicted_vs_training_sim_list),
+            "sa": len(prediction_sa_score_list),
+            "qed": len(prediction_qed_score_list),
+            "logp": len(prediction_logp_score_list)
         }
         
         # Check if all arrays have the same length
@@ -450,11 +450,11 @@ def metrics_calculation(predictions, references, train_data, train_vec=None, tra
             prediction_logp_score_list = (prediction_logp_score_list + [None] * target_length)[:target_length]
             
         result_dict = {"smiles": prediction_smiles["smiles"],
-                       "test_sim": predicted_vs_reference_sim_list, 
-                       "train_sim": predicted_vs_training_sim_list,
-                       "sa_score": prediction_sa_score_list,
-                       "qed_score": prediction_qed_score_list,
-                       "logp_score": prediction_logp_score_list
+                       "similarity_eval": predicted_vs_reference_sim_list,
+                       "similarity_train": predicted_vs_training_sim_list,
+                       "sa": prediction_sa_score_list,
+                       "qed": prediction_qed_score_list,
+                       "logp": prediction_logp_score_list
                        }
         
         try:

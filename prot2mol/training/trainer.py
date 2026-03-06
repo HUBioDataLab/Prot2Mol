@@ -42,6 +42,15 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         self._reset_train_component_accumulator()
         self._reset_eval_component_accumulator()
 
+    @staticmethod
+    def _is_same_loss_value(primary_loss, component_loss):
+        if primary_loss is None or component_loss is None:
+            return False
+        try:
+            return math.isclose(float(primary_loss), float(component_loss), rel_tol=1e-6, abs_tol=1e-8)
+        except (TypeError, ValueError):
+            return False
+
     def _stage_has_lm(self):
         return self.training_stage in {"lm_only", "multitask"}
 
@@ -88,20 +97,22 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         self._eval_component_sums["total_loss"] += self._to_log_scalar(total_loss)
         self._eval_component_count += 1
 
-    def _consume_train_component_logs(self):
+    def _consume_train_component_logs(self, primary_loss=None):
         if self._train_component_count == 0:
             return {}
         denom = float(self._train_component_count)
         logs = {
             "lm_loss": self._train_component_sums["lm_loss"] / denom,
             "pchembl_loss": self._train_component_sums["pchembl_loss"] / denom,
-            "pair_loss": self._train_component_sums["pair_loss"] / denom,
+            "ranking_loss": self._train_component_sums["pair_loss"] / denom,
             "total_loss": self._train_component_sums["total_loss"] / denom,
         }
+        if self._is_same_loss_value(primary_loss, logs["total_loss"]):
+            logs.pop("total_loss")
         self._reset_train_component_accumulator()
         return logs
 
-    def _consume_eval_component_logs(self, metric_key_prefix):
+    def _consume_eval_component_logs(self, metric_key_prefix, primary_loss=None):
         if self._eval_component_count == 0:
             return {}
 
@@ -126,9 +137,11 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         logs = {
             f"{metric_key_prefix}_lm_loss": float(sums[0].item() / denom),
             f"{metric_key_prefix}_pchembl_loss": float(sums[1].item() / denom),
-            f"{metric_key_prefix}_pair_loss": float(sums[2].item() / denom),
+            f"{metric_key_prefix}_ranking_loss": float(sums[2].item() / denom),
             f"{metric_key_prefix}_total_loss": float(sums[3].item() / denom),
         }
+        if self._is_same_loss_value(primary_loss, logs[f"{metric_key_prefix}_total_loss"]):
+            logs.pop(f"{metric_key_prefix}_total_loss")
         if self._stage_has_lm():
             try:
                 logs[f"{metric_key_prefix}_perplexity"] = float(math.exp(logs[f"{metric_key_prefix}_lm_loss"]))
@@ -155,7 +168,10 @@ class GPT2_w_crs_attn_Trainer(Trainer):
 
         eval_start = time.perf_counter()
         metrics = super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
-        component_metrics = self._consume_eval_component_logs(metric_key_prefix)
+        component_metrics = self._consume_eval_component_logs(
+            metric_key_prefix,
+            primary_loss=metrics.get(f"{metric_key_prefix}_loss"),
+        )
         metrics.update(component_metrics)
         if component_metrics:
             self.log(component_metrics)
@@ -179,7 +195,7 @@ class GPT2_w_crs_attn_Trainer(Trainer):
     def log(self, logs, start_time=None):
         logs = dict(logs)
         if "loss" in logs:
-            logs.update(self._consume_train_component_logs())
+            logs.update(self._consume_train_component_logs(primary_loss=logs["loss"]))
         return super().log(logs, start_time=start_time)
 
     def _build_model_inputs(self, inputs):

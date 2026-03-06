@@ -552,34 +552,42 @@ class PChemblPredictor:
             logger=self.logger,
         )
         summary = {
-            "MSE": float(metrics["pchembl_mse_raw"]),
-            "RMSE": float(metrics["pchembl_rmse_raw"]),
-            "MAE": float(metrics["pchembl_mae_raw"]),
-            "R2": float(metrics["pchembl_r2"]),
-            "Count": int(metrics["pchembl_valid_count"]),
+            "pchembl_raw_mse": float(metrics["pchembl_raw_mse"]),
+            "pchembl_raw_rmse": float(metrics["pchembl_raw_rmse"]),
+            "pchembl_raw_mae": float(metrics["pchembl_raw_mae"]),
+            "pchembl_r2": float(metrics["pchembl_r2"]),
+            "pchembl_count": int(metrics["pchembl_count"]),
         }
-        if "pchembl_pearson_raw" in metrics:
-            summary["Pearson_r"] = float(metrics["pchembl_pearson_raw"])
-        if "pchembl_spearman_raw" in metrics:
-            summary["Spearman_rho"] = float(metrics["pchembl_spearman_raw"])
+        if "pchembl_raw_pearson" in metrics:
+            summary["pchembl_raw_pearson"] = float(metrics["pchembl_raw_pearson"])
+        if "pchembl_raw_spearman" in metrics:
+            summary["pchembl_raw_spearman"] = float(metrics["pchembl_raw_spearman"])
         return summary
 
     def _log_metric_summary(self, metrics: Dict[str, float], include_significance: bool = False, y_true=None, y_pred=None):
         self.logger.info("-" * 40)
         self.logger.info("Evaluation Metrics:")
-        for key in ["MSE", "RMSE", "MAE", "R2", "Pearson_r", "Spearman_rho", "Count"]:
+        for key in [
+            "pchembl_raw_mse",
+            "pchembl_raw_rmse",
+            "pchembl_raw_mae",
+            "pchembl_r2",
+            "pchembl_raw_pearson",
+            "pchembl_raw_spearman",
+            "pchembl_count",
+        ]:
             if key not in metrics:
                 continue
             value = metrics[key]
-            if key == "Count":
+            if key == "pchembl_count":
                 self.logger.info("%s: %s", key, value)
             else:
                 self.logger.info("%s: %.4f", key, value)
         if include_significance and y_true is not None and y_pred is not None:
             pearson_corr, pearson_pval = pearsonr(y_true, y_pred)
             spearman_corr, spearman_pval = spearmanr(y_true, y_pred)
-            metrics["Pearson_pval"] = float(pearson_pval)
-            metrics["Spearman_pval"] = float(spearman_pval)
+            metrics["pchembl_raw_pearson_pval"] = float(pearson_pval)
+            metrics["pchembl_raw_spearman_pval"] = float(spearman_pval)
             self.logger.info("Pearson p-value: %.4e", pearson_pval)
             self.logger.info("Spearman p-value: %.4e", spearman_pval)
         self.logger.info("-" * 40)
@@ -673,14 +681,14 @@ class PChemblPredictor:
         
         if metrics is None:
             metrics = self._summarize_prediction_metrics(y_true, y_pred)
-        mse = metrics["MSE"]
-        mae = metrics["MAE"]
-        rmse = metrics["RMSE"]
-        r2 = metrics["R2"]
-        pearson_corr = metrics.get("Pearson_r", float("nan"))
-        spearman_corr = metrics.get("Spearman_rho", float("nan"))
-        pearson_pval = metrics.get("Pearson_pval", float("nan"))
-        spearman_pval = metrics.get("Spearman_pval", float("nan"))
+        mse = metrics["pchembl_raw_mse"]
+        mae = metrics["pchembl_raw_mae"]
+        rmse = metrics["pchembl_raw_rmse"]
+        r2 = metrics["pchembl_r2"]
+        pearson_corr = metrics.get("pchembl_raw_pearson", float("nan"))
+        spearman_corr = metrics.get("pchembl_raw_spearman", float("nan"))
+        pearson_pval = metrics.get("pchembl_raw_pearson_pval", float("nan"))
+        spearman_pval = metrics.get("pchembl_raw_spearman_pval", float("nan"))
 
         # Create figure with multiple subplots
         fig = plt.figure(figsize=(20, 12))

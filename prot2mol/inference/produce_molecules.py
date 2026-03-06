@@ -593,16 +593,16 @@ class MoleculeGenerator:
                 generated_df['Generated_SMILES'] = generated_smiles
             
             # Add additional molecular properties if available in results
-            if 'sa_score' in results_df.columns:
-                generated_df['SA_Score'] = results_df['sa_score'].tolist()
-            if 'qed_score' in results_df.columns:
-                generated_df['QED_Score'] = results_df['qed_score'].tolist()
-            if 'logp_score' in results_df.columns:
-                generated_df['LogP_Score'] = results_df['logp_score'].tolist()
-            if 'test_sim' in results_df.columns:
-                generated_df['Test_Similarity'] = results_df['test_sim'].tolist()
-            if 'train_sim' in results_df.columns:
-                generated_df['Train_Similarity'] = results_df['train_sim'].tolist()
+            if 'sa' in results_df.columns:
+                generated_df['sa'] = results_df['sa'].tolist()
+            if 'qed' in results_df.columns:
+                generated_df['qed'] = results_df['qed'].tolist()
+            if 'logp' in results_df.columns:
+                generated_df['logp'] = results_df['logp'].tolist()
+            if 'similarity_eval' in results_df.columns:
+                generated_df['similarity_eval'] = results_df['similarity_eval'].tolist()
+            if 'similarity_train' in results_df.columns:
+                generated_df['similarity_train'] = results_df['similarity_train'].tolist()
             
             self.logger.info("Metrics calculated successfully")
             for key, value in metrics.items():
