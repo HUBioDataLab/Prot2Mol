@@ -1,0 +1,13 @@
+train:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_max_length: 1024
+  molecule_max_length: 512
+  fusion_hidden_dim: 512
+  fusion_num_heads: 8
+  dropout: 0.1
+  pooling_type: mean
+  activity_threshold: 6.0
+  pair_loss_weight: 1.0
+  classification_loss_weight: 0.5
+  bce_pos_weight: 1.0
