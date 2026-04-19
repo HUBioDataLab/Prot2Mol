@@ -59,7 +59,7 @@ pytz==2024.1
 PyYAML==6.0.2
 rdkit==2024.3.5
 regex==2024.7.24
-requests==2.32.4
+requests==2.33.0
 safetensors==0.4.4
 scikit-learn==1.5.1
 scipy==1.14.0
