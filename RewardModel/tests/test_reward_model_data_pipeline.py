@@ -1,16 +1,13 @@
-import json
 import os
 import sqlite3
 
-from conftest import DummyTokenizer
 from reward_model.data import RewardDataStore
 from reward_model.data_processing import ChemblPreprocessConfig
 from reward_model.data_processing.chembl import (
-    preprocess_chembl_sqlite,
-    assign_assay_based_splits,
+    CURATED_FIELD_ORDER,
     deduplicate_assay_rows,
     extract_chembl_activity_rows,
-    tokenize_assay_rows,
+    preprocess_chembl_sqlite,
 )
 
 
@@ -192,7 +189,7 @@ def _patched_selfies(monkeypatch):
     )
 
 
-def test_extract_and_deduplicate_rows_apply_chembl_filters(tmp_path, monkeypatch):
+def test_extract_and_deduplicate_rows_apply_chembl_filters_and_minimal_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "chembl_36.sqlite"
     _create_test_sqlite(str(db_path))
     _patched_selfies(monkeypatch)
@@ -204,53 +201,27 @@ def test_extract_and_deduplicate_rows_apply_chembl_filters(tmp_path, monkeypatch
     assert total_raw_rows == 19
     assert len(filtered_rows) == 11
     assert len(curated_rows) == 10
+    assert set(curated_rows[0].keys()) == set(CURATED_FIELD_ORDER)
 
     collapsed = next(
         row
         for row in curated_rows
-        if row["group_id"] == "CHEMBL_T1__CHEMBL_A1" and row["parent_molregno"] == 10
+        if row["target_chembl_id"] == "CHEMBL_T1"
+        and row["assay_chembl_id"] == "CHEMBL_A1"
+        and row["parent_molregno"] == 10
     )
     assert collapsed["pchembl_value"] == 7.5
-    assert collapsed["n_raw_rows_collapsed"] == 2
-    assert json.loads(collapsed["raw_molregnos_json"]) == [10, 11]
+    assert collapsed["activity_label"] == 1
     assert collapsed["compound_selfies"] == "SELFIES<CCO>"
 
-    kept_groups = {row["group_id"] for row in curated_rows}
-    assert "CHEMBL_T1__CHEMBL_A3" not in kept_groups
-    assert "CHEMBL_T2__CHEMBL_A4" not in kept_groups
-    assert "CHEMBL_T1__CHEMBL_A5" not in kept_groups
-    assert "CHEMBL_T4__CHEMBL_A10" not in kept_groups
+    kept_groups = {(row["target_chembl_id"], row["assay_chembl_id"]) for row in curated_rows}
+    assert ("CHEMBL_T1", "CHEMBL_A3") not in kept_groups
+    assert ("CHEMBL_T2", "CHEMBL_A4") not in kept_groups
+    assert ("CHEMBL_T1", "CHEMBL_A5") not in kept_groups
+    assert ("CHEMBL_T4", "CHEMBL_A10") not in kept_groups
 
 
-def test_assign_assay_based_splits_are_deterministic_and_assay_scoped(tmp_path, monkeypatch):
-    db_path = tmp_path / "chembl_36.sqlite"
-    _create_test_sqlite(str(db_path))
-    _patched_selfies(monkeypatch)
-
-    config = ChemblPreprocessConfig(sqlite_path=str(db_path), output_dir=str(tmp_path / "artifacts"), split_seed=17)
-    filtered_rows, _ = extract_chembl_activity_rows(str(db_path), config)
-    curated_rows = deduplicate_assay_rows(filtered_rows, config)
-
-    first_assignment = assign_assay_based_splits(curated_rows, config)
-    second_assignment = assign_assay_based_splits(curated_rows, config)
-    assert first_assignment == second_assignment
-
-    sparse_rows = [row for row in first_assignment if row["target_chembl_id"] == "CHEMBL_T1"]
-    assert sparse_rows
-    assert {row["split"] for row in sparse_rows} == {"train"}
-    assert {row["is_sparse_train_only"] for row in sparse_rows} == {True}
-
-    target_three_rows = [row for row in first_assignment if row["target_chembl_id"] == "CHEMBL_T3"]
-    assert {row["split"] for row in target_three_rows} == {"train", "valid", "test"}
-
-    assay_to_split = {}
-    for row in first_assignment:
-        key = (row["target_chembl_id"], row["assay_chembl_id"])
-        assay_to_split.setdefault(key, set()).add(row["split"])
-    assert all(len(splits) == 1 for splits in assay_to_split.values())
-
-
-def test_preprocess_pipeline_writes_artifacts_and_runtime_grouping(tmp_path, monkeypatch):
+def test_preprocess_pipeline_writes_only_curated_artifacts(tmp_path, monkeypatch):
     db_path = tmp_path / "chembl_36.sqlite"
     _create_test_sqlite(str(db_path))
     _patched_selfies(monkeypatch)
@@ -259,84 +230,24 @@ def test_preprocess_pipeline_writes_artifacts_and_runtime_grouping(tmp_path, mon
     config = ChemblPreprocessConfig(
         sqlite_path=str(db_path),
         output_dir=str(output_dir),
-        split_seed=21,
-        protein_max_length=6,
-        molecule_max_length=7,
         write_parquet=False,
     )
 
-    artifacts = preprocess_chembl_sqlite(
-        config=config,
-        protein_tokenizer=DummyTokenizer(),
-        molecule_tokenizer=DummyTokenizer(),
-    )
+    artifacts = preprocess_chembl_sqlite(config=config)
 
     assert os.path.exists(artifacts.curated_csv_path)
-    assert os.path.exists(artifacts.tokenized_jsonl_path)
-    assert os.path.exists(artifacts.metadata_path)
     assert os.path.exists(artifacts.provenance_path)
     assert artifacts.curated_parquet_path is None
-
-    with open(artifacts.metadata_path, "r", encoding="utf-8") as handle:
-        metadata = json.load(handle)
-    assert metadata["total_raw_rows"] == 19
-    assert metadata["rows_after_deduplication"] == 10
-    assert metadata["split_counts"]["train"]["rows"] >= 1
+    assert not os.path.exists(output_dir / "tokenized")
+    assert not os.path.exists(output_dir / "metadata.json")
+    assert not os.path.exists(output_dir / "preprocess_config.json")
 
     store = RewardDataStore.from_output_dir(str(output_dir))
     assert len(store.curated_rows) == 10
-    assert len(store.tokenized_rows) == 10
-
-    one_tokenized_row = store.tokenized_rows[0]
-    assert "protein_input_ids" in one_tokenized_row
-    assert "molecule_input_ids" in one_tokenized_row
+    assert set(store.curated_rows[0].keys()) == set(CURATED_FIELD_ORDER)
+    assert all("split" not in row for row in store.curated_rows)
+    assert all("group_id" not in row for row in store.curated_rows)
 
     curated_groups = store.curated_groups()
     assert "CHEMBL_T1__CHEMBL_A1" in curated_groups
     assert len(curated_groups["CHEMBL_T1__CHEMBL_A1"]) == 2
-
-    train_groups = store.tokenized_groups(split="train")
-    assert all(all(row["split"] == "train" for row in rows) for rows in train_groups.values())
-
-
-def test_tokenize_assay_rows_preserve_group_metadata():
-    rows = [
-        {
-            "target_chembl_id": "CHEMBL_T1",
-            "target_pref_name": "Kinase One",
-            "protein_accession": "P11111",
-            "protein_sequence": "MKTAA",
-            "assay_chembl_id": "CHEMBL_A1",
-            "assay_id": 1,
-            "confidence_score": 8,
-            "target_organism": "Homo sapiens",
-            "parent_molregno": 10,
-            "molecule_chembl_id": "CHEMBL_M10",
-            "canonical_smiles": "CCO",
-            "compound_selfies": "[C][C][O]",
-            "pchembl_value": 7.5,
-            "activity_label": 1,
-            "n_raw_rows_collapsed": 2,
-            "group_id": "CHEMBL_T1__CHEMBL_A1",
-            "split": "train",
-            "split_seed": 42,
-            "split_policy": "demo",
-            "is_sparse_train_only": True,
-            "raw_activity_ids_json": "[1, 2]",
-            "raw_molregnos_json": "[10, 11]",
-            "raw_molecule_chembl_ids_json": "[\"CHEMBL_M10\", \"CHEMBL_M11\"]",
-            "raw_standard_types_json": "[\"IC50\"]",
-        }
-    ]
-    config = ChemblPreprocessConfig(output_dir="/tmp/unused", protein_max_length=6, molecule_max_length=7)
-    tokenized_rows = tokenize_assay_rows(
-        rows,
-        protein_tokenizer=DummyTokenizer(),
-        molecule_tokenizer=DummyTokenizer(),
-        config=config,
-    )
-
-    assert len(tokenized_rows) == 1
-    assert tokenized_rows[0]["group_id"] == "CHEMBL_T1__CHEMBL_A1"
-    assert len(tokenized_rows[0]["protein_input_ids"]) == 6
-    assert len(tokenized_rows[0]["molecule_input_ids"]) == 7

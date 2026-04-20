@@ -7,7 +7,7 @@ try:
     from .io import load_reward_model, load_reward_model_config, save_reward_model, save_reward_model_config
     from .core import RewardModel
     from .outputs import RewardModelOutput
-except ImportError:
+except Exception:
     pass
 else:
     __all__.extend(

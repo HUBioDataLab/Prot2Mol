@@ -5,10 +5,7 @@ def test_chembl_preprocess_config_round_trip(tmp_path):
     config = ChemblPreprocessConfig(
         sqlite_path="/data/chembl_36.sqlite",
         output_dir="/tmp/reward-data",
-        split_seed=123,
-        protein_max_length=512,
-        molecule_max_length=128,
-        tokenization_batch_size=64,
+        activity_threshold=5.5,
         write_parquet=False,
     )
 

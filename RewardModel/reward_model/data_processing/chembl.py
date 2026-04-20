@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import csv
 import gzip
-import hashlib
 import json
 import os
-import random
 import shutil
 import sqlite3
 import tarfile
@@ -16,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .config import ChemblPreprocessConfig
 
@@ -29,43 +27,21 @@ SCHEMA_DOC_URL = (
 TARGET_DOC_URL = (
     "https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/target-questions"
 )
-SQL_QUERY_VERSION = "chembl_assay_reward_v1"
-SPLIT_POLICY_NAME = "assay_within_target_80_10_10_train_only_if_lt3_assays"
+SQL_QUERY_VERSION = "chembl_assay_reward_v2_minimal_curated"
 
 CURATED_CSV_FILENAME = "chembl_assay_rows.csv"
 CURATED_PARQUET_FILENAME = "chembl_assay_rows.parquet"
-TOKENIZED_JSONL_FILENAME = "rows.jsonl"
-TOKENIZED_DATASET_DIRNAME = "hf_dataset"
-TOKENIZED_MANIFEST_FILENAME = "manifest.json"
-METADATA_FILENAME = "metadata.json"
 PROVENANCE_FILENAME = "provenance.json"
-PREPROCESS_CONFIG_FILENAME = "preprocess_config.json"
 
 CURATED_FIELD_ORDER: Tuple[str, ...] = (
     "target_chembl_id",
-    "target_pref_name",
-    "protein_accession",
     "protein_sequence",
     "assay_chembl_id",
-    "assay_id",
-    "confidence_score",
-    "target_organism",
     "parent_molregno",
     "molecule_chembl_id",
-    "canonical_smiles",
     "compound_selfies",
     "pchembl_value",
     "activity_label",
-    "n_raw_rows_collapsed",
-    "group_id",
-    "split",
-    "split_seed",
-    "split_policy",
-    "is_sparse_train_only",
-    "raw_activity_ids_json",
-    "raw_molregnos_json",
-    "raw_molecule_chembl_ids_json",
-    "raw_standard_types_json",
 )
 
 
@@ -75,20 +51,11 @@ class PreprocessArtifacts:
     raw_dir: str
     curated_csv_path: str
     curated_parquet_path: Optional[str]
-    tokenized_jsonl_path: str
-    tokenized_dataset_path: Optional[str]
-    metadata_path: str
     provenance_path: str
-    config_path: str
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _stable_seed(seed: int, value: str) -> int:
-    digest = hashlib.sha256(f"{seed}:{value}".encode("utf-8")).hexdigest()
-    return int(digest[:16], 16)
 
 
 def _ensure_dir(path: str) -> str:
@@ -113,11 +80,6 @@ def _parse_release_from_filename(path: str) -> Optional[str]:
 def _table_has_column(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:
     cursor = connection.execute(f"PRAGMA table_info({table_name})")
     return any(row[1] == column_name for row in cursor.fetchall())
-
-
-def _json_dump_sorted(values: Iterable[Any]) -> str:
-    unique = sorted({value for value in values if value is not None})
-    return json.dumps(unique)
 
 
 def _try_encode_selfies(smiles: str) -> Optional[str]:
@@ -147,42 +109,7 @@ def _normalize_scalar(value: Any) -> Any:
 
 
 def _row_to_serializable(row: Mapping[str, Any]) -> Dict[str, Any]:
-    serializable = {}
-    for key, value in row.items():
-        if isinstance(value, (list, tuple)):
-            serializable[key] = [_normalize_scalar(item) for item in value]
-        else:
-            serializable[key] = _normalize_scalar(value)
-    return serializable
-
-
-def _split_counts(num_assays: int, ratios: Sequence[float]) -> Tuple[int, int, int]:
-    if num_assays < 3:
-        return num_assays, 0, 0
-    train_ratio, valid_ratio, test_ratio = ratios
-    tentative_valid = max(1, int(round(num_assays * valid_ratio)))
-    tentative_test = max(1, int(round(num_assays * test_ratio)))
-
-    if tentative_valid + tentative_test >= num_assays:
-        overflow = tentative_valid + tentative_test - (num_assays - 1)
-        while overflow > 0 and tentative_valid > 1:
-            tentative_valid -= 1
-            overflow -= 1
-        while overflow > 0 and tentative_test > 1:
-            tentative_test -= 1
-            overflow -= 1
-        if overflow > 0:
-            tentative_valid = max(0, tentative_valid - overflow)
-            overflow = 0
-    train_count = num_assays - tentative_valid - tentative_test
-
-    if train_count <= 0:
-        train_count = 1
-        if tentative_valid >= tentative_test and tentative_valid > 0:
-            tentative_valid -= 1
-        elif tentative_test > 0:
-            tentative_test -= 1
-    return train_count, tentative_valid, tentative_test
+    return {key: _normalize_scalar(value) for key, value in row.items()}
 
 
 def _default_sql_query(config: ChemblPreprocessConfig, include_variant_filter: bool) -> Tuple[str, List[Any]]:
@@ -191,21 +118,12 @@ def _default_sql_query(config: ChemblPreprocessConfig, include_variant_filter: b
     variant_clause = "AND a.variant_id IS NULL" if include_variant_filter else ""
     query = f"""
         SELECT
-            act.activity_id AS activity_id,
-            act.assay_id AS assay_id,
             a.chembl_id AS assay_chembl_id,
-            a.confidence_score AS confidence_score,
             td.chembl_id AS target_chembl_id,
-            td.pref_name AS target_pref_name,
-            td.organism AS target_organism,
-            cs.accession AS protein_accession,
             cs.sequence AS protein_sequence,
-            act.molregno AS raw_molregno,
-            md_raw.chembl_id AS raw_molecule_chembl_id,
             COALESCE(mh.parent_molregno, act.molregno) AS parent_molregno,
             md_parent.chembl_id AS molecule_chembl_id,
             COALESCE(cs_parent.canonical_smiles, cs_raw.canonical_smiles) AS canonical_smiles,
-            act.standard_type AS standard_type,
             act.pchembl_value AS pchembl_value
         FROM activities act
         JOIN assays a
@@ -346,22 +264,12 @@ def extract_chembl_activity_rows(
                 continue
             rows.append(
                 {
-                    "activity_id": int(raw_row["activity_id"]),
-                    "assay_id": int(raw_row["assay_id"]),
-                    "assay_chembl_id": raw_row["assay_chembl_id"],
-                    "confidence_score": int(raw_row["confidence_score"]),
                     "target_chembl_id": raw_row["target_chembl_id"],
-                    "target_pref_name": raw_row["target_pref_name"],
-                    "target_organism": raw_row["target_organism"],
-                    "protein_accession": raw_row["protein_accession"],
                     "protein_sequence": raw_row["protein_sequence"],
-                    "raw_molregno": int(raw_row["raw_molregno"]),
-                    "raw_molecule_chembl_id": raw_row["raw_molecule_chembl_id"],
+                    "assay_chembl_id": raw_row["assay_chembl_id"],
                     "parent_molregno": int(raw_row["parent_molregno"]),
                     "molecule_chembl_id": raw_row["molecule_chembl_id"],
-                    "canonical_smiles": smiles,
                     "compound_selfies": compound_selfies,
-                    "standard_type": raw_row["standard_type"],
                     "pchembl_value": float(raw_row["pchembl_value"]),
                 }
             )
@@ -390,35 +298,24 @@ def deduplicate_assay_rows(
         deduplicated_rows.append(
             {
                 "target_chembl_id": example["target_chembl_id"],
-                "target_pref_name": example["target_pref_name"],
-                "protein_accession": example["protein_accession"],
                 "protein_sequence": example["protein_sequence"],
                 "assay_chembl_id": example["assay_chembl_id"],
-                "assay_id": int(example["assay_id"]),
-                "confidence_score": int(example["confidence_score"]),
-                "target_organism": example["target_organism"],
                 "parent_molregno": int(example["parent_molregno"]),
                 "molecule_chembl_id": example["molecule_chembl_id"],
-                "canonical_smiles": example["canonical_smiles"],
                 "compound_selfies": example["compound_selfies"],
                 "pchembl_value": aggregated_pchembl,
                 "activity_label": int(aggregated_pchembl >= config.activity_threshold),
-                "n_raw_rows_collapsed": len(grouped_rows),
-                "group_id": f"{example['target_chembl_id']}__{example['assay_chembl_id']}",
-                "raw_activity_ids_json": _json_dump_sorted(row["activity_id"] for row in grouped_rows),
-                "raw_molregnos_json": _json_dump_sorted(row["raw_molregno"] for row in grouped_rows),
-                "raw_molecule_chembl_ids_json": _json_dump_sorted(
-                    row["raw_molecule_chembl_id"] for row in grouped_rows
-                ),
-                "raw_standard_types_json": _json_dump_sorted(row["standard_type"] for row in grouped_rows),
             }
         )
 
-    group_counts = Counter(row["group_id"] for row in deduplicated_rows)
+    assay_counts = Counter(
+        (row["target_chembl_id"], row["assay_chembl_id"])
+        for row in deduplicated_rows
+    )
     filtered_rows = [
         row
         for row in deduplicated_rows
-        if group_counts[row["group_id"]] >= config.min_group_size
+        if assay_counts[(row["target_chembl_id"], row["assay_chembl_id"])] >= config.min_group_size
     ]
     filtered_rows.sort(
         key=lambda row: (
@@ -430,102 +327,6 @@ def deduplicate_assay_rows(
     return filtered_rows
 
 
-def assign_assay_based_splits(
-    rows: Sequence[Mapping[str, Any]],
-    config: ChemblPreprocessConfig,
-) -> List[Dict[str, Any]]:
-    assays_by_target: Dict[str, List[str]] = defaultdict(list)
-    for row in rows:
-        assays_by_target[str(row["target_chembl_id"])].append(str(row["assay_chembl_id"]))
-
-    split_lookup: Dict[Tuple[str, str], Tuple[str, bool]] = {}
-    for target_chembl_id, assay_ids in assays_by_target.items():
-        unique_assays = sorted(set(assay_ids))
-        if len(unique_assays) < config.min_assays_per_protein_for_holdout:
-            for assay_chembl_id in unique_assays:
-                split_lookup[(target_chembl_id, assay_chembl_id)] = ("train", True)
-            continue
-
-        ordered_assays = list(unique_assays)
-        rng = random.Random(_stable_seed(config.split_seed, target_chembl_id))
-        rng.shuffle(ordered_assays)
-
-        train_count, valid_count, test_count = _split_counts(len(ordered_assays), config.split_ratios)
-        train_assays = ordered_assays[:train_count]
-        valid_assays = ordered_assays[train_count : train_count + valid_count]
-        test_assays = ordered_assays[train_count + valid_count : train_count + valid_count + test_count]
-
-        for assay_chembl_id in train_assays:
-            split_lookup[(target_chembl_id, assay_chembl_id)] = ("train", False)
-        for assay_chembl_id in valid_assays:
-            split_lookup[(target_chembl_id, assay_chembl_id)] = ("valid", False)
-        for assay_chembl_id in test_assays:
-            split_lookup[(target_chembl_id, assay_chembl_id)] = ("test", False)
-
-    assigned_rows: List[Dict[str, Any]] = []
-    for row in rows:
-        split, is_sparse_train_only = split_lookup[(str(row["target_chembl_id"]), str(row["assay_chembl_id"]))]
-        assigned_row = dict(row)
-        assigned_row["split"] = split
-        assigned_row["split_seed"] = int(config.split_seed)
-        assigned_row["split_policy"] = SPLIT_POLICY_NAME
-        assigned_row["is_sparse_train_only"] = bool(is_sparse_train_only)
-        assigned_rows.append(assigned_row)
-    return assigned_rows
-
-
-def tokenize_assay_rows(
-    rows: Sequence[Mapping[str, Any]],
-    protein_tokenizer: Any,
-    molecule_tokenizer: Any,
-    config: ChemblPreprocessConfig,
-) -> List[Dict[str, Any]]:
-    from ..model.encoders import batch_encode_texts
-
-    if not rows:
-        return []
-
-    unique_proteins = list(dict.fromkeys(str(row["protein_sequence"]) for row in rows))
-    unique_molecules = list(dict.fromkeys(str(row["compound_selfies"]) for row in rows))
-
-    protein_tokens: Dict[str, Dict[str, Any]] = {}
-    molecule_tokens: Dict[str, Dict[str, Any]] = {}
-
-    for start in range(0, len(unique_proteins), config.tokenization_batch_size):
-        batch = unique_proteins[start : start + config.tokenization_batch_size]
-        encoded = batch_encode_texts(
-            tokenizer=protein_tokenizer,
-            texts=batch,
-            max_length=config.protein_max_length,
-        )
-        for batch_index, sequence in enumerate(batch):
-            protein_tokens[sequence] = {
-                f"protein_{key}": _normalize_scalar(value[batch_index].tolist())
-                for key, value in encoded.items()
-            }
-
-    for start in range(0, len(unique_molecules), config.tokenization_batch_size):
-        batch = unique_molecules[start : start + config.tokenization_batch_size]
-        encoded = batch_encode_texts(
-            tokenizer=molecule_tokenizer,
-            texts=batch,
-            max_length=config.molecule_max_length,
-        )
-        for batch_index, sequence in enumerate(batch):
-            molecule_tokens[sequence] = {
-                f"molecule_{key}": _normalize_scalar(value[batch_index].tolist())
-                for key, value in encoded.items()
-            }
-
-    tokenized_rows: List[Dict[str, Any]] = []
-    for row in rows:
-        tokenized_row = dict(row)
-        tokenized_row.update(protein_tokens[str(row["protein_sequence"])])
-        tokenized_row.update(molecule_tokens[str(row["compound_selfies"])])
-        tokenized_rows.append(_row_to_serializable(tokenized_row))
-    return tokenized_rows
-
-
 def save_curated_rows(
     rows: Sequence[Mapping[str, Any]],
     output_dir: str,
@@ -534,17 +335,11 @@ def save_curated_rows(
     curated_dir = _ensure_dir(output_dir)
     csv_path = os.path.join(curated_dir, CURATED_CSV_FILENAME)
 
-    fieldnames = list(CURATED_FIELD_ORDER)
-    if rows:
-        for key in rows[0].keys():
-            if key not in fieldnames:
-                fieldnames.append(key)
-
     with open(csv_path, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=list(CURATED_FIELD_ORDER))
         writer.writeheader()
         for row in rows:
-            writer.writerow(_row_to_serializable(row))
+            writer.writerow({key: _row_to_serializable(row).get(key) for key in CURATED_FIELD_ORDER})
 
     parquet_path: Optional[str] = None
     if write_parquet:
@@ -552,88 +347,13 @@ def save_curated_rows(
             import pandas as pd
 
             parquet_path = os.path.join(curated_dir, CURATED_PARQUET_FILENAME)
-            pd.DataFrame([_row_to_serializable(row) for row in rows]).to_parquet(parquet_path, index=False)
+            pd.DataFrame(
+                [{key: _row_to_serializable(row).get(key) for key in CURATED_FIELD_ORDER} for row in rows]
+            ).to_parquet(parquet_path, index=False)
         except Exception:
             parquet_path = None
 
     return csv_path, parquet_path
-
-
-def save_tokenized_rows(
-    rows: Sequence[Mapping[str, Any]],
-    output_dir: str,
-) -> Tuple[str, Optional[str]]:
-    tokenized_dir = _ensure_dir(output_dir)
-    jsonl_path = os.path.join(tokenized_dir, TOKENIZED_JSONL_FILENAME)
-    with open(jsonl_path, "w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(_row_to_serializable(row), sort_keys=True))
-            handle.write("\n")
-
-    dataset_path: Optional[str] = None
-    try:
-        from datasets import Dataset, DatasetDict
-
-        split_payload = defaultdict(list)
-        for row in rows:
-            split_payload[str(row["split"])].append(_row_to_serializable(row))
-        dataset_dict = DatasetDict(
-            {
-                split_name: Dataset.from_list(split_rows)
-                for split_name, split_rows in split_payload.items()
-                if split_rows
-            }
-        )
-        dataset_path = os.path.join(tokenized_dir, TOKENIZED_DATASET_DIRNAME)
-        dataset_dict.save_to_disk(dataset_path)
-    except Exception:
-        dataset_path = None
-
-    manifest_path = os.path.join(tokenized_dir, TOKENIZED_MANIFEST_FILENAME)
-    with open(manifest_path, "w", encoding="utf-8") as handle:
-        json.dump(
-            {
-                "num_rows": len(rows),
-                "columns": sorted(rows[0].keys()) if rows else [],
-                "hf_dataset_path": dataset_path,
-                "jsonl_path": jsonl_path,
-            },
-            handle,
-            indent=2,
-            sort_keys=True,
-        )
-
-    return jsonl_path, dataset_path
-
-
-def build_metadata(
-    total_raw_rows: int,
-    filtered_rows: Sequence[Mapping[str, Any]],
-    curated_rows: Sequence[Mapping[str, Any]],
-    provenance: Mapping[str, Any],
-) -> Dict[str, Any]:
-    metadata: Dict[str, Any] = {
-        "total_raw_rows": int(total_raw_rows),
-        "rows_after_filtering": len(filtered_rows),
-        "rows_after_deduplication": len(curated_rows),
-        "num_proteins": len({row["target_chembl_id"] for row in curated_rows}),
-        "num_assays": len({row["group_id"] for row in curated_rows}),
-        "num_sparse_train_only_proteins": len(
-            {row["target_chembl_id"] for row in curated_rows if row.get("is_sparse_train_only")}
-        ),
-        "split_counts": {},
-        "sql_query_version": provenance.get("sql_query_version"),
-        "chembl_release": provenance.get("chembl_release"),
-    }
-    for split_name in ("train", "valid", "test"):
-        split_rows = [row for row in curated_rows if row.get("split") == split_name]
-        metadata["split_counts"][split_name] = {
-            "proteins": len({row["target_chembl_id"] for row in split_rows}),
-            "assays": len({row["group_id"] for row in split_rows}),
-            "rows": len(split_rows),
-            "molecules": len({row["molecule_chembl_id"] for row in split_rows}),
-        }
-    return metadata
 
 
 def save_json(payload: Mapping[str, Any], path: str) -> str:
@@ -642,18 +362,13 @@ def save_json(payload: Mapping[str, Any], path: str) -> str:
     return path
 
 
-def preprocess_chembl_sqlite(
-    config: ChemblPreprocessConfig,
-    protein_tokenizer: Any,
-    molecule_tokenizer: Any,
-) -> PreprocessArtifacts:
+def preprocess_chembl_sqlite(config: ChemblPreprocessConfig) -> PreprocessArtifacts:
     if not config.output_dir:
         raise ValueError("config.output_dir must be provided")
 
     output_dir = os.path.abspath(config.output_dir)
     raw_dir = _ensure_dir(os.path.join(output_dir, config.raw_dir_name))
     curated_dir = _ensure_dir(os.path.join(output_dir, config.curated_dir_name))
-    tokenized_dir = _ensure_dir(os.path.join(output_dir, config.tokenized_dir_name))
 
     sqlite_path = config.sqlite_path
     if sqlite_path is None:
@@ -672,11 +387,8 @@ def preprocess_chembl_sqlite(
     if not os.path.exists(sqlite_path):
         raise FileNotFoundError(f"ChEMBL SQLite file does not exist: {sqlite_path}")
 
-    filtered_rows, total_raw_rows = extract_chembl_activity_rows(sqlite_path, config)
-    curated_rows = assign_assay_based_splits(deduplicate_assay_rows(filtered_rows, config), config)
-    tokenized_rows = tokenize_assay_rows(curated_rows, protein_tokenizer, molecule_tokenizer, config)
-
-    config_path = save_json(config.to_dict(), os.path.join(output_dir, PREPROCESS_CONFIG_FILENAME))
+    filtered_rows, _ = extract_chembl_activity_rows(sqlite_path, config)
+    curated_rows = deduplicate_assay_rows(filtered_rows, config)
 
     provenance = {
         "chembl_release": config.chembl_release or detect_chembl_release(sqlite_path),
@@ -685,8 +397,6 @@ def preprocess_chembl_sqlite(
         "download_date": _utc_now_iso() if config.download_url else None,
         "source_sqlite_path": sqlite_path,
         "sql_query_version": SQL_QUERY_VERSION,
-        "preprocessing_config_path": config_path,
-        "split_seed": config.split_seed,
         "reference_urls": {
             "downloads": CHEMBL_DOWNLOADS_DOC_URL,
             "schema": SCHEMA_DOC_URL,
@@ -700,32 +410,11 @@ def preprocess_chembl_sqlite(
         curated_dir,
         write_parquet=config.write_parquet,
     )
-    tokenized_jsonl_path, tokenized_dataset_path = save_tokenized_rows(tokenized_rows, tokenized_dir)
-
-    metadata = build_metadata(
-        total_raw_rows=total_raw_rows,
-        filtered_rows=filtered_rows,
-        curated_rows=curated_rows,
-        provenance=provenance,
-    )
-    metadata["artifact_paths"] = {
-        "curated_csv": curated_csv_path,
-        "curated_parquet": curated_parquet_path,
-        "tokenized_jsonl": tokenized_jsonl_path,
-        "tokenized_dataset": tokenized_dataset_path,
-        "provenance": provenance_path,
-        "config": config_path,
-    }
-    metadata_path = save_json(metadata, os.path.join(output_dir, METADATA_FILENAME))
 
     return PreprocessArtifacts(
         sqlite_path=sqlite_path,
         raw_dir=raw_dir,
         curated_csv_path=curated_csv_path,
         curated_parquet_path=curated_parquet_path,
-        tokenized_jsonl_path=tokenized_jsonl_path,
-        tokenized_dataset_path=tokenized_dataset_path,
-        metadata_path=metadata_path,
         provenance_path=provenance_path,
-        config_path=config_path,
     )

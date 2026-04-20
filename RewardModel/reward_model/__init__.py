@@ -1,8 +1,8 @@
 """Standalone reward-model package for protein-molecule scoring."""
 
-from .data import RewardDataStore, group_rows_by_group_id, load_curated_rows, load_tokenized_rows
+from .data import RewardDataStore, group_rows_by_group_id, load_curated_rows
 from .data_processing import ChemblPreprocessConfig, preprocess_chembl_sqlite
-from .model import RewardModelConfig
+from .model.config import RewardModelConfig
 
 __all__ = [
     "ChemblPreprocessConfig",
@@ -10,7 +10,6 @@ __all__ = [
     "RewardModelConfig",
     "group_rows_by_group_id",
     "load_curated_rows",
-    "load_tokenized_rows",
     "preprocess_chembl_sqlite",
 ]
 
@@ -27,7 +26,7 @@ try:
         save_reward_model,
         save_reward_model_config,
     )
-except ImportError:
+except Exception:
     pass
 else:
     __all__.extend(
