@@ -1,10 +1,7 @@
 import torch
 
 from conftest import DummyEncoder, DummyTokenizer
-from reward_model.config import RewardModelConfig
-from reward_model.encoders import LoadedEncoder
-from reward_model.model import RewardModel
-from reward_model.outputs import RewardModelOutput
+from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, RewardModelOutput
 
 
 def _build_model():

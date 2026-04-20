@@ -84,7 +84,7 @@ def load_reward_model(
     protein_bundle: Optional[LoadedEncoder] = None,
     molecule_bundle: Optional[LoadedEncoder] = None,
 ):
-    from .model import RewardModel
+    from .core import RewardModel
 
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model path does not exist: {model_path}")

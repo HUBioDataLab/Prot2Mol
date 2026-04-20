@@ -69,16 +69,20 @@ def batch_encode_texts(
     return encoded
 
 
+def load_tokenizer(
+    name_or_path: str,
+    tokenizer_kwargs: Optional[Dict[str, Any]] = None,
+):
+    return AutoTokenizer.from_pretrained(name_or_path, **(tokenizer_kwargs or {}))
+
+
 def load_encoder_bundle(
     name_or_path: str,
     tokenizer_name_or_path: Optional[str] = None,
     tokenizer_kwargs: Optional[Dict[str, Any]] = None,
     model_kwargs: Optional[Dict[str, Any]] = None,
 ) -> LoadedEncoder:
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_name_or_path or name_or_path,
-        **(tokenizer_kwargs or {}),
-    )
+    tokenizer = load_tokenizer(tokenizer_name_or_path or name_or_path, tokenizer_kwargs=tokenizer_kwargs)
     model = AutoModel.from_pretrained(name_or_path, **(model_kwargs or {}))
     hidden_size = infer_hidden_size(model)
     return LoadedEncoder(

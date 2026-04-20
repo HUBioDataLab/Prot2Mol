@@ -1,4 +1,4 @@
-from reward_model.config import RewardModelConfig
+from reward_model.model import RewardModelConfig
 
 
 def test_reward_model_config_round_trip(tmp_path):

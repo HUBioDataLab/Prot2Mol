@@ -1,10 +1,15 @@
 import torch
 
 from conftest import DummyEncoder, DummyTokenizer
-from reward_model.config import RewardModelConfig
-from reward_model.encoders import LoadedEncoder, load_encoder_bundle
-from reward_model.io import load_reward_model, load_reward_model_config, save_reward_model
-from reward_model.model import RewardModel
+from reward_model.model import (
+    LoadedEncoder,
+    RewardModel,
+    RewardModelConfig,
+    load_encoder_bundle,
+    load_reward_model,
+    load_reward_model_config,
+    save_reward_model,
+)
 
 
 def _dummy_bundles():
@@ -38,8 +43,8 @@ def test_load_encoder_bundle_uses_full_name_and_infers_hidden_size(monkeypatch):
             captured["model"] = (name_or_path, kwargs)
             return DummyEncoder(hidden_size=12)
 
-    monkeypatch.setattr("reward_model.encoders.AutoTokenizer", _AutoTokenizer)
-    monkeypatch.setattr("reward_model.encoders.AutoModel", _AutoModel)
+    monkeypatch.setattr("reward_model.model.encoders.AutoTokenizer", _AutoTokenizer)
+    monkeypatch.setattr("reward_model.model.encoders.AutoModel", _AutoModel)
 
     bundle = load_encoder_bundle(
         name_or_path="/abs/path/to/protein-model",
