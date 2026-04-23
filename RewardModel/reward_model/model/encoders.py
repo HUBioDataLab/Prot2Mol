@@ -56,14 +56,20 @@ def batch_encode_texts(
     padding: str = "max_length",
     truncation: bool = True,
 ) -> Dict[str, torch.Tensor]:
-    encoded = tokenizer.batch_encode_plus(
-        list(texts),
-        add_special_tokens=add_special_tokens,
-        padding=padding,
-        truncation=truncation,
-        max_length=max_length,
-        return_tensors="pt",
-    )
+    encode_kwargs = {
+        "add_special_tokens": add_special_tokens,
+        "padding": padding,
+        "truncation": truncation,
+        "max_length": max_length,
+        "return_tensors": "pt",
+    }
+    text_list = list(texts)
+
+    if callable(tokenizer):
+        encoded = tokenizer(text_list, **encode_kwargs)
+    else:
+        encoded = tokenizer.batch_encode_plus(text_list, **encode_kwargs)
+
     if device is not None:
         encoded = {key: value.to(device) for key, value in encoded.items()}
     return encoded

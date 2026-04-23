@@ -40,6 +40,10 @@ class ChemblPreprocessConfig:
     curated_dir_name: str = "curated"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.confidence_scores, tuple):
+            self.confidence_scores = tuple(self.confidence_scores)
+        if not isinstance(self.standard_types, tuple):
+            self.standard_types = tuple(self.standard_types)
         self.validate()
 
     def validate(self) -> None:
