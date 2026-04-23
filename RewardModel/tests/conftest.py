@@ -14,6 +14,9 @@ class DummyTokenizer:
         self.pad_token_id = pad_token_id
         self.calls = []
 
+    def __call__(self, texts, **kwargs):
+        return self.batch_encode_plus(texts, **kwargs)
+
     def batch_encode_plus(
         self,
         texts,
