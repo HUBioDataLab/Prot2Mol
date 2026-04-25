@@ -167,6 +167,17 @@ python prot2mol/main.py generate \
   --config prot2mol/configs/generate.yaml
 ```
 
+Generation-time pChEMBL scoring and `generate --mode prediction` now support the same
+target-resolution inputs as `predict`:
+- `Target_FASTA`
+- `UniProt_ID`
+- `Target_CHEMBL_ID`
+- or `--prot_id` as a single-target fallback
+
+Both generation-time scoring and `generate --mode prediction` can also save the same
+predicted pChEMBL distribution plot, plus an optional comparison plot against the real
+training-set pChEMBL distribution for the target protein.
+
 ### 4. Predict pChEMBL
 
 ```bash
@@ -179,10 +190,32 @@ Reproduce validation-split predictions (same split strategies used in training):
 ```bash
 python prot2mol/main.py predict \
   --config prot2mol/configs/predict.yaml \
-  --reproduce random
+  --reproduce auto
 ```
 
-Use `--reproduce aid` for AID hold-out validation split.
+Use `--reproduce random` or `--reproduce aid` to override the saved split mode manually.
+When `--reproduce auto` is used, the checkpoint `config.json` provides
+`eval_split`, `eval_split_ratio`, and `split_seed`.
+
+Score an arbitrary batch of protein-ligand pairs and save the predicted pChEMBL
+distribution plot:
+
+```bash
+python prot2mol/main.py predict \
+  --config prot2mol/configs/predict.yaml
+```
+
+Compare the scored batch against the real training-set pChEMBL distribution for a
+specific protein target:
+
+```bash
+python prot2mol/main.py predict \
+  --config prot2mol/configs/predict.yaml \
+  --compare_protein_id CHEMBL4282
+```
+
+If `predict.reference_dataset` is omitted, the script falls back to the checkpoint
+`dataset_source_path` when available.
 If local model caches are not under the default path, set `predict.models_base` in YAML
 or export `MODELS_BASE_PATH` to the directory that contains `models--zjunlp--MolGen-large`.
 For ID-based target resolution, set:
