@@ -11,17 +11,20 @@ It supports:
 """
 
 import os
+import re
 import sys
 import json
 import logging
 import argparse
 import warnings
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datasets import load_dataset
@@ -41,7 +44,9 @@ from prot2mol.io.hf_utils import (
 )
 from prot2mol.data.pipeline import (
     find_molecule_column,
+    has_matching_precomputed_split,
     load_processed_dataset,
+    load_processed_stats,
     split_train_eval_dataset,
     to_selfies_list,
     tokenize_protein_sequences_for_inference,
@@ -72,6 +77,7 @@ class PChemblPredictor:
         self.mol_tokenizer = None
         self.prot_tokenizer = None
         self.model = None
+        self.saved_model_config: Dict[str, object] = {}
         self.sequence_cache = {}  # Cache for ID -> Sequence lookup
         self._chembl_to_uniprot: Optional[Dict[str, str]] = None
         self._target_id_to_sequence: Optional[Dict[str, str]] = None
@@ -91,6 +97,7 @@ class PChemblPredictor:
              self.logger.info(f"Found config.json at {config_path}, loading configuration...")
              try:
                  json_config = load_saved_model_config(self.config.model_path, logger=self.logger)
+                 self.saved_model_config = dict(json_config)
 
                  for arg_key, json_val in json_config.items():
                      if not hasattr(self.config, arg_key):
@@ -107,6 +114,7 @@ class PChemblPredictor:
                  "Using CLI/YAML values; ensure architecture args match training.",
                  self.config.model_path,
              )
+             self.saved_model_config = {}
         
     def _setup_logging(self) -> logging.Logger:
         logging.basicConfig(
@@ -484,29 +492,245 @@ class PChemblPredictor:
 
     def _load_eval_split_dataset(self, split_mode: str, split_ratio: float, split_seed: int):
         """Load dataset and return the validation split used for reproduction/evaluation."""
+        _, eval_data = self._load_requested_split_dataset(
+            dataset_path=self.config.input_file,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        )
+        return eval_data
+
+    def _load_requested_split_dataset(
+        self,
+        dataset_path: str,
+        split_mode: str,
+        split_ratio: float,
+        split_seed: int,
+    ):
+        """Load a dataset path and reconstruct the requested train/eval split."""
         cache_dir = os.environ.get('DATASETS_CACHE_DIR', "/gpfs/projects/etur29/atabey/datasets")
+        dataset = None
+        processed_data_path = None
 
         try:
-            dataset, processed_data_path = load_processed_dataset(self.config.input_file, cache_dir=cache_dir)
+            dataset, processed_data_path = load_processed_dataset(dataset_path, cache_dir=cache_dir)
             self.logger.info(f"Loading preprocessed dataset from {processed_data_path}")
         except FileNotFoundError:
-            self.logger.warning("Preprocessed data not found in cache.")
-            self.logger.warning("Falling back to loading raw CSV and tokenizing on-the-fly.")
-            try:
-                dataset = load_dataset("csv", data_files=self.config.input_file)
-            except Exception as e:
-                self.logger.error(f"Failed to load dataset: {e}")
-                return None
+            self.logger.warning("Preprocessed data not found in cache for %s.", dataset_path)
 
-        full_data = dataset["train"]
-        _, eval_data = split_train_eval_dataset(
+        stats = load_processed_stats(dataset_path, cache_dir=cache_dir)
+        if dataset is not None and has_matching_precomputed_split(
+            dataset,
+            stats,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        ):
+            self.logger.info("Using precomputed train/eval splits from cache.")
+            return dataset["train"], dataset["test"]
+
+        use_cached_full_dataset = dataset is not None and hasattr(dataset, "keys") and "train" in dataset
+        if dataset is not None and stats is not None and stats.get("split_preprocessed") and hasattr(dataset, "keys") and "test" in dataset:
+            self.logger.warning(
+                "Cached split configuration at %s does not match the requested settings "
+                "(cached: mode=%s ratio=%s seed=%s; requested: mode=%s ratio=%s seed=%s). "
+                "Falling back to raw CSV split reconstruction.",
+                processed_data_path,
+                stats.get("eval_split"),
+                stats.get("eval_split_ratio"),
+                stats.get("split_seed"),
+                split_mode,
+                split_ratio,
+                split_seed,
+            )
+            use_cached_full_dataset = False
+
+        if use_cached_full_dataset:
+            self.logger.info("Using cached full dataset to reconstruct requested split in-memory.")
+            full_data = dataset["train"]
+        else:
+            self.logger.info("Loading raw CSV dataset from %s for split reconstruction", dataset_path)
+            try:
+                dataset = load_dataset("csv", data_files=dataset_path)
+            except Exception as exc:
+                self.logger.error("Failed to load dataset from %s: %s", dataset_path, exc)
+                return None, None
+            full_data = dataset["train"]
+
+        train_data, eval_data = split_train_eval_dataset(
             full_data=full_data,
             split_mode=split_mode,
             split_ratio=split_ratio,
             split_seed=split_seed,
             logger=self.logger,
         )
-        return eval_data
+        return train_data, eval_data
+
+    def _load_train_split_dataset(self, dataset_path: str, split_mode: str, split_ratio: float, split_seed: int):
+        """Load dataset and return the train split used during training."""
+        train_data, _ = self._load_requested_split_dataset(
+            dataset_path=dataset_path,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        )
+        return train_data
+
+    def _resolve_reproduce_settings(self, requested_mode: str) -> Tuple[str, float, int]:
+        """Resolve split mode/ratio/seed from CLI overrides or saved checkpoint metadata."""
+        saved_mode = self.saved_model_config.get("eval_split")
+        saved_ratio = self.saved_model_config.get("eval_split_ratio")
+        saved_seed = self.saved_model_config.get("split_seed")
+
+        if requested_mode == "auto":
+            if saved_mode not in {"random", "aid"} or saved_ratio is None or saved_seed is None:
+                raise ValueError(
+                    "Checkpoint does not contain eval split metadata. "
+                    "Use --reproduce random or --reproduce aid together with "
+                    "--reproduce_split_ratio/--reproduce_split_seed."
+                )
+            return str(saved_mode), float(saved_ratio), int(saved_seed)
+
+        split_ratio = getattr(self.config, "reproduce_split_ratio", None)
+        split_seed = getattr(self.config, "reproduce_split_seed", None)
+        if split_ratio is None:
+            split_ratio = float(saved_ratio) if saved_mode == requested_mode and saved_ratio is not None else 0.01
+        if split_seed is None:
+            split_seed = int(saved_seed) if saved_mode == requested_mode and saved_seed is not None else 42
+        return requested_mode, float(split_ratio), int(split_seed)
+
+    def _resolve_reference_dataset_path(self) -> Optional[str]:
+        """Return dataset CSV used for training-reference comparisons."""
+        configured = getattr(self.config, "reference_dataset", None)
+        if configured:
+            expanded = os.path.expanduser(configured)
+            if os.path.exists(expanded):
+                return expanded
+            raise FileNotFoundError(f"Reference dataset not found: {expanded}")
+
+        saved_path = self.saved_model_config.get("dataset_source_path")
+        if isinstance(saved_path, str) and saved_path.strip():
+            expanded = os.path.expanduser(saved_path.strip())
+            if os.path.exists(expanded):
+                return expanded
+            self.logger.warning("Checkpoint dataset_source_path does not exist: %s", expanded)
+        return None
+
+    @staticmethod
+    def _safe_filename_component(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("._-") or "value"
+
+    def _filter_reference_rows_for_protein(self, df: pd.DataFrame, protein_id: str) -> pd.DataFrame:
+        """Filter reference rows by a protein identifier across common target-id columns."""
+        token = str(protein_id).strip()
+        if not token:
+            return df.iloc[0:0].copy()
+
+        candidate_columns = [
+            "Target_CHEMBL_ID",
+            "UniProt_ID",
+            "Target_ID",
+            "Protein_ID",
+        ]
+        for column_name in candidate_columns:
+            actual = self._find_column(df, [column_name])
+            if actual is None:
+                continue
+            values = df[actual].astype(str).str.strip()
+            mask = values.str.casefold() == token.casefold()
+            if mask.any():
+                return df.loc[mask].copy()
+
+        if "Target_FASTA" in df.columns:
+            values = df["Target_FASTA"].astype(str).str.strip()
+            mask = values == token
+            if mask.any():
+                return df.loc[mask].copy()
+        return df.iloc[0:0].copy()
+
+    def _load_training_reference_rows(self, protein_id: str) -> pd.DataFrame:
+        """Load real training rows for a specific protein from the training dataset split."""
+        dataset_path = self._resolve_reference_dataset_path()
+        if dataset_path is None:
+            raise ValueError(
+                "No reference dataset is available for protein comparison. "
+                "Set --reference_dataset or use a checkpoint that saved dataset_source_path."
+            )
+
+        split_mode, split_ratio, split_seed = self._resolve_reproduce_settings("auto")
+        train_data = self._load_train_split_dataset(
+            dataset_path=dataset_path,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=split_seed,
+        )
+        if train_data is None:
+            raise ValueError(f"Failed to load train split from reference dataset: {dataset_path}")
+
+        train_df = train_data.to_pandas() if hasattr(train_data, "to_pandas") else pd.DataFrame(train_data)
+        matched = self._filter_reference_rows_for_protein(train_df, protein_id)
+        self.logger.info(
+            "Training reference selection for %s returned %s rows from %s",
+            protein_id,
+            len(matched),
+            dataset_path,
+        )
+        return matched
+
+    def _save_distribution_plot(
+        self,
+        batch_predictions: Sequence[float],
+        output_path: str,
+        title: str,
+        batch_label: str,
+        reference_values: Optional[Sequence[float]] = None,
+        reference_label: Optional[str] = None,
+    ) -> Optional[str]:
+        """Save a predicted pChEMBL distribution plot, optionally with a reference distribution."""
+        batch_values = np.asarray(batch_predictions, dtype=np.float32)
+        batch_values = batch_values[np.isfinite(batch_values)]
+        if batch_values.size == 0:
+            self.logger.warning("Skipping distribution plot because there are no finite predictions.")
+            return None
+
+        ref_values = None
+        if reference_values is not None:
+            ref_values = np.asarray(reference_values, dtype=np.float32)
+            ref_values = ref_values[np.isfinite(ref_values)]
+            if ref_values.size == 0:
+                ref_values = None
+
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bins = max(10, min(int(getattr(self.config, "distribution_bins", 40)), max(10, int(np.sqrt(batch_values.size)) * 2)))
+        common_kwargs = {"stat": "density", "bins": bins, "element": "step", "fill": True, "alpha": 0.35}
+
+        sns.histplot(batch_values, color="#1f77b4", label=batch_label, ax=ax, **common_kwargs)
+        if batch_values.size > 1 and np.unique(batch_values).size > 1:
+            sns.kdeplot(batch_values, color="#1f77b4", ax=ax, linewidth=2)
+        ax.axvline(batch_values.mean(), color="#1f77b4", linestyle="--", linewidth=1.5)
+
+        subtitle = [f"{batch_label}: n={batch_values.size}, mean={batch_values.mean():.3f}, std={batch_values.std(ddof=0):.3f}"]
+        if ref_values is not None and reference_label:
+            sns.histplot(ref_values, color="#d62728", label=reference_label, ax=ax, **common_kwargs)
+            if ref_values.size > 1 and np.unique(ref_values).size > 1:
+                sns.kdeplot(ref_values, color="#d62728", ax=ax, linewidth=2)
+            ax.axvline(ref_values.mean(), color="#d62728", linestyle="--", linewidth=1.5)
+            subtitle.append(
+                f"{reference_label}: n={ref_values.size}, mean={ref_values.mean():.3f}, std={ref_values.std(ddof=0):.3f}"
+            )
+
+        ax.set_title(title)
+        ax.set_xlabel("pChEMBL")
+        ax.set_ylabel("Density")
+        ax.legend()
+        ax.grid(True, alpha=0.25)
+        fig.text(0.5, 0.01, " | ".join(subtitle), ha="center", fontsize=10)
+        fig.tight_layout(rect=(0, 0.03, 1, 1))
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        self.logger.info("Saved distribution plot to %s", output_path)
+        return output_path
 
     def _override_normalization_from_input_file(self):
         """Update normalization using pChEMBL values from the full input file."""
@@ -667,8 +891,7 @@ class PChemblPredictor:
 
     def reproduce(self, split_mode: str):
         """Run prediction pipeline on validation split for result reproduction."""
-        split_ratio = float(getattr(self.config, "reproduce_split_ratio", 0.01))
-        split_seed = int(getattr(self.config, "reproduce_split_seed", 42))
+        split_mode, split_ratio, split_seed = self._resolve_reproduce_settings(split_mode)
         self._run_split_evaluation(
             split_mode=split_mode,
             split_ratio=split_ratio,
@@ -835,6 +1058,7 @@ class PChemblPredictor:
     def _predict_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Helper to run prediction on a dataframe"""
         prediction_start = time.perf_counter()
+        df = df.copy()
         # Normalize expected target column names (supports lowercase variants).
         target_fasta_col = self._find_column(df, ["Target_FASTA"])
         uniprot_col = self._find_column(df, ["UniProt_ID", "uniprot_id"])
@@ -848,6 +1072,19 @@ class PChemblPredictor:
             rename_map[chembl_col] = "Target_CHEMBL_ID"
         if rename_map:
             df = df.rename(columns=rename_map)
+
+        forced_target_chembl_id = str(getattr(self.config, "target_chembl_id", "") or "").strip()
+        if forced_target_chembl_id:
+            forced_target_chembl_id = forced_target_chembl_id.upper()
+            self.logger.info(
+                "Using target_chembl_id=%s for all rows; ignoring any target sequence context in the input file.",
+                forced_target_chembl_id,
+            )
+            df["Target_CHEMBL_ID"] = forced_target_chembl_id
+            if "Target_FASTA" in df.columns:
+                df["Target_FASTA"] = pd.NA
+            if "UniProt_ID" in df.columns:
+                df["UniProt_ID"] = pd.NA
 
         mol_col, is_selfies = find_molecule_column(df.columns)
         if not mol_col:
@@ -935,6 +1172,7 @@ class PChemblPredictor:
         
         result_df = self._predict_dataframe(df)
         output_df = self._sanitize_output_dataframe(result_df)
+        out_base = os.path.splitext(self.config.output_file)[0]
         metrics = None
         if "pchembl_value_Median" in result_df.columns:
             eval_df = result_df.dropna(subset=["pchembl_value_Median", "Predicted_pChEMBL"])
@@ -958,6 +1196,41 @@ class PChemblPredictor:
                     eval_df["Predicted_pChEMBL"].values,
                     metrics,
                 )
+
+        if getattr(self.config, "save_distribution_plot", True) and "Predicted_pChEMBL" in result_df.columns:
+            self._save_distribution_plot(
+                batch_predictions=result_df["Predicted_pChEMBL"].values,
+                output_path=f"{out_base}_predicted_distribution.png",
+                title="Predicted pChEMBL Distribution",
+                batch_label="Batch predicted pChEMBL",
+            )
+
+        compare_protein_id = getattr(self.config, "compare_protein_id", None)
+        if compare_protein_id:
+            try:
+                reference_df = self._load_training_reference_rows(compare_protein_id)
+                if len(reference_df) == 0:
+                    self.logger.warning(
+                        "No training reference rows found for protein %s. Skipping comparison plot.",
+                        compare_protein_id,
+                    )
+                elif "pchembl_value_Median" not in reference_df.columns:
+                    self.logger.warning(
+                        "Training reference rows for %s do not contain pchembl_value_Median. Skipping comparison plot.",
+                        compare_protein_id,
+                    )
+                else:
+                    safe_protein = self._safe_filename_component(compare_protein_id)
+                    self._save_distribution_plot(
+                        batch_predictions=result_df["Predicted_pChEMBL"].values,
+                        output_path=f"{out_base}_comparison_{safe_protein}.png",
+                        title=f"Batch Predictions vs Training Distribution for {compare_protein_id}",
+                        batch_label="Batch predicted pChEMBL",
+                        reference_values=reference_df["pchembl_value_Median"].values,
+                        reference_label=f"Train real pChEMBL ({compare_protein_id})",
+                    )
+            except Exception as exc:
+                self.logger.warning("Failed to build protein comparison plot for %s: %s", compare_protein_id, exc)
         
         # Save
         self.logger.info(f"Saving results to {self.config.output_file}")
@@ -1005,24 +1278,54 @@ def parse_args(argv=None):
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--pchembl_mean", type=float, default=5.924)
     parser.add_argument("--pchembl_std", type=float, default=1.362)
-    
+    parser.add_argument(
+        "--target_chembl_id",
+        type=str,
+        default=None,
+        help="Optional CHEMBL target id to score all input molecules against. When set, overrides target columns in the input file.",
+    )
+
+    parser.add_argument(
+        "--reference_dataset",
+        type=str,
+        default=None,
+        help="Training dataset CSV used for protein-level comparison. Defaults to checkpoint dataset_source_path.",
+    )
+    parser.add_argument(
+        "--compare_protein_id",
+        type=str,
+        default=None,
+        help="Protein identifier (for example CHEMBL4282) used to pull real training rows for comparison.",
+    )
+    parser.add_argument(
+        "--save_distribution_plot",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to save a predicted pChEMBL distribution plot for the input batch.",
+    )
+    parser.add_argument(
+        "--distribution_bins",
+        type=int,
+        default=40,
+        help="Maximum histogram bin count for saved pChEMBL distribution plots.",
+    )
     parser.add_argument(
         "--reproduce_split_ratio",
         type=float,
-        default=0.01,
-        help="Fraction of data (or AIDs) held out for validation reproduction",
+        default=None,
+        help="Fraction of data (or AIDs) held out for validation reproduction. Defaults to checkpoint metadata when available.",
     )
     parser.add_argument(
         "--reproduce_split_seed",
         type=int,
-        default=42,
-        help="Random seed for split reproducibility",
+        default=None,
+        help="Random seed for split reproducibility. Defaults to checkpoint metadata when available.",
     )
     parser.add_argument(
         "--reproduce",
-        choices=["random", "aid"],
+        choices=["auto", "random", "aid"],
         default=None,
-        help="Load validation split from input file and run prediction pipeline.",
+        help="Load validation split from input file and run prediction pipeline. Use 'auto' to recover split settings from the checkpoint.",
     )
 
     return parse_args_with_config(parser, section="predict", argv=argv)

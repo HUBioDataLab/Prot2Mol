@@ -57,6 +57,10 @@ class GPT2_w_crs_attn_Trainer(Trainer):
     def _stage_has_pchembl(self):
         return self.training_stage in {"pchembl_only", "multitask"}
 
+    @staticmethod
+    def _unwrap_model(model):
+        return getattr(model, "module", model)
+
     def _reset_train_component_accumulator(self):
         self._train_component_sums = {
             "lm_loss": 0.0,
@@ -200,10 +204,15 @@ class GPT2_w_crs_attn_Trainer(Trainer):
 
     def _build_model_inputs(self, inputs):
         """Create normalized model inputs shared by train/eval/prediction paths."""
-        train_lm = inputs.get("train_lm", None)
-        if train_lm is None:
-            batch_size = inputs["mol_input_ids"].shape[0]
+        batch_size = inputs["mol_input_ids"].shape[0]
+        if self.training_stage == "lm_only":
             train_lm = torch.ones(batch_size, dtype=torch.bool, device=inputs["mol_input_ids"].device)
+        elif self.training_stage == "pchembl_only":
+            train_lm = torch.zeros(batch_size, dtype=torch.bool, device=inputs["mol_input_ids"].device)
+        else:
+            train_lm = inputs.get("train_lm", None)
+            if train_lm is None:
+                train_lm = torch.ones(batch_size, dtype=torch.bool, device=inputs["mol_input_ids"].device)
 
         return {
             "mol_input_ids": inputs["mol_input_ids"],
@@ -211,9 +220,11 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             "prot_attention_mask": inputs["prot_attention_mask"],
             "labels": inputs.get("labels", inputs["mol_input_ids"]),
             "pchembl_values": inputs.get("pchembl_values", None),
+            "group_ids": inputs.get("group_id", None),
             "train_lm": train_lm,
             "pchembl_only_mode": self.training_stage == "pchembl_only",
             "compute_pchembl": self._stage_has_pchembl(),
+            "pchembl_pair_weight": self.pchembl_pair_weight,
         }
 
     def _compose_total_loss(self, model, outputs, inputs):
@@ -222,29 +233,26 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         Keeping this logic centralized avoids model/trainer duplication.
         """
         lm_loss = outputs.get("lm_loss", None)
+        loss = outputs.get("loss", None)
+        pchembl_loss = outputs.get("pchembl_loss", None)
+        pair_loss = outputs.get("pchembl_pair_loss", None)
         pchembl_preds = outputs.get("pchembl_predictions", None)
         pchembl_values = inputs.get("pchembl_values", None)
         group_ids = inputs.get("group_id", None)
 
-        pchembl_loss = None
-        pair_loss = None
-        if pchembl_preds is not None and pchembl_values is not None:
-            delta = model._config.get("pchembl_huber_delta", 1.0)
+        if pchembl_loss is None and pchembl_preds is not None and pchembl_values is not None:
+            loss_model = self._unwrap_model(model)
+            delta = getattr(loss_model, "_config", {}).get("pchembl_huber_delta", 1.0)
             pchembl_loss = F.smooth_l1_loss(pchembl_preds, pchembl_values, beta=delta)
             if group_ids is not None:
                 pair_loss = self._pairwise_huber(pchembl_preds, pchembl_values, group_ids, delta=delta)
 
-        loss = None
-        if self._stage_has_lm() and lm_loss is not None:
-            loss = model.lm_weight * lm_loss
-        if self._stage_has_pchembl() and pchembl_loss is not None:
+        if loss is None and self._stage_has_lm() and lm_loss is not None:
+            loss = lm_loss
+        if loss is None and self._stage_has_pchembl() and pchembl_loss is not None:
             total_pair = pair_loss if pair_loss is not None else 0.0
-            pchembl_term = model.pchembl_weight * (pchembl_loss + self.pchembl_pair_weight * total_pair)
+            pchembl_term = pchembl_loss + self.pchembl_pair_weight * total_pair
             loss = pchembl_term if loss is None else loss + pchembl_term
-
-        if loss is None:
-            # Keep backward compatibility if model provides a direct scalar loss.
-            loss = outputs.get("loss", None)
 
         return loss, lm_loss, pchembl_loss, pair_loss
         
@@ -371,8 +379,9 @@ class GPT2_w_crs_attn_Trainer(Trainer):
                 if pchembl_preds is not None and model_inputs.get("pchembl_values") is not None:
                     self.pchembl_predictions_list.append(pchembl_preds.detach().cpu())
                     self.pchembl_targets_list.append(model_inputs["pchembl_values"].detach().cpu())
-                    if "group_id" in inputs:
-                        self.pchembl_group_ids_list.append(inputs["group_id"].detach().cpu())
+                    metric_groups = inputs.get("metric_group_id", inputs.get("group_id"))
+                    if metric_groups is not None:
+                        self.pchembl_group_ids_list.append(metric_groups.detach().cpu())
             else:
                 # Handle tuple outputs
                 loss = outputs[0] if len(outputs) > 0 else None

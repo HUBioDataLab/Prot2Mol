@@ -16,9 +16,13 @@ import wandb
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from prot2mol.data.pipeline import (
+    attach_metric_group_ids,
+    attach_split_targets,
     extract_smiles_list,
     get_processed_data_path,
+    has_matching_precomputed_split,
     load_processed_dataset,
+    load_processed_stats,
     split_train_eval_dataset,
     tokenize_protein_sequences_for_inference,
 )
@@ -87,10 +91,12 @@ class TrainingScript:
             "weight_decay": config.weight_decay,
             "gradient_accumulation_steps": config.gradient_accumulation_steps,
             "dataloader_num_workers": config.dataloader_num_workers,
+            "pchembl_huber_delta": config.pchembl_huber_delta,
             "resume_from_checkpoint": config.resume_from_checkpoint,
             "load_pretrained_model": config.load_pretrained_model,
             "ignore_mismatched_optimizer": config.ignore_mismatched_optimizer,
             "training_mode": config.training_mode,
+            "training_stage": config.training_stage,
             "eval_split": config.eval_split,
             "eval_split_ratio": config.eval_split_ratio,
             "split_seed": config.split_seed,
@@ -143,7 +149,7 @@ class TrainingScript:
         return extract_smiles_list(data_source, drop_invalid=drop_invalid, logger=self.logger)
 
     def _validate_training_stage(self):
-        stage = self.training_config["training_stage"]
+        stage = self.training_config.get("training_stage", self.model_config["training_stage"])
         if stage in {"pchembl_only", "multitask"} and not self.model_config["train_pchembl_head"]:
             raise ValueError(
                 f"training_stage={stage} requires --train_pchembl_head to be enabled."
@@ -156,47 +162,50 @@ class TrainingScript:
             )
 
     def _stage_has_lm(self) -> bool:
-        return self.training_config["training_stage"] in {"lm_only", "multitask"}
+        return self.training_config.get("training_stage", self.model_config["training_stage"]) in {"lm_only", "multitask"}
 
     def _stage_has_pchembl(self) -> bool:
-        return self.training_config["training_stage"] in {"pchembl_only", "multitask"}
+        return self.training_config.get("training_stage", self.model_config["training_stage"]) in {"pchembl_only", "multitask"}
 
     def _apply_split_targets(self, dataset_split):
-        if not self._stage_has_pchembl():
-            def _neutralize(batch):
-                size = len(batch["pchembl_value_Median"])
-                return {
-                    "pchembl_values": [0.0] * size,
-                    "train_lm": [True] * size,
-                }
+        self.logger.info(
+            "Attaching split targets for stage=%s on %s samples",
+            self.training_config["training_stage"],
+            len(dataset_split),
+        )
+        return attach_split_targets(
+            dataset_split=dataset_split,
+            training_stage=self.training_config["training_stage"],
+            pchembl_mean=self.pchembl_mean,
+            pchembl_std=self.pchembl_std,
+            pchembl_threshold=self.pchembl_threshold,
+        )
 
-            return dataset_split.map(
-                _neutralize,
-                batched=True,
-                num_proc=self.training_config.get("dataloader_num_workers"),
-                desc="Applying neutral LM-only targets",
-            )
+    def _set_split_normalization(self, pchembl_mean: float, pchembl_std: float, pchembl_threshold: float):
+        self.pchembl_mean = float(pchembl_mean)
+        self.pchembl_std = float(pchembl_std)
+        self.pchembl_threshold = float(pchembl_threshold)
+        pchembl_huber_delta = self.training_config.get(
+            "pchembl_huber_delta",
+            self.model_config["pchembl_huber_delta"],
+        )
+        normalized_delta = (
+            pchembl_huber_delta / self.pchembl_std
+            if self.pchembl_std > 0
+            else pchembl_huber_delta
+        )
+        self.model._config["pchembl_huber_delta"] = normalized_delta
+        self.model._config["pchembl_mean"] = self.pchembl_mean
+        self.model._config["pchembl_std"] = self.pchembl_std
+        self.model._config["pchembl_threshold"] = self.pchembl_threshold
+        self.model_config["pchembl_huber_delta"] = normalized_delta
 
-        def _normalize(batch):
-            raw_values = batch["pchembl_value_Median"]
-            normalized = [
-                (float(val) - self.pchembl_mean) / (self.pchembl_std + 1e-8)
-                for val in raw_values
-            ]
-            if self.training_config["training_stage"] == "multitask":
-                train_lm = [float(val) >= self.pchembl_threshold for val in raw_values]
-            else:
-                train_lm = [False] * len(raw_values)
-            return {
-                "pchembl_values": normalized,
-                "train_lm": train_lm,
-            }
-
-        return dataset_split.map(
-            _normalize,
-            batched=True,
-            num_proc=self.training_config.get("dataloader_num_workers"),
-            desc="Applying split-specific pChEMBL normalization",
+        self.logger.info(
+            "Train-split pChEMBL stats: mean=%.4f std=%.4f threshold=%.1f delta_norm=%.4f",
+            self.pchembl_mean,
+            self.pchembl_std,
+            self.pchembl_threshold,
+            normalized_delta,
         )
 
     def _compute_split_normalization(self):
@@ -215,26 +224,10 @@ class TrainingScript:
         if values.size == 0:
             raise ValueError("Training split does not contain valid pChEMBL values.")
 
-        self.pchembl_mean = float(values.mean())
-        self.pchembl_std = float(values.std(ddof=0))
-        self.pchembl_threshold = 6.0
-        normalized_delta = (
-            self.training_config["pchembl_huber_delta"] / self.pchembl_std
-            if self.pchembl_std > 0
-            else self.training_config["pchembl_huber_delta"]
-        )
-        self.model._config["pchembl_huber_delta"] = normalized_delta
-        self.model._config["pchembl_mean"] = self.pchembl_mean
-        self.model._config["pchembl_std"] = self.pchembl_std
-        self.model._config["pchembl_threshold"] = self.pchembl_threshold
-        self.model_config["pchembl_huber_delta"] = normalized_delta
-
-        self.logger.info(
-            "Train-split pChEMBL stats: mean=%.4f std=%.4f threshold=%.1f delta_norm=%.4f",
-            self.pchembl_mean,
-            self.pchembl_std,
-            self.pchembl_threshold,
-            normalized_delta,
+        self._set_split_normalization(
+            pchembl_mean=float(values.mean()),
+            pchembl_std=float(values.std(ddof=0)),
+            pchembl_threshold=6.0,
         )
 
     def _build_train_vectors(self):
@@ -260,16 +253,28 @@ class TrainingScript:
                 return len(set(str(v) for v in dataset_split["Target_FASTA"]))
         return 0
 
+    def _count_train_lm_positive_samples(self) -> int:
+        stage = self.training_config["training_stage"]
+        if stage == "lm_only":
+            return int(len(self.train_data))
+        if stage == "pchembl_only":
+            return 0
+        if "train_lm" in getattr(self.train_data, "column_names", []):
+            return int(sum(bool(flag) for flag in self.train_data["train_lm"]))
+        if "pchembl_value_Median" not in getattr(self.train_data, "column_names", []):
+            return 0
+        values = np.asarray(self.train_data["pchembl_value_Median"], dtype=np.float32)
+        valid_values = values[~np.isnan(values)]
+        return int(np.sum(valid_values >= self.pchembl_threshold))
+
     def _update_dataset_stats(self, total_samples: int):
-        train_lm_flags = self.train_data["train_lm"] if "train_lm" in self.train_data.column_names else []
-        train_lm_positive = int(sum(bool(flag) for flag in train_lm_flags))
         self.dataset_stats = {
             "dataset_name": self.dataset_name,
             "dataset_source_path": os.path.abspath(self.selfies_path),
             "dataset_total_samples": int(total_samples),
             "train_samples": int(len(self.train_data)),
             "eval_samples": int(len(self.test_data)),
-            "train_lm_positive_samples": train_lm_positive,
+            "train_lm_positive_samples": self._count_train_lm_positive_samples(),
             "train_unique_proteins": self._count_unique_proteins(self.train_data),
             "eval_unique_proteins": self._count_unique_proteins(self.test_data),
             "train_unique_molecules": len(set(self.train_smiles_list)),
@@ -389,22 +394,43 @@ class TrainingScript:
             processed_data_path,
         )
         dataset, _ = load_processed_dataset(self.selfies_path, cache_dir=cache_dir)
-
-        self.logger.info("Splitting dataset into train and test sets...")
-        full_data = dataset["train"]
         split_ratio = self.training_config.get("eval_split_ratio", 0.01)
         split_mode = self.training_config.get("eval_split", "random")
-        self.train_data, self.test_data = split_train_eval_dataset(
-            full_data=full_data,
-            split_mode=split_mode,
-            split_ratio=split_ratio,
-            split_seed=self.training_config.get("split_seed", 42),
-            num_proc=self.training_config.get("dataloader_num_workers"),
-            logger=self.logger,
-        )
-        self._compute_split_normalization()
-        self.train_data = self._apply_split_targets(self.train_data)
-        self.test_data = self._apply_split_targets(self.test_data)
+        split_seed = self.training_config.get("split_seed", 42)
+        stats = load_processed_stats(self.selfies_path, cache_dir=cache_dir)
+        if has_matching_precomputed_split(dataset, stats, split_mode=split_mode, split_ratio=split_ratio, split_seed=split_seed):
+            self.logger.info("Using precomputed train/test splits from cache.")
+            self.train_data = attach_metric_group_ids(dataset["train"])
+            self.test_data = attach_metric_group_ids(dataset["test"])
+            self._set_split_normalization(
+                pchembl_mean=stats["pchembl_mean"],
+                pchembl_std=stats["pchembl_std"],
+                pchembl_threshold=stats.get("pchembl_threshold", 6.0),
+            )
+            total_samples = int(stats.get("dataset_total_samples", len(self.train_data) + len(self.test_data)))
+        elif stats is not None and stats.get("split_preprocessed") and hasattr(dataset, "keys") and "test" in dataset:
+            raise ValueError(
+                "Cached dataset contains precomputed train/test splits that do not match the requested "
+                f"split configuration (cached: mode={stats.get('eval_split')} ratio={stats.get('eval_split_ratio')} "
+                f"seed={stats.get('split_seed')}; requested: mode={split_mode} ratio={split_ratio} seed={split_seed}). "
+                "Re-run preprocessing with the requested split settings."
+            )
+        else:
+            self.logger.info("Splitting dataset into train and test sets from legacy full cache...")
+            self.logger.info("Legacy cache detected; re-run preprocessing to avoid startup split materialization.")
+            full_data = dataset["train"]
+            self.train_data, self.test_data = split_train_eval_dataset(
+                full_data=full_data,
+                split_mode=split_mode,
+                split_ratio=split_ratio,
+                split_seed=split_seed,
+                num_proc=self.training_config.get("dataloader_num_workers"),
+                logger=self.logger,
+            )
+            self._compute_split_normalization()
+            self.train_data = self._apply_split_targets(self.train_data)
+            self.test_data = self._apply_split_targets(self.test_data)
+            total_samples = len(full_data)
 
         self.logger.info(
             "Dataset split: %s train, %s test samples",
@@ -412,16 +438,22 @@ class TrainingScript:
             len(self.test_data),
         )
 
-        self.logger.info("Caching canonical SMILES for metrics...")
-        self.train_smiles_list = self._extract_smiles_list(self.train_data, drop_invalid=True)
-        self.eval_reference_smiles = self._extract_smiles_list(self.test_data, drop_invalid=True)
+        if self.global_rank == 0:
+            self.logger.info("Caching canonical SMILES for metrics...")
+            self.train_smiles_list = self._extract_smiles_list(self.train_data, drop_invalid=True)
+            self.eval_reference_smiles = self._extract_smiles_list(self.test_data, drop_invalid=True)
 
-        if not self.train_smiles_list:
-            self.logger.warning("Training data does not contain valid SMILES entries")
-        if not self.eval_reference_smiles:
-            self.logger.warning("Evaluation data does not contain valid SMILES entries")
-        self._build_train_vectors()
-        self._update_dataset_stats(total_samples=len(full_data))
+            if not self.train_smiles_list:
+                self.logger.warning("Training data does not contain valid SMILES entries")
+            if not self.eval_reference_smiles:
+                self.logger.warning("Evaluation data does not contain valid SMILES entries")
+            self._build_train_vectors()
+        else:
+            self.train_smiles_list = []
+            self.eval_reference_smiles = []
+            self.training_vec = None
+
+        self._update_dataset_stats(total_samples=total_samples)
 
     def ddp_setup(self):
         """Initialize DDP with proper error handling and device setup."""

@@ -109,10 +109,13 @@ class TrainingRunner:
         if self.logger is not None:
             self.logger.info("Saving model to %s", output_dir)
         trainer.save_model(output_dir)
-        model_config = getattr(trainer.model, "_config", None)
-        if model_config is None:
-            model_config = getattr(getattr(trainer, "model_wrapped", None), "_config", None)
-        if model_config is not None:
+        model_holder = getattr(trainer.model, "module", trainer.model)
+        if model_holder is None:
+            model_wrapped = getattr(trainer, "model_wrapped", None)
+            model_holder = getattr(model_wrapped, "module", model_wrapped)
+        model_config = getattr(model_holder, "_config", None)
+        should_save_config = getattr(trainer, "is_world_process_zero", lambda: True)()
+        if should_save_config and model_config is not None:
             save_model_config(output_dir, model_config, logger=self.logger)
         if self.logger is not None:
             self.logger.info("Model saved successfully")

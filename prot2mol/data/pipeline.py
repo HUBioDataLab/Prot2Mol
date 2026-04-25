@@ -1,6 +1,9 @@
+import json
+import math
 import os
 from typing import Iterable, Optional, Sequence, Tuple
 
+import numpy as np
 import selfies as sf
 import torch
 from datasets import load_from_disk
@@ -27,6 +30,48 @@ def get_processed_data_path(selfies_path: str, cache_dir: Optional[str] = None) 
     return os.path.join(effective_cache_dir, dataset_name)
 
 
+def get_processed_stats_path(selfies_path: str, cache_dir: Optional[str] = None) -> str:
+    """Return the stats JSON path stored beside a cached dataset."""
+    return os.path.join(get_processed_data_path(selfies_path, cache_dir=cache_dir), "pchembl_stats.json")
+
+
+def load_processed_stats(selfies_path: str, cache_dir: Optional[str] = None):
+    """Load preprocessing stats if present, otherwise return None."""
+    stats_path = get_processed_stats_path(selfies_path, cache_dir=cache_dir)
+    if not os.path.exists(stats_path):
+        return None
+    try:
+        with open(stats_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+
+def has_matching_precomputed_split(dataset, stats, split_mode: str, split_ratio: float, split_seed: int) -> bool:
+    """Return True when the cached dataset already contains the requested split."""
+    if stats is None or not stats.get("split_preprocessed"):
+        return False
+    if not hasattr(dataset, "keys"):
+        return False
+    split_names = set(dataset.keys())
+    if not {"train", "test"}.issubset(split_names):
+        return False
+    cached_mode = stats.get("eval_split")
+    cached_ratio = stats.get("eval_split_ratio")
+    cached_seed = stats.get("split_seed")
+    if cached_mode != split_mode:
+        return False
+    try:
+        if not math.isclose(float(cached_ratio), float(split_ratio), rel_tol=0.0, abs_tol=1e-12):
+            return False
+    except (TypeError, ValueError):
+        return False
+    try:
+        return int(cached_seed) == int(split_seed)
+    except (TypeError, ValueError):
+        return False
+
+
 def load_processed_dataset(selfies_path: str, cache_dir: Optional[str] = None):
     """Load preprocessed dataset from disk cache."""
     processed_data_path = get_processed_data_path(selfies_path, cache_dir=cache_dir)
@@ -47,6 +92,11 @@ def split_train_eval_dataset(
     Split a tokenized HF dataset into train/eval partitions.
     Supports random split and AID hold-out split.
     """
+    if split_ratio <= 0.0:
+        return full_data, full_data.select([])
+    if split_ratio >= 1.0:
+        return full_data.select([]), full_data
+
     if split_mode == "aid":
         if "AID" not in full_data.column_names:
             if logger is not None:
@@ -68,7 +118,7 @@ def split_train_eval_dataset(
                 split_ratio,
                 len(aids),
             )
-        proc = num_proc if (num_proc is None or num_proc >= 1) else None
+        proc = num_proc if (num_proc is not None and num_proc > 1) else None
         test_data = full_data.filter(lambda x: x["AID"] in holdout_aids, num_proc=proc)
         train_data = full_data.filter(lambda x: x["AID"] not in holdout_aids, num_proc=proc)
         return train_data, test_data
@@ -181,6 +231,67 @@ def tokenize_molecule_batch(
         "pchembl_values": torch.tensor(normalized_pchembl, dtype=torch.float),
         "train_lm": torch.tensor(train_lm_flags, dtype=torch.bool),
     }
+
+
+def attach_split_targets(
+    dataset_split,
+    training_stage: str,
+    pchembl_mean: float = 0.0,
+    pchembl_std: float = 1.0,
+    pchembl_threshold: float = 6.0,
+):
+    """Attach normalized pChEMBL targets and LM flags without a Dataset.map() pass."""
+    column_names = set(getattr(dataset_split, "column_names", []))
+    existing = [name for name in ("pchembl_values", "train_lm") if name in column_names]
+    if existing:
+        dataset_split = dataset_split.remove_columns(existing)
+
+    split_size = len(dataset_split)
+    if training_stage == "lm_only":
+        normalized_pchembl = np.zeros(split_size, dtype=np.float32)
+        train_lm = np.ones(split_size, dtype=np.bool_)
+    else:
+        if "pchembl_value_Median" not in column_names:
+            raise KeyError("Dataset split is missing required column 'pchembl_value_Median'.")
+        raw_values = np.asarray(dataset_split["pchembl_value_Median"], dtype=np.float32)
+        normalized_pchembl = ((raw_values - pchembl_mean) / (pchembl_std + 1e-8)).astype(np.float32, copy=False)
+        if training_stage == "multitask":
+            train_lm = raw_values >= pchembl_threshold
+        else:
+            train_lm = np.zeros(split_size, dtype=np.bool_)
+
+    dataset_split = dataset_split.add_column("pchembl_values", normalized_pchembl)
+    dataset_split = dataset_split.add_column("train_lm", train_lm)
+    return attach_metric_group_ids(dataset_split)
+
+
+def attach_metric_group_ids(
+    dataset_split,
+    source_column: str = "Target_FASTA",
+    output_column: str = "metric_group_id",
+):
+    """Attach FASTA-based group ids for within-protein ranking metrics."""
+    column_names = set(getattr(dataset_split, "column_names", []))
+    if output_column in column_names:
+        return dataset_split
+
+    split_size = len(dataset_split)
+    if source_column not in column_names:
+        return dataset_split.add_column(output_column, np.full(split_size, -1, dtype=np.int64))
+
+    group_ids = np.empty(split_size, dtype=np.int64)
+    group_map = {}
+    next_group_id = 0
+    values = dataset_split[source_column]
+    for idx, value in enumerate(values):
+        key = str(value).strip()
+        group_id = group_map.get(key)
+        if group_id is None:
+            group_id = next_group_id
+            group_map[key] = group_id
+            next_group_id += 1
+        group_ids[idx] = group_id
+    return dataset_split.add_column(output_column, group_ids)
 
 
 def find_molecule_column(columns: Sequence[str]) -> Tuple[Optional[str], bool]:

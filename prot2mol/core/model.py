@@ -199,15 +199,72 @@ class Prot2MolModel(nn.Module):
             shift_labels.view(-1),
         )
 
+    def _pairwise_huber_loss(self, y_pred, y_true, group_ids, delta=1.0):
+        if group_ids is None:
+            return None
+
+        valid_mask = group_ids >= 0
+        if not torch.any(valid_mask):
+            return None
+
+        y_pred = y_pred[valid_mask]
+        y_true = y_true[valid_mask]
+        group_ids = group_ids[valid_mask]
+
+        losses = []
+        for group_id in torch.unique(group_ids):
+            idx = (group_ids == group_id).nonzero(as_tuple=True)[0]
+            if idx.numel() < 2:
+                continue
+            perm = idx[torch.randperm(idx.numel(), device=idx.device)]
+            half = perm.numel() // 2
+            if half == 0:
+                continue
+            a = perm[:half]
+            b = perm[half:half * 2]
+            dy_pred = y_pred[a] - y_pred[b]
+            dy_true = y_true[a] - y_true[b]
+            losses.append(F.smooth_l1_loss(dy_pred, dy_true, beta=delta))
+
+        if not losses:
+            return None
+        return torch.stack(losses).mean()
+
+    def _compose_total_loss(self, lm_loss, pchembl_predictions, pchembl_values, group_ids=None, pchembl_pair_weight=1.0):
+        pchembl_loss = None
+        pair_loss = None
+        total_loss = None
+
+        if lm_loss is not None:
+            total_loss = self.lm_weight * lm_loss
+
+        if pchembl_predictions is not None and pchembl_values is not None:
+            delta = self._config.get("pchembl_huber_delta", 1.0)
+            pchembl_loss = F.smooth_l1_loss(pchembl_predictions, pchembl_values, beta=delta)
+            pair_loss = self._pairwise_huber_loss(
+                pchembl_predictions,
+                pchembl_values,
+                group_ids,
+                delta=delta,
+            )
+            pair_term = pchembl_pair_weight * (pair_loss if pair_loss is not None else 0.0)
+            pchembl_term = self.pchembl_weight * (pchembl_loss + pair_term)
+            total_loss = pchembl_term if total_loss is None else total_loss + pchembl_term
+
+        return total_loss, pchembl_loss, pair_loss
+
     def _decode_from_protein_embeddings(
         self,
         mol_input_ids,
         protein_embeddings,
         prot_attention_mask,
         labels=None,
+        pchembl_values=None,
+        group_ids=None,
         train_lm=True,
         pchembl_only_mode=False,
         compute_pchembl=True,
+        pchembl_pair_weight=1.0,
     ):
         labels_for_lm = self._prepare_lm_labels(
             labels=labels,
@@ -262,14 +319,23 @@ class Prot2MolModel(nn.Module):
                 mol_attention_mask,
             )
 
+        total_loss, pchembl_loss, pair_loss = self._compose_total_loss(
+            lm_loss=lm_loss,
+            pchembl_predictions=pchembl_predictions,
+            pchembl_values=pchembl_values,
+            group_ids=group_ids,
+            pchembl_pair_weight=pchembl_pair_weight,
+        )
+
         outputs = {
             "lm_loss": lm_loss,
             "logits": logits,
             "pchembl_predictions": pchembl_predictions,
+            "pchembl_loss": pchembl_loss,
+            "pchembl_pair_loss": pair_loss,
             "last_hidden_state": hidden_states,
+            "loss": total_loss,
         }
-        if lm_loss is not None:
-            outputs["loss"] = lm_loss
         return {key: value for key, value in outputs.items() if value is not None}
 
     def forward(
@@ -279,9 +345,11 @@ class Prot2MolModel(nn.Module):
         prot_attention_mask,
         labels=None,
         pchembl_values=None,
+        group_ids=None,
         train_lm=True,
         pchembl_only_mode=False,
         compute_pchembl=True,
+        pchembl_pair_weight=1.0,
     ):
         """
         Forward pass for language modeling and pChEMBL prediction.
@@ -312,9 +380,12 @@ class Prot2MolModel(nn.Module):
             protein_embeddings=protein_embeddings,
             prot_attention_mask=prot_attention_mask,
             labels=labels,
+            pchembl_values=pchembl_values,
+            group_ids=group_ids,
             train_lm=train_lm,
             pchembl_only_mode=pchembl_only_mode,
             compute_pchembl=compute_pchembl,
+            pchembl_pair_weight=pchembl_pair_weight,
         )
     
     def predict_pchembl_from_protein_embeddings(self, mol_input_ids, protein_embeddings, prot_attention_mask):
@@ -482,7 +553,8 @@ class FusionDTITokenFusion(nn.Module):
 
     def _masked_softmax(self, logits: torch.Tensor, row_mask: torch.Tensor, col_mask: torch.Tensor) -> torch.Tensor:
         valid_pairs = row_mask.unsqueeze(2).unsqueeze(-1) & col_mask.unsqueeze(1).unsqueeze(-1)
-        masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, -1e9))
+        mask_fill_value = torch.finfo(logits.dtype).min
+        masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, mask_fill_value))
         alpha = torch.softmax(masked_logits, dim=2)
         return torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
 
