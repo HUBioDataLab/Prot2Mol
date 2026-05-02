@@ -4,12 +4,14 @@ import csv
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping
 
 from ..data_processing.chembl import (
     CURATED_CSV_FILENAME,
     CURATED_PARQUET_FILENAME,
 )
+
+
 def _restore_curated_row_types(row: Dict[str, Any]) -> Dict[str, Any]:
     converted = dict(row)
     for key in ("parent_molregno", "activity_label"):

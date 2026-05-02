@@ -1,4 +1,4 @@
-train:
+model:
   protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
   molecule_model_name_or_path: HUBioDataLab/SELFormer
   protein_max_length: 1024
@@ -11,3 +11,26 @@ train:
   pair_loss_weight: 1.0
   classification_loss_weight: 0.5
   bce_pos_weight: 1.0
+
+data:
+  curated_data_path: ../reward_model/data/curated
+  tokenized_dataset_dir: ../reward_model/data/tokenized/reward_train_examples
+  tokenization_batch_size: 64
+  eval_split_ratio: 0.05
+  split_seed: 42
+
+training:
+  output_dir: ../outputs/reward_train
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 0
+  seed: 42
+  fp16: false
+  save_safetensors: false
+  save_total_limit: 2
