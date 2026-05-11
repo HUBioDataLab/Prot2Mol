@@ -42,7 +42,7 @@ class RewardModelTrainer(Trainer):
         if value is None:
             return 0.0
         if isinstance(value, torch.Tensor):
-            return float(value.detach().mean().cpu().item())
+            return float(value.detach().float().mean().cpu().item())
         return float(value)
 
     def _record_train_components(
