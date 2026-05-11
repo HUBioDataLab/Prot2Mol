@@ -12,7 +12,13 @@ from reward_model.training import (
     RewardTrainerConfig,
     build_pair_records,
     create_training_arguments,
+    get_saved_pair_dataset_paths,
+    get_tokenized_split_dataset_paths,
+    load_saved_pair_dataset,
+    prepare_pair_datasets_from_config,
+    save_pair_dataset_from_example_dataset,
 )
+from reward_model.training.entry import train_reward_model_from_config
 
 
 def _dummy_bundles():
@@ -36,54 +42,54 @@ def _pair_ready_examples():
         [
             {
                 "example_id": 0,
-                "group_id": "G1",
+                "group_id": "T1__A1",
                 "target_chembl_id": "T1",
-                "assay_chembl_id": "A1",
-                "molecule_chembl_id": "M0",
+                "assay_id": "A1",
+                "compound_id": "M0",
                 "protein_input_ids": [1, 1, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [7, 8, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
-                "activity_label": 0,
+                "binary_label": 0,
                 "pchembl_value": 4.0,
             },
             {
                 "example_id": 1,
-                "group_id": "G1",
+                "group_id": "T1__A1",
                 "target_chembl_id": "T1",
-                "assay_chembl_id": "A1",
-                "molecule_chembl_id": "M1",
+                "assay_id": "A1",
+                "compound_id": "M1",
                 "protein_input_ids": [1, 1, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [8, 8, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
-                "activity_label": 1,
+                "binary_label": 1,
                 "pchembl_value": 7.0,
             },
             {
                 "example_id": 2,
-                "group_id": "G2",
+                "group_id": "T2__A2",
                 "target_chembl_id": "T2",
-                "assay_chembl_id": "A2",
-                "molecule_chembl_id": "M2",
+                "assay_id": "A2",
+                "compound_id": "M2",
                 "protein_input_ids": [2, 2, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [3, 4, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
-                "activity_label": 0,
+                "binary_label": 0,
                 "pchembl_value": 5.0,
             },
             {
                 "example_id": 3,
-                "group_id": "G2",
+                "group_id": "T2__A2",
                 "target_chembl_id": "T2",
-                "assay_chembl_id": "A2",
-                "molecule_chembl_id": "M3",
+                "assay_id": "A2",
+                "compound_id": "M3",
                 "protein_input_ids": [2, 2, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [5, 6, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
-                "activity_label": 1,
+                "binary_label": 1,
                 "pchembl_value": 8.0,
             },
         ]
@@ -96,8 +102,9 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path):
     protein_bundle, molecule_bundle = _dummy_bundles()
     examples = _pair_ready_examples()
     pair_records, _ = build_pair_records(examples)
-    train_dataset = RewardPairDataset(examples, pair_records)
-    eval_dataset = RewardPairDataset(examples, pair_records)
+    pair_dataset = Dataset.from_list(pair_records)
+    train_dataset = RewardPairDataset(examples, pair_dataset)
+    eval_dataset = RewardPairDataset(examples, pair_dataset)
 
     model = RewardModel(
         config=RewardModelConfig(
@@ -146,3 +153,259 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path):
         molecule_bundle=molecule_bundle,
     )
     assert reloaded.config.fusion_hidden_dim == 10
+
+
+def test_prepare_pair_datasets_from_config_saves_train_val_and_test_pair_datasets(tmp_path):
+    split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
+    pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
+
+    pair_ready_examples = _pair_ready_examples()
+    train_examples = pair_ready_examples.select([0, 1])
+    val_examples = pair_ready_examples.select([2, 3])
+    test_examples = Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T3__A3",
+                "target_chembl_id": "T3",
+                "assay_id": "A3",
+                "compound_id": "M4",
+                "pchembl_value": 5.0,
+                "binary_label": 0,
+                "protein_input_ids": [7, 7, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [8, 8, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            }
+        ]
+    )
+
+    train_examples.save_to_disk(split_paths["train"])
+    val_examples.save_to_disk(split_paths["val"])
+    test_examples.save_to_disk(split_paths["test"])
+
+    config_path = tmp_path / "reward_train.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model:",
+                "  protein_model_name_or_path: protein/dummy",
+                "  molecule_model_name_or_path: molecule/dummy",
+                "data:",
+                f"  train_parquet_path: {tmp_path / 'unused_train.parquet'}",
+                f"  val_parquet_path: {tmp_path / 'unused_val.parquet'}",
+                f"  test_parquet_path: {tmp_path / 'unused_test.parquet'}",
+                f"  tokenized_dataset_dir: {tmp_path / 'tokenized'}",
+                "  tokenization_batch_size: 2",
+                "training:",
+                f"  output_dir: {tmp_path / 'trainer_output'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prepare_pair_datasets_from_config(str(config_path))
+
+    assert os.path.exists(pair_paths["train"])
+    assert os.path.exists(pair_paths["val"])
+    assert os.path.exists(pair_paths["test"])
+    assert summary["train_pairs"] == 1
+    assert summary["val_pairs"] == 1
+    assert summary["test_pairs"] == 0
+
+    train_pairs = load_saved_pair_dataset(pair_paths["train"])
+    val_pairs = load_saved_pair_dataset(pair_paths["val"])
+    test_pairs = load_saved_pair_dataset(pair_paths["test"])
+    assert len(train_pairs) == 1
+    assert len(val_pairs) == 1
+    assert len(test_pairs) == 0
+
+
+def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path, monkeypatch):
+    split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
+    pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
+
+    train_examples = Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M0",
+                "pchembl_value": 4.0,
+                "binary_label": 0,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [2, 2, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+            {
+                "example_id": 1,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M1",
+                "pchembl_value": 7.0,
+                "binary_label": 1,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [3, 3, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+        ]
+    )
+    val_examples = Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M2",
+                "pchembl_value": 4.0,
+                "binary_label": 0,
+                "protein_input_ids": [4, 4, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [5, 5, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+            {
+                "example_id": 1,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M3",
+                "pchembl_value": 8.0,
+                "binary_label": 1,
+                "protein_input_ids": [4, 4, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [6, 6, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+        ]
+    )
+    test_examples = Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T3__A3",
+                "target_chembl_id": "T3",
+                "assay_id": "A3",
+                "compound_id": "M4",
+                "pchembl_value": 5.0,
+                "binary_label": 0,
+                "protein_input_ids": [7, 7, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [8, 8, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            }
+        ]
+    )
+
+    train_examples.save_to_disk(split_paths["train"])
+    val_examples.save_to_disk(split_paths["val"])
+    test_examples.save_to_disk(split_paths["test"])
+    save_pair_dataset_from_example_dataset(train_examples, pair_paths["train"], split_name="train")
+    save_pair_dataset_from_example_dataset(val_examples, pair_paths["val"], split_name="val")
+
+    config_path = tmp_path / "reward_train.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model:",
+                "  protein_model_name_or_path: protein/dummy",
+                "  molecule_model_name_or_path: molecule/dummy",
+                "  fusion_hidden_dim: 8",
+                "  fusion_num_heads: 2",
+                "  dropout: 0.0",
+                "data:",
+                f"  train_parquet_path: {tmp_path / 'unused_train.parquet'}",
+                f"  val_parquet_path: {tmp_path / 'unused_val.parquet'}",
+                f"  test_parquet_path: {tmp_path / 'unused_test.parquet'}",
+                f"  tokenized_dataset_dir: {tmp_path / 'tokenized'}",
+                "  tokenization_batch_size: 2",
+                "training:",
+                f"  output_dir: {tmp_path / 'trainer_output'}",
+                "  num_train_epochs: 1",
+                "  per_device_train_batch_size: 2",
+                "  per_device_eval_batch_size: 2",
+                "  logging_steps: 1",
+                "  fp16: false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    class _FakeTrainer:
+        def __init__(self, model, args, train_dataset, eval_dataset, data_collator):
+            captured["train_dataset_len"] = len(train_dataset)
+            captured["eval_dataset_len"] = len(eval_dataset)
+            captured["train_dataset"] = train_dataset
+            captured["eval_dataset"] = eval_dataset
+            captured["data_collator"] = data_collator
+
+        def train(self):
+            captured["train_called"] = True
+            return None
+
+        def save_model(self, output_dir):
+            captured["save_model_output_dir"] = output_dir
+
+        def evaluate(self):
+            captured["evaluate_called"] = True
+            return {"eval_loss": 0.5}
+
+    monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
+    monkeypatch.setattr("reward_model.training.entry.RewardModel", lambda config: object())
+    monkeypatch.setattr("reward_model.training.entry.create_training_arguments", lambda config: object())
+
+    summary = train_reward_model_from_config(str(config_path))
+
+    assert captured["train_called"] is True
+    assert captured["evaluate_called"] is True
+    assert captured["train_dataset_len"] == 1
+    assert captured["eval_dataset_len"] == 1
+    assert isinstance(captured["data_collator"], RewardPairCollator)
+    assert summary["train_examples"] == 2
+    assert summary["val_examples"] == 2
+    assert summary["test_examples"] == 1
+    assert summary["train_pairs"] == 1
+    assert summary["val_pairs"] == 1
+
+
+def test_train_reward_model_from_config_requires_saved_pair_datasets(tmp_path):
+    split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
+
+    pair_ready_examples = _pair_ready_examples()
+    train_examples = pair_ready_examples.select([0, 1])
+    val_examples = pair_ready_examples.select([2, 3])
+    test_examples = pair_ready_examples.select([0])
+    train_examples.save_to_disk(split_paths["train"])
+    val_examples.save_to_disk(split_paths["val"])
+    test_examples.save_to_disk(split_paths["test"])
+
+    config_path = tmp_path / "reward_train.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model:",
+                "  protein_model_name_or_path: protein/dummy",
+                "  molecule_model_name_or_path: molecule/dummy",
+                "data:",
+                f"  train_parquet_path: {tmp_path / 'unused_train.parquet'}",
+                f"  val_parquet_path: {tmp_path / 'unused_val.parquet'}",
+                f"  test_parquet_path: {tmp_path / 'unused_test.parquet'}",
+                f"  tokenized_dataset_dir: {tmp_path / 'tokenized'}",
+                "  tokenization_batch_size: 2",
+                "training:",
+                f"  output_dir: {tmp_path / 'trainer_output'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FileNotFoundError, match="prepare_reward_pair_datasets.py"):
+        train_reward_model_from_config(str(config_path))

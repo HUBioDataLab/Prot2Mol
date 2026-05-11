@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 
-from reward_model.training import prepare_training_examples_from_config
+from reward_model.training import prepare_pair_datasets_from_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
         "reward_train.yaml",
     )
     parser = argparse.ArgumentParser(
-        description="Prepare tokenized RewardModel train/val/test datasets from split parquet inputs.",
+        description="Prepare saved RewardModel train/val/test pair datasets from tokenized split examples.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    summary = prepare_training_examples_from_config(args.config)
+    summary = prepare_pair_datasets_from_config(args.config)
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 

@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
         "reward_train.yaml",
     )
     parser = argparse.ArgumentParser(
-        description="Train the RewardModel from tokenized pair-ready examples.",
+        description="Train the RewardModel from tokenized split parquet examples and in-memory pair tables.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

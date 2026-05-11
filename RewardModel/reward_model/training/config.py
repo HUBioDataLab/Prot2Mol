@@ -17,26 +17,26 @@ def _resolve_path(path: str, base_dir: str) -> str:
 
 @dataclass(eq=True)
 class RewardTrainingDataConfig:
-    curated_data_path: str
+    train_parquet_path: str
+    val_parquet_path: str
+    test_parquet_path: str
     tokenized_dataset_dir: str
     tokenization_batch_size: int = 64
-    eval_split_ratio: float = 0.05
-    split_seed: int = 42
 
     def __post_init__(self) -> None:
         self.validate()
 
     def validate(self) -> None:
-        if not self.curated_data_path:
-            raise ValueError("curated_data_path must be provided")
+        if not self.train_parquet_path:
+            raise ValueError("train_parquet_path must be provided")
+        if not self.val_parquet_path:
+            raise ValueError("val_parquet_path must be provided")
+        if not self.test_parquet_path:
+            raise ValueError("test_parquet_path must be provided")
         if not self.tokenized_dataset_dir:
             raise ValueError("tokenized_dataset_dir must be provided")
         if self.tokenization_batch_size <= 0:
             raise ValueError("tokenization_batch_size must be > 0")
-        if self.eval_split_ratio <= 0.0 or self.eval_split_ratio >= 1.0:
-            raise ValueError("eval_split_ratio must be in (0.0, 1.0)")
-        if self.split_seed < 0:
-            raise ValueError("split_seed must be >= 0")
 
 
 @dataclass(eq=True)
@@ -108,7 +108,9 @@ def load_reward_training_config(config_path: str) -> RewardTrainingConfigBundle:
     model_config = RewardModelConfig.from_dict(dict(payload["model"]))
 
     data_section: Dict[str, Any] = dict(payload["data"])
-    data_section["curated_data_path"] = _resolve_path(data_section["curated_data_path"], base_dir)
+    data_section["train_parquet_path"] = _resolve_path(data_section["train_parquet_path"], base_dir)
+    data_section["val_parquet_path"] = _resolve_path(data_section["val_parquet_path"], base_dir)
+    data_section["test_parquet_path"] = _resolve_path(data_section["test_parquet_path"], base_dir)
     data_section["tokenized_dataset_dir"] = _resolve_path(data_section["tokenized_dataset_dir"], base_dir)
     data_config = RewardTrainingDataConfig(**data_section)
 

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict
 
 from .config import RewardTrainingConfigBundle, load_reward_training_config
 from .data import (
     RewardPairCollator,
     RewardPairDataset,
-    build_pair_records,
+    get_saved_pair_dataset_paths,
+    get_tokenized_split_dataset_paths,
+    load_saved_pair_dataset,
     load_tokenized_example_dataset,
-    prepare_tokenized_example_dataset,
-    split_tokenized_examples_by_group,
+    prepare_tokenized_split_datasets,
+    save_pair_dataset_from_example_dataset,
 )
 from .trainer import RewardModelTrainer, create_training_arguments
 from ..model import RewardModel
@@ -18,39 +21,97 @@ from ..model import RewardModel
 
 def prepare_training_examples_from_config(config_path: str) -> Dict[str, Any]:
     config = load_reward_training_config(config_path)
-    artifacts = prepare_tokenized_example_dataset(config.data, config.model)
+    artifacts = prepare_tokenized_split_datasets(config.data, config.model)
     return {
-        "dataset_path": artifacts.dataset_path,
-        "num_examples": artifacts.num_examples,
-        "num_groups": artifacts.num_groups,
+        "tokenized_dataset_dir": artifacts.base_dir,
+        "train_dataset_path": artifacts.train_dataset_path,
+        "val_dataset_path": artifacts.val_dataset_path,
+        "test_dataset_path": artifacts.test_dataset_path,
+        "train_examples": artifacts.train_examples,
+        "val_examples": artifacts.val_examples,
+        "test_examples": artifacts.test_examples,
+        "train_groups": artifacts.train_groups,
+        "val_groups": artifacts.val_groups,
+        "test_groups": artifacts.test_groups,
     }
+
+
+def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
+    config = load_reward_training_config(config_path)
+    example_paths = get_tokenized_split_dataset_paths(config.data.tokenized_dataset_dir)
+    pair_paths = get_saved_pair_dataset_paths(config.data.tokenized_dataset_dir)
+
+    missing_paths = [
+        path
+        for path in (example_paths["train"], example_paths["val"], example_paths["test"])
+        if not os.path.exists(path)
+    ]
+    if missing_paths:
+        raise FileNotFoundError(
+            "Tokenized split datasets not found. "
+            f"Missing: {missing_paths}. Run prepare_reward_training_data.py first."
+        )
+
+    summaries: Dict[str, Any] = {
+        "pair_dataset_dir": os.path.abspath(config.data.tokenized_dataset_dir),
+    }
+    for split_name in ("train", "val", "test"):
+        example_dataset = load_tokenized_example_dataset(example_paths[split_name])
+        start_time = time.perf_counter()
+        artifacts = save_pair_dataset_from_example_dataset(
+            example_dataset,
+            pair_paths[split_name],
+            split_name=split_name,
+        )
+        elapsed = time.perf_counter() - start_time
+        if split_name in {"train", "val"} and artifacts.num_pairs == 0:
+            raise ValueError(f"{split_name.capitalize()} split produced zero valid ranking pairs")
+
+        summaries[f"{split_name}_pair_dataset_path"] = artifacts.dataset_path
+        summaries[f"{split_name}_examples"] = len(example_dataset)
+        summaries[f"{split_name}_groups"] = artifacts.num_groups
+        summaries[f"{split_name}_groups_with_pairs"] = artifacts.num_groups_with_pairs
+        summaries[f"{split_name}_pairs"] = artifacts.num_pairs
+        summaries[f"{split_name}_pair_build_seconds"] = round(elapsed, 4)
+
+    return summaries
 
 
 def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
     config = load_reward_training_config(config_path)
-    dataset_path = os.path.abspath(config.data.tokenized_dataset_dir)
-    if not os.path.exists(dataset_path):
+    example_paths = get_tokenized_split_dataset_paths(config.data.tokenized_dataset_dir)
+    pair_paths = get_saved_pair_dataset_paths(config.data.tokenized_dataset_dir)
+
+    missing_example_paths = [
+        path
+        for path in (example_paths["train"], example_paths["val"], example_paths["test"])
+        if not os.path.exists(path)
+    ]
+    if missing_example_paths:
         raise FileNotFoundError(
-            f"Tokenized example dataset not found at {dataset_path}. "
-            "Run prepare_reward_training_data.py first."
+            "Tokenized split datasets not found. "
+            f"Missing: {missing_example_paths}. Run prepare_reward_training_data.py first."
         )
 
-    tokenized_examples = load_tokenized_example_dataset(dataset_path)
-    train_examples, eval_examples, split_stats = split_tokenized_examples_by_group(
-        tokenized_examples,
-        eval_split_ratio=config.data.eval_split_ratio,
-        split_seed=config.data.split_seed,
-    )
+    missing_pair_paths = [
+        path
+        for path in (pair_paths["train"], pair_paths["val"])
+        if not os.path.exists(path)
+    ]
+    if missing_pair_paths:
+        raise FileNotFoundError(
+            "Saved pair datasets not found. "
+            f"Missing: {missing_pair_paths}. Run prepare_reward_pair_datasets.py first."
+        )
 
-    train_pairs, train_pair_stats = build_pair_records(train_examples)
-    eval_pairs, eval_pair_stats = build_pair_records(eval_examples)
-    if not train_pairs:
-        raise ValueError("Temporary training split produced zero valid ranking pairs")
-    if not eval_pairs:
-        raise ValueError("Temporary evaluation split produced zero valid ranking pairs")
+    train_examples = load_tokenized_example_dataset(example_paths["train"])
+    val_examples = load_tokenized_example_dataset(example_paths["val"])
+    test_examples = load_tokenized_example_dataset(example_paths["test"])
+    train_pairs = load_saved_pair_dataset(pair_paths["train"])
+    eval_pairs = load_saved_pair_dataset(pair_paths["val"])
 
     train_dataset = RewardPairDataset(train_examples, train_pairs)
-    eval_dataset = RewardPairDataset(eval_examples, eval_pairs)
+    eval_dataset = RewardPairDataset(val_examples, eval_pairs)
     collator = RewardPairCollator()
 
     trainer = RewardModelTrainer(
@@ -65,12 +126,14 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
     eval_metrics = trainer.evaluate()
 
     return {
-        "train_examples": split_stats.train_examples,
-        "eval_examples": split_stats.eval_examples,
-        "train_groups": split_stats.train_groups,
-        "eval_groups": split_stats.eval_groups,
-        "train_pairs": train_pair_stats.num_pairs,
-        "eval_pairs": eval_pair_stats.num_pairs,
+        "train_examples": len(train_examples),
+        "val_examples": len(val_examples),
+        "test_examples": len(test_examples),
+        "train_groups": len(set(train_examples["group_id"])),
+        "val_groups": len(set(val_examples["group_id"])),
+        "test_groups": len(set(test_examples["group_id"])),
+        "train_pairs": len(train_pairs),
+        "val_pairs": len(eval_pairs),
         "output_dir": os.path.abspath(config.training.output_dir),
         "eval_metrics": eval_metrics,
     }
