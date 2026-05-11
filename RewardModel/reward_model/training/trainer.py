@@ -180,11 +180,7 @@ class RewardModelTrainer(Trainer):
         save_dir = output_dir or self.args.output_dir
         os.makedirs(save_dir, exist_ok=True)
         model_to_save = self.model.module if hasattr(self.model, "module") else self.model
-        save_reward_model(
-            model_to_save,
-            save_dir,
-            use_safetensors=self.args.save_safetensors,
-        )
+        save_reward_model(model_to_save, save_dir)
         torch.save(self.args, os.path.join(save_dir, TRAINING_ARGS_NAME))
 
     @staticmethod
@@ -213,7 +209,6 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         dataloader_num_workers=config.dataloader_num_workers,
         seed=config.seed,
         fp16=config.fp16,
-        save_safetensors=config.save_safetensors,
         save_total_limit=config.save_total_limit,
         remove_unused_columns=False,
         disable_tqdm=True,
