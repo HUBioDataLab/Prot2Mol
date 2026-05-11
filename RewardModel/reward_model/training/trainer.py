@@ -201,6 +201,7 @@ class RewardModelTrainer(Trainer):
 def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
     args_kwargs = dict(
         output_dir=os.path.abspath(config.output_dir),
+        run_name=os.path.basename(os.path.abspath(config.output_dir)),
         num_train_epochs=config.num_train_epochs,
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
@@ -216,7 +217,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         save_total_limit=config.save_total_limit,
         remove_unused_columns=False,
         disable_tqdm=True,
-        report_to=[],
+        report_to=["wandb"],
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",

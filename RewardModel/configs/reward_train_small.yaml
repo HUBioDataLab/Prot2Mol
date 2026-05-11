@@ -16,14 +16,14 @@ data:
   train_parquet_path: ../../../dummy/train.parquet
   val_parquet_path: ../../../dummy/val.parquet
   test_parquet_path: ../../../dummy/test.parquet
-  tokenized_dataset_dir: ../reward_model/data/tokenized/reward_train_examples_demo
+  tokenized_dataset_dir: ../reward_model/data/tokenized/reward_train_examples_demo_10k
   tokenization_batch_size: 16
 
 training:
   output_dir: ../outputs/reward_train_demo
-  num_train_epochs: 2
-  per_device_train_batch_size: 2
-  per_device_eval_batch_size: 2
+  num_train_epochs: 10
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
   gradient_accumulation_steps: 1
   learning_rate: 1.0e-5
   weight_decay: 0.01
@@ -31,6 +31,6 @@ training:
   logging_steps: 1
   dataloader_num_workers: 0
   seed: 42
-  fp16: false
+  fp16: true
   save_safetensors: false
   save_total_limit: 1
