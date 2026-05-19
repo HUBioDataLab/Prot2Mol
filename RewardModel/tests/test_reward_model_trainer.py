@@ -11,6 +11,9 @@ from reward_model.training import (
     RewardModelTrainer,
     RewardTrainerConfig,
     build_pair_records,
+    compute_classification_metrics,
+    compute_groupwise_spearman,
+    compute_pairwise_accuracy,
     create_training_arguments,
     get_saved_pair_dataset_paths,
     get_tokenized_split_dataset_paths,
@@ -96,11 +99,126 @@ def _pair_ready_examples():
     )
 
 
-def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path):
+def _metric_ready_examples():
+    return Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M0",
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [7, 8, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 0,
+                "pchembl_value": 4.0,
+            },
+            {
+                "example_id": 1,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M1",
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [8, 8, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 0,
+                "pchembl_value": 6.0,
+            },
+            {
+                "example_id": 2,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M2",
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [9, 9, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 1,
+                "pchembl_value": 8.0,
+            },
+            {
+                "example_id": 3,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M3",
+                "protein_input_ids": [2, 2, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [3, 4, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 0,
+                "pchembl_value": 4.5,
+            },
+            {
+                "example_id": 4,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M4",
+                "protein_input_ids": [2, 2, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [4, 5, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 1,
+                "pchembl_value": 7.0,
+            },
+            {
+                "example_id": 5,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M5",
+                "protein_input_ids": [2, 2, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [5, 6, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+                "binary_label": 1,
+                "pchembl_value": 8.5,
+            },
+        ]
+    )
+
+
+def test_metric_helpers_compute_expected_values():
+    classification_metrics = compute_classification_metrics(
+        probabilities=[0.1, 0.4, 0.8, 0.9],
+        labels=[0, 0, 1, 1],
+    )
+    assert classification_metrics["eval_mcc"] == pytest.approx(1.0)
+    assert classification_metrics["eval_f1"] == pytest.approx(1.0)
+    assert classification_metrics["eval_roc_auc"] == pytest.approx(1.0)
+    assert classification_metrics["eval_precision"] == pytest.approx(1.0)
+    assert classification_metrics["eval_recall"] == pytest.approx(1.0)
+    assert classification_metrics["eval_accuracy"] == pytest.approx(1.0)
+
+    pairwise_accuracy = compute_pairwise_accuracy(
+        positive_scores=[2.0, 1.5, 0.0],
+        negative_scores=[1.0, 2.0, -1.0],
+    )
+    assert pairwise_accuracy == pytest.approx(2.0 / 3.0)
+
+    spearman_metrics = compute_groupwise_spearman(
+        group_ids=["A", "A", "A", "B", "B", "B", "C", "C"],
+        ranking_scores=[1.0, 2.0, 3.0, 1.0, 3.0, 2.0, 4.0, 5.0],
+        pchembl_values=[4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 1.0],
+        min_group_size=3,
+    )
+    assert spearman_metrics["eval_spearman"] == pytest.approx(0.75)
+    assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
+
+
+def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     pytest.importorskip("accelerate")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv("WANDB_MODE", "disabled")
 
     protein_bundle, molecule_bundle = _dummy_bundles()
-    examples = _pair_ready_examples()
+    examples = _metric_ready_examples()
     pair_records, _ = build_pair_records(examples)
     pair_dataset = Dataset.from_list(pair_records)
     train_dataset = RewardPairDataset(examples, pair_dataset)
@@ -143,6 +261,15 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path):
     assert "eval_pair_loss" in eval_metrics
     assert "eval_classification_loss" in eval_metrics
     assert "eval_num_pairs" in eval_metrics
+    assert "eval_mcc" in eval_metrics
+    assert "eval_f1" in eval_metrics
+    assert "eval_roc_auc" in eval_metrics
+    assert "eval_precision" in eval_metrics
+    assert "eval_recall" in eval_metrics
+    assert "eval_accuracy" in eval_metrics
+    assert "eval_pairwise_accuracy" in eval_metrics
+    assert "eval_spearman" in eval_metrics
+    assert "eval_spearman_num_groups" in eval_metrics
     assert any("pair_loss" in entry for entry in trainer.state.log_history)
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")

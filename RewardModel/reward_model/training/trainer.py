@@ -10,6 +10,8 @@ from transformers.trainer import TRAINING_ARGS_NAME
 
 from ..model import save_reward_model
 from .config import RewardTrainerConfig
+from .data import RewardPairDataset
+from .evaluation import compute_reward_model_eval_metrics
 
 
 class RewardModelTrainer(Trainer):
@@ -161,10 +163,20 @@ class RewardModelTrainer(Trainer):
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
         )
+        active_eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        if not isinstance(active_eval_dataset, RewardPairDataset):
+            raise TypeError("RewardModelTrainer expects eval_dataset to be a RewardPairDataset")
         component_metrics = self._consume_eval_component_logs(metric_key_prefix)
+        reward_metrics = compute_reward_model_eval_metrics(
+            self,
+            self.model,
+            active_eval_dataset,
+        )
         metrics.update(component_metrics)
-        if component_metrics:
-            self.log(component_metrics)
+        metrics.update(reward_metrics)
+        extra_metrics = {**component_metrics, **reward_metrics}
+        if extra_metrics:
+            self.log(extra_metrics)
         return metrics
 
     def log(self, logs, start_time=None):

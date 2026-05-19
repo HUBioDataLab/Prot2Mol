@@ -21,6 +21,12 @@ from .data import (
     prepare_tokenized_split_datasets,
     save_pair_dataset_from_example_dataset,
 )
+from .evaluation import (
+    compute_classification_metrics,
+    compute_groupwise_spearman,
+    compute_pairwise_accuracy,
+    compute_reward_model_eval_metrics,
+)
 from .entry import (
     prepare_pair_datasets_from_config,
     prepare_training_examples_from_config,
@@ -42,6 +48,10 @@ __all__ = [
     "TokenizedSplitArtifacts",
     "build_group_id",
     "build_pair_records",
+    "compute_classification_metrics",
+    "compute_groupwise_spearman",
+    "compute_pairwise_accuracy",
+    "compute_reward_model_eval_metrics",
     "create_training_arguments",
     "get_saved_pair_dataset_paths",
     "get_tokenized_split_dataset_paths",
