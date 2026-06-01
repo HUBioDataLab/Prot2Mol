@@ -35,21 +35,43 @@ class DummyTokenizer:
                 "truncation": truncation,
             }
         )
+        lengths = []
+        for text in texts:
+            text_len = max(1, len(str(text)))
+            if truncation and max_length is not None:
+                text_len = min(text_len, max_length)
+            lengths.append(text_len)
+
+        if padding == "max_length":
+            if max_length is None:
+                raise ValueError("DummyTokenizer requires max_length when padding='max_length'")
+            pad_to = max_length
+        elif padding == "longest":
+            pad_to = max(lengths, default=0)
+        elif padding in (False, None, "do_not_pad"):
+            pad_to = None
+        else:
+            raise ValueError(f"Unsupported padding mode for DummyTokenizer: {padding}")
+
         rows = []
         masks = []
-        for idx, text in enumerate(texts):
-            text_len = min(max(1, len(str(text))), max_length)
+        for idx, text_len in enumerate(lengths):
             row = [idx + 1] * text_len
             mask = [1] * text_len
-            if padding == "max_length":
-                pad_len = max_length - text_len
+            if pad_to is not None:
+                pad_len = pad_to - text_len
                 row += [self.pad_token_id] * pad_len
                 mask += [0] * pad_len
             rows.append(row)
             masks.append(mask)
+        if return_tensors == "pt":
+            return {
+                "input_ids": torch.tensor(rows, dtype=torch.long),
+                "attention_mask": torch.tensor(masks, dtype=torch.long),
+            }
         return {
-            "input_ids": torch.tensor(rows, dtype=torch.long),
-            "attention_mask": torch.tensor(masks, dtype=torch.long),
+            "input_ids": rows,
+            "attention_mask": masks,
         }
 
 

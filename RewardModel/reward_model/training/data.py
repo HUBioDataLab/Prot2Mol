@@ -190,6 +190,61 @@ def _select_tokenized_columns(dataset: Dataset) -> Dataset:
     return dataset.remove_columns(removable)
 
 
+def _measure_tokenized_lengths(
+    tokenizer: Any,
+    texts: Sequence[str],
+) -> List[int]:
+    encode_kwargs = {
+        "add_special_tokens": True,
+        "padding": "longest",
+        "truncation": False,
+        "return_tensors": "pt",
+    }
+    text_list = list(texts)
+
+    if callable(tokenizer):
+        encoded = tokenizer(text_list, **encode_kwargs)
+    else:
+        encoded = tokenizer.batch_encode_plus(text_list, **encode_kwargs)
+
+    return [int(length) for length in encoded["attention_mask"].sum(dim=1).tolist()]
+
+
+def _filter_rows_that_fit_max_lengths(
+    dataset: Dataset,
+    *,
+    split_name: str,
+    data_config: RewardTrainingDataConfig,
+    model_config: RewardModelConfig,
+    protein_tokenizer: Any,
+    molecule_tokenizer: Any,
+) -> Dataset:
+    def _mark_rows_that_fit(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[bool]]:
+        protein_lengths = _measure_tokenized_lengths(protein_tokenizer, batch["protein_sequence"])
+        molecule_lengths = _measure_tokenized_lengths(molecule_tokenizer, batch["compound_selfies"])
+        return {
+            "_fits_max_lengths": [
+                protein_length <= model_config.protein_max_length
+                and molecule_length <= model_config.molecule_max_length
+                for protein_length, molecule_length in zip(protein_lengths, molecule_lengths)
+            ]
+        }
+
+    filtered = dataset.map(
+        _mark_rows_that_fit,
+        batched=True,
+        batch_size=data_config.tokenization_batch_size,
+        desc=f"Filtering {split_name} reward-model examples by max token length",
+    )
+    filtered = filtered.filter(
+        lambda row: bool(row["_fits_max_lengths"]),
+        desc=f"Dropping overlong {split_name} reward-model examples",
+    )
+    filtered = filtered.remove_columns("_fits_max_lengths")
+    filtered = filtered.remove_columns("example_id")
+    return filtered.add_column("example_id", list(range(len(filtered))))
+
+
 def _tokenize_example_rows(
     prepared_rows: Sequence[Mapping[str, Any]],
     *,
@@ -200,6 +255,14 @@ def _tokenize_example_rows(
     molecule_tokenizer: Any,
 ) -> Dataset:
     dataset = Dataset.from_list([dict(row) for row in prepared_rows])
+    dataset = _filter_rows_that_fit_max_lengths(
+        dataset,
+        split_name=split_name,
+        data_config=data_config,
+        model_config=model_config,
+        protein_tokenizer=protein_tokenizer,
+        molecule_tokenizer=molecule_tokenizer,
+    )
 
     def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[List[int]]]:
         protein_batch = batch_encode_texts(
