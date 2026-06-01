@@ -331,6 +331,112 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     assert "split" not in train_dataset.column_names
 
 
+def test_prepare_tokenized_split_datasets_drops_rows_exceeding_token_limits(tmp_path, monkeypatch):
+    split_rows = {
+        "train": [
+            {
+                "source": "Papyrus",
+                "assay_id": "A1",
+                "target_id": "TARGET_A",
+                "target_chembl_id": "T1",
+                "protein_sequence": "MKTAA",
+                "compound_id": "KEEP",
+                "compound_selfies": "[N]",
+                "pchembl_value": 6.0,
+                "binary_label": 1,
+                "assay_group_id": "IGNORED",
+                "split": "train",
+            },
+            {
+                "source": "Papyrus",
+                "assay_id": "A1",
+                "target_id": "TARGET_A",
+                "target_chembl_id": "T1",
+                "protein_sequence": "MKTAA",
+                "compound_id": "DROP_MOL",
+                "compound_selfies": "[C][C][C][C]",
+                "pchembl_value": 4.0,
+                "binary_label": 0,
+                "assay_group_id": "IGNORED",
+                "split": "train",
+            },
+            {
+                "source": "Papyrus",
+                "assay_id": "A2",
+                "target_id": "TARGET_B",
+                "target_chembl_id": "T2",
+                "protein_sequence": "PROTEIN_TOO_LONG",
+                "compound_id": "DROP_PROT",
+                "compound_selfies": "[O]",
+                "pchembl_value": 7.0,
+                "binary_label": 1,
+                "assay_group_id": "IGNORED",
+                "split": "train",
+            },
+        ],
+        "val": [
+            {
+                "source": "Papyrus",
+                "assay_id": "A3",
+                "target_id": "TARGET_C",
+                "target_chembl_id": "T3",
+                "protein_sequence": "TTTTT",
+                "compound_id": "VAL_KEEP",
+                "compound_selfies": "[S]",
+                "pchembl_value": 4.5,
+                "binary_label": 0,
+                "assay_group_id": "IGNORED",
+                "split": "val",
+            }
+        ],
+        "test": [
+            {
+                "source": "Papyrus",
+                "assay_id": "A4",
+                "target_id": "TARGET_D",
+                "target_chembl_id": "T4",
+                "protein_sequence": "CCCCC",
+                "compound_id": "TEST_KEEP",
+                "compound_selfies": "[F]",
+                "pchembl_value": 5.0,
+                "binary_label": 0,
+                "assay_group_id": "IGNORED",
+                "split": "test",
+            }
+        ],
+    }
+    for split_name, rows in split_rows.items():
+        _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
+
+    monkeypatch.setattr("reward_model.training.data.load_tokenizer", lambda *_args, **_kwargs: DummyTokenizer())
+
+    artifacts = prepare_tokenized_split_datasets(
+        RewardTrainingDataConfig(
+            train_parquet_path=str(tmp_path / "train.parquet"),
+            val_parquet_path=str(tmp_path / "val.parquet"),
+            test_parquet_path=str(tmp_path / "test.parquet"),
+            tokenized_dataset_dir=str(tmp_path / "tokenized_examples"),
+            tokenization_batch_size=2,
+        ),
+        RewardModelConfig(
+            protein_model_name_or_path="dummy/protein",
+            molecule_model_name_or_path="dummy/molecule",
+            protein_max_length=6,
+            molecule_max_length=8,
+        ),
+    )
+    split_paths = get_tokenized_split_dataset_paths(artifacts.base_dir)
+    train_dataset = load_tokenized_example_dataset(split_paths["train"])
+
+    assert len(train_dataset) == 1
+    assert artifacts.train_examples == 1
+    assert artifacts.train_groups == 1
+    assert train_dataset["compound_id"] == ["KEEP"]
+    assert train_dataset["example_id"] == [0]
+    assert len(train_dataset[0]["protein_input_ids"]) == 6
+    assert len(train_dataset[0]["molecule_input_ids"]) == 8
+
+
 def test_build_pair_records_creates_all_valid_pairs_and_skips_ties():
     dataset = Dataset.from_list(_tokenized_example_rows())
 

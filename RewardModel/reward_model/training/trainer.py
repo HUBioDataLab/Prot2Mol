@@ -225,11 +225,16 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         remove_unused_columns=False,
         disable_tqdm=True,
         report_to=["wandb"],
-        save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
     )
+
+    schedule_strategy = "steps" if config.eval_steps is not None else "epoch"
+    args_kwargs["save_strategy"] = schedule_strategy
+    if config.eval_steps is not None:
+        args_kwargs["eval_steps"] = config.eval_steps
+        args_kwargs["save_steps"] = config.eval_steps
 
     init_params = inspect.signature(TrainingArguments.__init__).parameters
     args_kwargs = {
@@ -238,9 +243,9 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         if key in init_params
     }
     if "evaluation_strategy" in init_params:
-        args_kwargs["evaluation_strategy"] = "epoch"
+        args_kwargs["evaluation_strategy"] = schedule_strategy
     elif "eval_strategy" in init_params:
-        args_kwargs["eval_strategy"] = "epoch"
+        args_kwargs["eval_strategy"] = schedule_strategy
     try:
         return TrainingArguments(**args_kwargs)
     except ImportError as exc:

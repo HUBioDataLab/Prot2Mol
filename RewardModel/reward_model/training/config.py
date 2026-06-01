@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 import yaml
 
@@ -46,6 +46,7 @@ class RewardTrainerConfig:
     per_device_train_batch_size: int = 8
     per_device_eval_batch_size: int = 8
     gradient_accumulation_steps: int = 1
+    eval_steps: Optional[int] = None
     learning_rate: float = 1e-5
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
@@ -70,6 +71,8 @@ class RewardTrainerConfig:
             raise ValueError("per_device_eval_batch_size must be > 0")
         if self.gradient_accumulation_steps <= 0:
             raise ValueError("gradient_accumulation_steps must be > 0")
+        if self.eval_steps is not None and self.eval_steps <= 0:
+            raise ValueError("eval_steps must be > 0 when provided")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be > 0")
         if self.weight_decay < 0.0:

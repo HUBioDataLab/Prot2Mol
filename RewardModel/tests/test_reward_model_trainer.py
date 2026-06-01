@@ -282,6 +282,27 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert reloaded.config.fusion_hidden_dim == 10
 
 
+def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_set(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            eval_steps=25,
+            fp16=False,
+        )
+    )
+
+    def _strategy_value(value):
+        return value.value if hasattr(value, "value") else value
+
+    assert _strategy_value(args.save_strategy) == "steps"
+    assert args.eval_steps == 25
+    assert args.save_steps == 25
+    if hasattr(args, "evaluation_strategy"):
+        assert _strategy_value(args.evaluation_strategy) == "steps"
+    if hasattr(args, "eval_strategy"):
+        assert _strategy_value(args.eval_strategy) == "steps"
+
+
 def test_prepare_pair_datasets_from_config_saves_train_val_and_test_pair_datasets(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
