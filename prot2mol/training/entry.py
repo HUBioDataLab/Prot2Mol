@@ -49,7 +49,7 @@ def parse_arguments(argv=None):
     training_group.add_argument(
         "--training_mode",
         type=str,
-        default="auto",
+        default="single_gpu",
         choices=["auto", "single_gpu", "multi_gpu", "multi_node"],
         help=(
             "Training execution mode. "

@@ -303,6 +303,75 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
         assert _strategy_value(args.eval_strategy) == "steps"
 
 
+def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            fp16=False,
+        )
+    )
+
+    assert "wandb" not in list(args.report_to)
+
+
+def test_create_training_arguments_rejects_distributed_env_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "2")
+
+    with pytest.raises(ValueError, match="training_mode=single_gpu"):
+        create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "trainer_output"),
+                fp16=False,
+            )
+        )
+
+
+def test_reward_training_arguments_rejects_incomplete_multi_gpu_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "2")
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+    monkeypatch.delenv("MASTER_ADDR", raising=False)
+    monkeypatch.delenv("MASTER_PORT", raising=False)
+
+    with pytest.raises(ValueError, match="Distributed launch environment is incomplete"):
+        create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "trainer_output"),
+                fp16=False,
+                training_mode="multi_gpu",
+            )
+        )
+
+
+def test_reward_training_arguments_rejects_invalid_distributed_rank(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+
+    with pytest.raises(ValueError, match="Invalid distributed rank"):
+        create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "trainer_output"),
+                fp16=False,
+                training_mode="multi_gpu",
+            )
+        )
+
+
+def test_reward_trainer_config_normalizes_report_to_string(tmp_path):
+    config = RewardTrainerConfig(
+        output_dir=str(tmp_path / "trainer_output"),
+        report_to="wandb",
+    )
+
+    assert config.report_to == ["wandb"]
+
+
 def test_prepare_pair_datasets_from_config_saves_train_val_and_test_pair_datasets(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))

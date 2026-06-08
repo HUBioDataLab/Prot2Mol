@@ -8,6 +8,8 @@ import yaml
 
 from ..model import RewardModelConfig
 
+VALID_TRAINING_MODES = ("auto", "single_gpu", "multi_gpu", "multi_node")
+
 
 def _resolve_path(path: str, base_dir: str) -> str:
     if os.path.isabs(path):
@@ -56,8 +58,16 @@ class RewardTrainerConfig:
     fp16: bool = False
     save_safetensors: bool = False
     save_total_limit: int = 2
+    training_mode: str = "single_gpu"
+    report_to: Optional[Any] = None
 
     def __post_init__(self) -> None:
+        if self.report_to is None:
+            self.report_to = []
+        elif isinstance(self.report_to, str):
+            self.report_to = [self.report_to]
+        else:
+            self.report_to = list(self.report_to)
         self.validate()
 
     def validate(self) -> None:
@@ -85,6 +95,10 @@ class RewardTrainerConfig:
             raise ValueError("dataloader_num_workers must be >= 0")
         if self.save_total_limit <= 0:
             raise ValueError("save_total_limit must be > 0")
+        if self.training_mode not in VALID_TRAINING_MODES:
+            raise ValueError(
+                f"training_mode must be one of {', '.join(VALID_TRAINING_MODES)}"
+            )
 
 
 @dataclass(eq=True)

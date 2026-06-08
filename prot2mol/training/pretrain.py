@@ -1,9 +1,12 @@
 # Standard library imports
 from collections import Counter
+import hashlib
+import json
 import logging
 import os
+import shutil
 import sys
-from typing import Dict
+from typing import Dict, Optional
 
 from torch.distributed import destroy_process_group
 
@@ -11,6 +14,7 @@ from torch.distributed import destroy_process_group
 import numpy as np
 import torch
 import wandb
+from datasets import load_from_disk
 
 # Local application imports
 # Add project root to path
@@ -94,6 +98,7 @@ class TrainingScript:
             "eval_split": config.eval_split,
             "eval_split_ratio": config.eval_split_ratio,
             "split_seed": config.split_seed,
+            "pchembl_huber_delta": config.pchembl_huber_delta,
         }
         self._validate_training_stage()
 
@@ -104,6 +109,7 @@ class TrainingScript:
         self.train_smiles_list = []
         self.eval_reference_smiles = []
         self.dataset_stats: Dict[str, object] = {}
+        self.prepared_split_metadata: Dict[str, object] = {}
         self.trainer = None
         self.training_vec = None
         self.pchembl_mean = 0.0
@@ -160,6 +166,174 @@ class TrainingScript:
 
     def _stage_has_pchembl(self) -> bool:
         return self.training_config["training_stage"] in {"pchembl_only", "multitask"}
+
+    def _needs_generation_metrics(self) -> bool:
+        return self._stage_has_lm()
+
+    def _distributed_barrier(self, label: str):
+        if (
+            self.distributed_context.is_distributed
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            self.logger.info("Rank %s waiting at barrier: %s", self.global_rank, label)
+            torch.distributed.barrier()
+
+    def _processed_dataset_fingerprint(self, processed_data_path: str) -> Dict[str, object]:
+        entries = []
+        for root, dirs, files in os.walk(processed_data_path):
+            dirs.sort()
+            for filename in sorted(files):
+                path = os.path.join(root, filename)
+                if not os.path.isfile(path):
+                    continue
+                rel_path = os.path.relpath(path, processed_data_path)
+                stat = os.stat(path)
+                entry = {
+                    "path": rel_path,
+                    "size": int(stat.st_size),
+                    "mtime_ns": int(stat.st_mtime_ns),
+                }
+                if filename.endswith(".json") or stat.st_size <= 1024 * 1024:
+                    with open(path, "rb") as handle:
+                        entry["sha256"] = hashlib.sha256(handle.read()).hexdigest()
+                entries.append(entry)
+
+        digest = hashlib.sha256(
+            json.dumps(entries, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return {
+            "digest": digest,
+            "file_count": len(entries),
+        }
+
+    def _prepared_split_cache_payload(self, processed_data_path: str) -> Dict[str, object]:
+        return {
+            "cache_version": 1,
+            "selfies_path": os.path.abspath(self.selfies_path),
+            "processed_dataset_path": os.path.abspath(processed_data_path),
+            "processed_dataset_fingerprint": self._processed_dataset_fingerprint(
+                processed_data_path
+            ),
+            "eval_split": self.training_config["eval_split"],
+            "eval_split_ratio": float(self.training_config["eval_split_ratio"]),
+            "split_seed": int(self.training_config["split_seed"]),
+            "training_stage": self.training_config["training_stage"],
+            "train_pchembl_head": bool(self.model_config["train_pchembl_head"]),
+            "pchembl_huber_delta": float(self.training_config["pchembl_huber_delta"]),
+        }
+
+    def _prepared_split_cache_dir(self, processed_data_path: str) -> str:
+        payload = self._prepared_split_cache_payload(processed_data_path)
+        payload_json = json.dumps(payload, sort_keys=True)
+        cache_key = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
+        return os.path.join(f"{processed_data_path}_prepared_splits", cache_key)
+
+    def _prepared_split_cache_paths(self, cache_dir: str) -> Dict[str, str]:
+        return {
+            "train": os.path.join(cache_dir, "train"),
+            "eval": os.path.join(cache_dir, "eval"),
+            "metadata": os.path.join(cache_dir, "metadata.json"),
+        }
+
+    def _prepared_split_cache_ready(
+        self,
+        cache_dir: str,
+        processed_data_path: Optional[str] = None,
+    ) -> bool:
+        paths = self._prepared_split_cache_paths(cache_dir)
+        ready = (
+            os.path.isdir(paths["train"])
+            and os.path.isdir(paths["eval"])
+            and os.path.exists(paths["metadata"])
+        )
+        if not ready or processed_data_path is None:
+            return ready
+        try:
+            with open(paths["metadata"], "r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return False
+        return metadata.get("payload") == self._prepared_split_cache_payload(
+            processed_data_path
+        )
+
+    def _split_metadata(self, total_samples: int, processed_data_path: str) -> Dict[str, object]:
+        return {
+            "payload": self._prepared_split_cache_payload(processed_data_path),
+            "dataset_total_samples": int(total_samples),
+            "train_samples": int(len(self.train_data)),
+            "eval_samples": int(len(self.test_data)),
+            "pchembl_mean": float(self.pchembl_mean),
+            "pchembl_std": float(self.pchembl_std),
+            "pchembl_threshold": float(self.pchembl_threshold),
+            "pchembl_huber_delta": float(self.model_config["pchembl_huber_delta"]),
+        }
+
+    def _apply_split_metadata(self, metadata: Dict[str, object]):
+        self.pchembl_mean = float(metadata.get("pchembl_mean", 0.0))
+        self.pchembl_std = float(metadata.get("pchembl_std", 1.0))
+        self.pchembl_threshold = float(metadata.get("pchembl_threshold", 6.0))
+        normalized_delta = float(
+            metadata.get(
+                "pchembl_huber_delta",
+                self.training_config["pchembl_huber_delta"],
+            )
+        )
+
+        self.model._config["pchembl_huber_delta"] = normalized_delta
+        self.model._config["pchembl_mean"] = self.pchembl_mean
+        self.model._config["pchembl_std"] = self.pchembl_std
+        self.model._config["pchembl_threshold"] = self.pchembl_threshold
+        self.model_config["pchembl_huber_delta"] = normalized_delta
+
+    def _save_prepared_splits(self, cache_dir: str, total_samples: int, processed_data_path: str):
+        tmp_dir = f"{cache_dir}.tmp"
+        if os.path.isdir(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_paths = self._prepared_split_cache_paths(tmp_dir)
+
+        self.train_data.save_to_disk(tmp_paths["train"])
+        self.test_data.save_to_disk(tmp_paths["eval"])
+        metadata = self._split_metadata(total_samples, processed_data_path)
+        with open(tmp_paths["metadata"], "w", encoding="utf-8") as handle:
+            json.dump(metadata, handle, indent=2, sort_keys=True)
+
+        if os.path.isdir(cache_dir):
+            shutil.rmtree(cache_dir)
+        os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+        os.replace(tmp_dir, cache_dir)
+        self.prepared_split_metadata = metadata
+
+    def _build_prepared_splits(self, full_data, cache_dir: str, processed_data_path: str):
+        split_ratio = self.training_config.get("eval_split_ratio", 0.01)
+        split_mode = self.training_config.get("eval_split", "random")
+        self.train_data, self.test_data = split_train_eval_dataset(
+            full_data=full_data,
+            split_mode=split_mode,
+            split_ratio=split_ratio,
+            split_seed=self.training_config.get("split_seed", 42),
+            num_proc=self.training_config.get("dataloader_num_workers"),
+            logger=self.logger,
+        )
+        self._compute_split_normalization()
+        self.train_data = self._apply_split_targets(self.train_data)
+        self.test_data = self._apply_split_targets(self.test_data)
+        self._save_prepared_splits(
+            cache_dir,
+            total_samples=len(full_data),
+            processed_data_path=processed_data_path,
+        )
+
+    def _load_prepared_splits(self, cache_dir: str):
+        paths = self._prepared_split_cache_paths(cache_dir)
+        self.train_data = load_from_disk(paths["train"])
+        self.test_data = load_from_disk(paths["eval"])
+        with open(paths["metadata"], "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        self.prepared_split_metadata = metadata
+        self._apply_split_metadata(metadata)
 
     def _apply_split_targets(self, dataset_split):
         if not self._stage_has_pchembl():
@@ -383,28 +557,34 @@ class TrainingScript:
             self.logger.error(error_msg)
             raise FileNotFoundError(error_msg)
 
-        self.logger.info(
-            "Rank %s: Loading pre-processed dataset from %s",
-            self.global_rank,
-            processed_data_path,
-        )
-        dataset, _ = load_processed_dataset(self.selfies_path, cache_dir=cache_dir)
+        prepared_cache_dir = self._prepared_split_cache_dir(processed_data_path)
 
-        self.logger.info("Splitting dataset into train and test sets...")
-        full_data = dataset["train"]
-        split_ratio = self.training_config.get("eval_split_ratio", 0.01)
-        split_mode = self.training_config.get("eval_split", "random")
-        self.train_data, self.test_data = split_train_eval_dataset(
-            full_data=full_data,
-            split_mode=split_mode,
-            split_ratio=split_ratio,
-            split_seed=self.training_config.get("split_seed", 42),
-            num_proc=self.training_config.get("dataloader_num_workers"),
-            logger=self.logger,
+        if self.distributed_context.is_distributed and self.global_rank != 0:
+            self._distributed_barrier("prepared split cache")
+        else:
+            if self._prepared_split_cache_ready(prepared_cache_dir, processed_data_path=processed_data_path):
+                self.logger.info("Loading prepared split cache from %s", prepared_cache_dir)
+            else:
+                self.logger.info(
+                    "Rank %s: Loading pre-processed dataset from %s",
+                    self.global_rank,
+                    processed_data_path,
+                )
+                dataset, _ = load_processed_dataset(self.selfies_path, cache_dir=cache_dir)
+                full_data = dataset["train"]
+                self.logger.info("Building prepared split cache at %s", prepared_cache_dir)
+                self._build_prepared_splits(full_data, prepared_cache_dir, processed_data_path=processed_data_path)
+            self._distributed_barrier("prepared split cache")
+
+        if not self._prepared_split_cache_ready(prepared_cache_dir, processed_data_path=processed_data_path):
+            raise FileNotFoundError(f"Prepared split cache was not created at: {prepared_cache_dir}")
+        self._load_prepared_splits(prepared_cache_dir)
+        total_samples = int(
+            self.prepared_split_metadata.get(
+                "dataset_total_samples",
+                len(self.train_data) + len(self.test_data),
+            )
         )
-        self._compute_split_normalization()
-        self.train_data = self._apply_split_targets(self.train_data)
-        self.test_data = self._apply_split_targets(self.test_data)
 
         self.logger.info(
             "Dataset split: %s train, %s test samples",
@@ -412,16 +592,25 @@ class TrainingScript:
             len(self.test_data),
         )
 
-        self.logger.info("Caching canonical SMILES for metrics...")
-        self.train_smiles_list = self._extract_smiles_list(self.train_data, drop_invalid=True)
-        self.eval_reference_smiles = self._extract_smiles_list(self.test_data, drop_invalid=True)
+        if self._needs_generation_metrics() and self.global_rank == 0:
+            self.logger.info("Caching canonical SMILES for generation metrics...")
+            self.train_smiles_list = self._extract_smiles_list(self.train_data, drop_invalid=True)
+            self.eval_reference_smiles = self._extract_smiles_list(self.test_data, drop_invalid=True)
 
-        if not self.train_smiles_list:
-            self.logger.warning("Training data does not contain valid SMILES entries")
-        if not self.eval_reference_smiles:
-            self.logger.warning("Evaluation data does not contain valid SMILES entries")
-        self._build_train_vectors()
-        self._update_dataset_stats(total_samples=len(full_data))
+            if not self.train_smiles_list:
+                self.logger.warning("Training data does not contain valid SMILES entries")
+            if not self.eval_reference_smiles:
+                self.logger.warning("Evaluation data does not contain valid SMILES entries")
+            self._build_train_vectors()
+        else:
+            self.train_smiles_list = []
+            self.eval_reference_smiles = []
+            self.training_vec = None
+            if not self._needs_generation_metrics():
+                self.logger.info("Skipping generation-metric SMILES/fingerprint prep for stage=%s", self.training_config["training_stage"])
+            else:
+                self.logger.info("Skipping generation-metric prep on rank %s", self.global_rank)
+        self._update_dataset_stats(total_samples=total_samples)
 
     def ddp_setup(self):
         """Initialize DDP with proper error handling and device setup."""

@@ -35,3 +35,5 @@ training:
   fp16: true
   save_safetensors: false
   save_total_limit: 1
+  training_mode: single_gpu
+  report_to: []

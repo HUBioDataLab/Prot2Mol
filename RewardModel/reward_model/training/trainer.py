@@ -14,6 +14,77 @@ from .data import RewardPairDataset
 from .evaluation import compute_reward_model_eval_metrics
 
 
+REQUIRED_DISTRIBUTED_ENV_VARS = (
+    "WORLD_SIZE",
+    "LOCAL_WORLD_SIZE",
+    "RANK",
+    "LOCAL_RANK",
+    "MASTER_ADDR",
+    "MASTER_PORT",
+)
+
+
+def _safe_int(value: Optional[str], default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _missing_env_vars(names):
+    return [name for name in names if os.environ.get(name) in (None, "")]
+
+
+def _validate_training_mode_environment(config: RewardTrainerConfig) -> None:
+    mode = config.training_mode
+    world_size = max(1, _safe_int(os.environ.get("WORLD_SIZE"), 1))
+    default_local_world_size = world_size if world_size > 1 else 1
+    local_world_size = max(
+        1,
+        _safe_int(os.environ.get("LOCAL_WORLD_SIZE"), default_local_world_size),
+    )
+    global_rank = _safe_int(os.environ.get("RANK"), -1)
+    local_rank = _safe_int(os.environ.get("LOCAL_RANK"), -1)
+    requires_distributed_env = mode in {"multi_gpu", "multi_node"} or (
+        mode == "auto" and world_size > 1
+    )
+    if requires_distributed_env:
+        missing = _missing_env_vars(REQUIRED_DISTRIBUTED_ENV_VARS)
+        if missing:
+            raise ValueError(
+                "Distributed launch environment is incomplete; missing "
+                f"{', '.join(missing)}. Use torchrun/sbatch launcher wiring or "
+                "run with training_mode=single_gpu."
+            )
+        if global_rank < 0 or global_rank >= world_size:
+            raise ValueError(
+                f"Invalid distributed rank: RANK={global_rank}, WORLD_SIZE={world_size}"
+            )
+        if local_rank < 0 or local_rank >= local_world_size:
+            raise ValueError(
+                f"Invalid local rank: LOCAL_RANK={local_rank}, "
+                f"LOCAL_WORLD_SIZE={local_world_size}"
+            )
+
+    if mode == "single_gpu" and world_size > 1:
+        raise ValueError(
+            "training_mode=single_gpu requires WORLD_SIZE=1. "
+            "Unset distributed launcher variables or choose multi_gpu/multi_node."
+        )
+    if mode == "multi_gpu":
+        if world_size <= 1:
+            raise ValueError("training_mode=multi_gpu requires WORLD_SIZE>1")
+        if world_size != local_world_size:
+            raise ValueError(
+                "training_mode=multi_gpu expects all ranks on one node. "
+                "Use multi_node for multi-node launches."
+            )
+    if mode == "multi_node" and world_size <= local_world_size:
+        raise ValueError("training_mode=multi_node requires more than one node")
+
+
 class RewardModelTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -207,6 +278,8 @@ class RewardModelTrainer(Trainer):
 
 
 def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
+    _validate_training_mode_environment(config)
+
     args_kwargs = dict(
         output_dir=os.path.abspath(config.output_dir),
         run_name=os.path.basename(os.path.abspath(config.output_dir)),
@@ -224,7 +297,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         save_total_limit=config.save_total_limit,
         remove_unused_columns=False,
         disable_tqdm=True,
-        report_to=["wandb"],
+        report_to=config.report_to,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,

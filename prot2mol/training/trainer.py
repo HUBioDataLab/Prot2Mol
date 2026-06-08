@@ -113,7 +113,8 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         return logs
 
     def _consume_eval_component_logs(self, metric_key_prefix, primary_loss=None):
-        if self._eval_component_count == 0:
+        is_distributed = getattr(self.args, "local_rank", -1) != -1
+        if self._eval_component_count == 0 and not is_distributed:
             return {}
 
         sums = torch.tensor(
@@ -128,12 +129,16 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             dtype=torch.float64,
         )
 
-        if self.args.local_rank != -1:
+        if is_distributed:
             import torch.distributed as dist
 
             dist.all_reduce(sums)
 
-        denom = float(sums[-1].item()) if sums[-1].item() > 0 else 1.0
+        if sums[-1].item() <= 0:
+            self._reset_eval_component_accumulator()
+            return {}
+
+        denom = float(sums[-1].item())
         logs = {
             f"{metric_key_prefix}_lm_loss": float(sums[0].item() / denom),
             f"{metric_key_prefix}_pchembl_loss": float(sums[1].item() / denom),
@@ -414,12 +419,19 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         Returns:
             Tuple of (predictions, targets, group_ids) as numpy arrays, or (None, None, None) if empty
         """
-        if len(self.pchembl_predictions_list) == 0:
+        local_rank = getattr(self.args, "local_rank", -1)
+        is_distributed = gather_across_ranks and local_rank != -1
+        if len(self.pchembl_predictions_list) == 0 and not is_distributed:
             return None, None, None
-        
-        # Concatenate all batches on this rank
-        predictions = torch.cat(self.pchembl_predictions_list, dim=0)
-        targets = torch.cat(self.pchembl_targets_list, dim=0)
+
+        # Concatenate all batches on this rank. In DDP, ranks with zero local
+        # samples must still enter collectives with empty tensors.
+        if len(self.pchembl_predictions_list) > 0:
+            predictions = torch.cat(self.pchembl_predictions_list, dim=0)
+            targets = torch.cat(self.pchembl_targets_list, dim=0)
+        else:
+            predictions = torch.empty(0, dtype=torch.float32)
+            targets = torch.empty(0, dtype=torch.float32)
         group_ids = None
         if len(self.pchembl_group_ids_list) > 0:
             group_ids = torch.cat(self.pchembl_group_ids_list, dim=0)
@@ -429,25 +441,35 @@ class GPT2_w_crs_attn_Trainer(Trainer):
         # Gather across ranks if requested and in DDP mode
         # NOTE: Transformers gathers LM predictions before calling compute_metrics,
         # so we need to do the same for pChEMBL predictions to ensure counts match
-        if gather_across_ranks and self.args.local_rank != -1:
+        if is_distributed:
             import torch.distributed as dist
-            import logging
-            logger = logging.getLogger(__name__)
             
-            # Move to CUDA for gathering
-            device = torch.device(f"cuda:{self.args.local_rank}")
+            # Move to the trainer device for gathering.
+            device = torch.device(getattr(self.args, "device", f"cuda:{local_rank}"))
             predictions = predictions.to(device)
             targets = targets.to(device)
             if group_ids is not None:
                 group_ids = group_ids.to(device)
             
             world_size = dist.get_world_size()
-            rank = dist.get_rank()
             
             # Gather sizes first
             local_size = torch.tensor([predictions.shape[0]], device=device)
             size_list = [torch.zeros_like(local_size) for _ in range(world_size)]
             dist.all_gather(size_list, local_size)
+            total_size = sum(int(size.item()) for size in size_list)
+            if total_size == 0:
+                return None, None, None
+
+            has_group_ids = torch.tensor([1 if group_ids is not None else 0], device=device)
+            dist.all_reduce(has_group_ids, op=dist.ReduceOp.MAX)
+            if bool(has_group_ids.item()) and group_ids is None:
+                group_ids = torch.full(
+                    (predictions.shape[0],),
+                    -1,
+                    device=device,
+                    dtype=torch.long,
+                )
             
             max_size = max([s.item() for s in size_list])
             
@@ -484,14 +506,12 @@ class GPT2_w_crs_attn_Trainer(Trainer):
             targets = torch.cat(targets_list, dim=0)
             if group_ids is not None:
                 group_ids = torch.cat(groups_list, dim=0)
-            
-            total_samples = predictions.shape[0]
            
         else:
-            if self.args.local_rank != -1:
+            if local_rank != -1:
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.info(f"Rank {self.args.local_rank}: Returning {local_samples} LOCAL pChEMBL predictions (no gathering)")
+                logger.info(f"Rank {local_rank}: Returning {local_samples} LOCAL pChEMBL predictions (no gathering)")
         
         # Convert to numpy
         predictions_np = predictions.cpu().numpy()

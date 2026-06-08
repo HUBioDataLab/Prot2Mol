@@ -1,0 +1,24 @@
+{
+  "workspace": "/Users/atabeyunlu/Prot2Mol/presentation_workspace/prot2mol_dataset",
+  "pptx": "/Users/atabeyunlu/Prot2Mol/presentation_workspace/prot2mol_dataset/output/output.pptx",
+  "checks": {
+    "pptx_package": {
+      "slide_count": 4,
+      "media_count": 0,
+      "chart_count": 1,
+      "zero_byte_media": [],
+      "invalid_png_media": [],
+      "placeholder_text": [],
+      "debug_line_colors": [],
+      "slide_numbers": [],
+      "warnings": [],
+      "failures": []
+    },
+    "output_hygiene": {
+      "output_dir": "/Users/atabeyunlu/Prot2Mol/presentation_workspace/prot2mol_dataset/output",
+      "unexpected_files": []
+    }
+  },
+  "failures": [],
+  "warnings": []
+}

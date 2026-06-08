@@ -6,6 +6,7 @@ from torch.distributed import init_process_group
 from transformers import TrainingArguments
 
 from ..io.hf_utils import save_model_config
+from .distributed import REQUIRED_DISTRIBUTED_ENV_VARS
 from .trainer import GPT2_w_crs_attn_Trainer
 
 
@@ -20,6 +21,12 @@ class TrainingRunner:
     def ddp_setup(self):
         """Initialize DDP with explicit rank/device validation."""
         try:
+            missing = [name for name in REQUIRED_DISTRIBUTED_ENV_VARS if os.environ.get(name) in (None, "")]
+            if missing:
+                raise RuntimeError(
+                    "Cannot initialize DDP with incomplete environment; missing "
+                    f"{', '.join(missing)}"
+                )
             world_size = int(os.environ["WORLD_SIZE"])
             torch.cuda.set_device(self.local_rank)
             init_process_group(backend="nccl", rank=self.global_rank, world_size=world_size)
@@ -112,7 +119,7 @@ class TrainingRunner:
         model_config = getattr(trainer.model, "_config", None)
         if model_config is None:
             model_config = getattr(getattr(trainer, "model_wrapped", None), "_config", None)
-        if model_config is not None:
+        if model_config is not None and self.global_rank == 0:
             save_model_config(output_dir, model_config, logger=self.logger)
         if self.logger is not None:
             self.logger.info("Model saved successfully")

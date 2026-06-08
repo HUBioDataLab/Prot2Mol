@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
 import torch
 
-from prot2mol.training.entry import create_run_name
+from prot2mol.training.entry import create_run_name, parse_arguments
 from prot2mol.training.trainer import GPT2_w_crs_attn_Trainer
 from prot2mol.training.training_runner import TrainingRunner
 
@@ -126,6 +127,12 @@ def test_training_runner_mode_detection_and_args():
     assert str(eval_field).lower().endswith("epoch")
 
 
+def test_parse_arguments_defaults_to_single_gpu():
+    args = parse_arguments(argv=[])
+
+    assert args.training_mode == "single_gpu"
+
+
 def test_create_run_name_is_compact_and_stable():
     config = SimpleNamespace(
         prot_emb_model="saprot",
@@ -145,7 +152,7 @@ def test_create_run_name_is_compact_and_stable():
         prot_max_length=1000,
         learning_rate=1e-5,
         train_batch_size=4,
-        training_mode="auto",
+        training_mode="single_gpu",
         run_name_suffix="Phase_IIIa",
     )
 
@@ -162,3 +169,58 @@ def test_create_run_name_is_compact_and_stable():
     assert len(run_name_a) <= 200
     assert "Phase_IIIa" in run_name_a
     assert "stg-pchembl_only" in run_name_a
+
+
+def test_eval_component_logs_all_reduce_with_zero_local_count(monkeypatch):
+    trainer = _make_light_trainer(pchembl_only=True)
+    trainer._reset_eval_component_accumulator()
+    trainer.args = SimpleNamespace(local_rank=0, device=torch.device("cpu"))
+    calls = []
+
+    def fake_all_reduce(tensor, op=None):
+        calls.append((tensor.clone(), op))
+        tensor[1] = 2.0
+        tensor[3] = 2.0
+        tensor[4] = 1.0
+
+    monkeypatch.setattr(torch.distributed, "all_reduce", fake_all_reduce)
+
+    logs = trainer._consume_eval_component_logs("eval")
+
+    assert calls
+    assert logs["eval_pchembl_loss"] == pytest.approx(2.0)
+    assert logs["eval_total_loss"] == pytest.approx(2.0)
+
+
+def test_get_pchembl_predictions_gathers_with_zero_local_predictions(monkeypatch):
+    trainer = _make_light_trainer(pchembl_only=True)
+    trainer.args = SimpleNamespace(local_rank=0, device=torch.device("cpu"))
+    trainer.pchembl_predictions_list = []
+    trainer.pchembl_targets_list = []
+    trainer.pchembl_group_ids_list = []
+    calls = {"all_gather": 0, "all_reduce": 0}
+
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 2)
+
+    def fake_all_reduce(tensor, op=None):
+        calls["all_reduce"] += 1
+
+    def fake_all_gather(outputs, tensor):
+        calls["all_gather"] += 1
+        if tensor.numel() == 1:
+            outputs[0].copy_(torch.tensor([0], dtype=tensor.dtype, device=tensor.device))
+            outputs[1].copy_(torch.tensor([2], dtype=tensor.dtype, device=tensor.device))
+            return
+
+        outputs[0].zero_()
+        outputs[1].copy_(torch.tensor([0.25, 0.75], dtype=tensor.dtype, device=tensor.device))
+
+    monkeypatch.setattr(torch.distributed, "all_reduce", fake_all_reduce)
+    monkeypatch.setattr(torch.distributed, "all_gather", fake_all_gather)
+
+    predictions, targets, group_ids = trainer.get_pchembl_predictions()
+
+    assert calls == {"all_gather": 3, "all_reduce": 1}
+    assert predictions.tolist() == pytest.approx([0.25, 0.75])
+    assert targets.tolist() == pytest.approx([0.25, 0.75])
+    assert group_ids is None

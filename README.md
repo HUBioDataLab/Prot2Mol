@@ -129,6 +129,8 @@ The pChEMBL head uses protein token embeddings from the frozen encoder and decod
 - `multi_gpu`: single-node distributed training (multi-GPU)
 - `multi_node`: multi-node distributed training (HPC)
 
+The default config and CLI default are `single_gpu`. Use `auto` only when you intentionally want launch environment variables to decide the mode.
+
 Single GPU:
 
 ```bash

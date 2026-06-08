@@ -3,6 +3,14 @@ from dataclasses import dataclass
 from typing import Mapping, Optional
 
 VALID_TRAINING_MODES = ("auto", "single_gpu", "multi_gpu", "multi_node")
+REQUIRED_DISTRIBUTED_ENV_VARS = (
+    "WORLD_SIZE",
+    "LOCAL_WORLD_SIZE",
+    "RANK",
+    "LOCAL_RANK",
+    "MASTER_ADDR",
+    "MASTER_PORT",
+)
 
 
 def _safe_int(value, default: int) -> int:
@@ -12,6 +20,10 @@ def _safe_int(value, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _missing_env_vars(environment: Mapping[str, str], names):
+    return [name for name in names if environment.get(name) in (None, "")]
 
 
 @dataclass(frozen=True)
@@ -66,8 +78,8 @@ def resolve_distributed_context(
     world_size = max(1, _safe_int(environment.get("WORLD_SIZE"), 1))
     local_world_size_default = world_size if world_size > 1 else 1
     local_world_size = max(1, _safe_int(environment.get("LOCAL_WORLD_SIZE"), local_world_size_default))
-    global_rank = _safe_int(environment.get("RANK"), 0)
-    local_rank = _safe_int(environment.get("LOCAL_RANK"), 0)
+    global_rank = _safe_int(environment.get("RANK"), -1)
+    local_rank = _safe_int(environment.get("LOCAL_RANK"), -1)
     node_rank = _safe_int(
         environment.get("GROUP_RANK", environment.get("NODE_RANK")),
         0,
@@ -75,6 +87,17 @@ def resolve_distributed_context(
 
     inferred_mode = _infer_mode_from_env(world_size=world_size, local_world_size=local_world_size)
     effective_mode = inferred_mode if mode == "auto" else mode
+    requires_distributed_env = mode in {"multi_gpu", "multi_node"} or (
+        mode == "auto" and world_size > 1
+    )
+    if requires_distributed_env:
+        missing = _missing_env_vars(environment, REQUIRED_DISTRIBUTED_ENV_VARS)
+        if missing:
+            raise ValueError(
+                "Distributed launch environment is incomplete; missing "
+                f"{', '.join(missing)}. Use torchrun/sbatch launcher wiring or "
+                "run with training_mode=single_gpu."
+            )
 
     if mode == "single_gpu" and world_size > 1:
         raise ValueError(
