@@ -88,7 +88,6 @@ def _validate_training_mode_environment(config: RewardTrainerConfig) -> None:
 class RewardModelTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._last_grad_norm = 0.0
         self._reset_train_component_accumulator()
         self._reset_eval_component_accumulator()
 
@@ -153,7 +152,6 @@ class RewardModelTrainer(Trainer):
             "classification_loss": self._train_component_sums["classification_loss"] / denom,
             "total_loss": self._train_component_sums["total_loss"] / denom,
             "num_pairs": self._train_component_sums["num_pairs"] / denom,
-            "grad_norm": self._last_grad_norm,
         }
         self._reset_train_component_accumulator()
         return logs
@@ -198,11 +196,6 @@ class RewardModelTrainer(Trainer):
             )
 
         return (outputs.loss, outputs) if return_outputs else outputs.loss
-
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        loss = super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
-        self._last_grad_norm = self._compute_grad_norm(model)
-        return loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         with torch.no_grad():
@@ -265,17 +258,6 @@ class RewardModelTrainer(Trainer):
         model_to_save = self.model.module if hasattr(self.model, "module") else self.model
         save_reward_model(model_to_save, save_dir)
         torch.save(self.args, os.path.join(save_dir, TRAINING_ARGS_NAME))
-
-    @staticmethod
-    def _compute_grad_norm(model) -> float:
-        total = 0.0
-        for parameter in model.parameters():
-            if parameter.grad is None:
-                continue
-            grad = parameter.grad.detach()
-            total += float(torch.sum(grad * grad).item())
-        return total ** 0.5
-
 
 def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
     _validate_training_mode_environment(config)
