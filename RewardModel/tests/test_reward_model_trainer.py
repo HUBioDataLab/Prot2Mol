@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -203,12 +204,23 @@ def test_metric_helpers_compute_expected_values():
     assert pairwise_accuracy == pytest.approx(2.0 / 3.0)
 
     spearman_metrics = compute_groupwise_spearman(
-        group_ids=["A", "A", "A", "B", "B", "B", "C", "C"],
-        ranking_scores=[1.0, 2.0, 3.0, 1.0, 3.0, 2.0, 4.0, 5.0],
-        pchembl_values=[4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 1.0],
+        group_ids=[
+            "T1__A1",
+            "T1__A1",
+            "T1__A1",
+            "T2__A2",
+            "T2__A2",
+            "T2__A2",
+            "T2__A2",
+            "T3__A3",
+            "T3__A3",
+            "T3__A3",
+        ],
+        ranking_scores=[1.0, 2.0, 3.0, 1.0, 2.0, 4.0, 3.0, 4.0, 5.0, 6.0],
+        pchembl_values=[4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 1.0, 1.0, 1.0],
         min_group_size=3,
     )
-    assert spearman_metrics["eval_spearman"] == pytest.approx(0.75)
+    assert spearman_metrics["eval_spearman"] == pytest.approx((3.0 * 1.0 + 4.0 * 0.8) / 7.0)
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
 
 
@@ -249,6 +261,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         ),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        val2_eval_dataset=eval_dataset,
         data_collator=RewardPairCollator(),
     )
 
@@ -270,6 +283,46 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_pairwise_accuracy" in eval_metrics
     assert "eval_spearman" in eval_metrics
     assert "eval_spearman_num_groups" in eval_metrics
+    assert "eval_val2_loss" in eval_metrics
+    assert "eval_val2_pair_loss" in eval_metrics
+    assert "eval_val2_classification_loss" in eval_metrics
+    assert "eval_val2_pairwise_accuracy" in eval_metrics
+    assert "eval_val2_mcc" in eval_metrics
+    assert "eval_val2_f1" in eval_metrics
+    assert "eval_val2_roc_auc" in eval_metrics
+    assert "eval_val2_precision" in eval_metrics
+    assert "eval_val2_recall" in eval_metrics
+    assert "eval_val2_accuracy" in eval_metrics
+    assert "eval_val2_spearman" in eval_metrics
+    assert "eval_val2_spearman_num_groups" in eval_metrics
+    assay_log_path = tmp_path / "trainer_output" / "eval_assay_spearman.jsonl"
+    val2_assay_log_path = tmp_path / "trainer_output" / "eval_val2_assay_spearman.jsonl"
+    assay_log_records = [
+        json.loads(line)
+        for line in assay_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(assay_log_records) >= 1
+    latest_assay_log = assay_log_records[-1]
+    assert latest_assay_log["global_step"] == trainer.state.global_step
+    assert latest_assay_log["weighted_spearman"] == pytest.approx(eval_metrics["eval_spearman"])
+    assert latest_assay_log["num_eligible_groups"] == pytest.approx(
+        eval_metrics["eval_spearman_num_groups"]
+    )
+    assert latest_assay_log["assays"]
+    assert {
+        "group_id",
+        "target_chembl_id",
+        "assay_id",
+        "num_examples",
+        "spearman",
+    }.issubset(latest_assay_log["assays"][0])
+    val2_assay_log_records = [
+        json.loads(line)
+        for line in val2_assay_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
+        eval_metrics["eval_val2_spearman"]
+    )
     assert any("pair_loss" in entry for entry in trainer.state.log_history)
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
@@ -557,11 +610,20 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     captured = {}
 
     class _FakeTrainer:
-        def __init__(self, model, args, train_dataset, eval_dataset, data_collator):
+        def __init__(
+            self,
+            model,
+            args,
+            train_dataset,
+            eval_dataset,
+            data_collator,
+            val2_eval_dataset=None,
+        ):
             captured["train_dataset_len"] = len(train_dataset)
             captured["eval_dataset_len"] = len(eval_dataset)
             captured["train_dataset"] = train_dataset
             captured["eval_dataset"] = eval_dataset
+            captured["val2_eval_dataset"] = val2_eval_dataset
             captured["data_collator"] = data_collator
 
         def train(self):
@@ -585,12 +647,127 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert captured["evaluate_called"] is True
     assert captured["train_dataset_len"] == 1
     assert captured["eval_dataset_len"] == 1
+    assert captured["val2_eval_dataset"] is None
     assert isinstance(captured["data_collator"], RewardPairCollator)
     assert summary["train_examples"] == 2
     assert summary["val_examples"] == 2
     assert summary["test_examples"] == 1
     assert summary["train_pairs"] == 1
     assert summary["val_pairs"] == 1
+
+
+def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):
+    split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
+    pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
+
+    train_examples = _pair_ready_examples().select([0, 1])
+    val_examples = _pair_ready_examples().select([2, 3])
+    test_examples = _pair_ready_examples().select([0])
+    val2_examples = Dataset.from_list(
+        [
+            {
+                "example_id": 0,
+                "group_id": "T4__A4",
+                "target_chembl_id": "T4",
+                "assay_id": "A4",
+                "compound_id": "M0",
+                "pchembl_value": 4.0,
+                "binary_label": 0,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [2, 2, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+            {
+                "example_id": 1,
+                "group_id": "T4__A4",
+                "target_chembl_id": "T4",
+                "assay_id": "A4",
+                "compound_id": "M1",
+                "pchembl_value": 7.0,
+                "binary_label": 1,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [3, 3, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+        ]
+    )
+
+    train_examples.save_to_disk(split_paths["train"])
+    val_examples.save_to_disk(split_paths["val"])
+    test_examples.save_to_disk(split_paths["test"])
+    val2_examples.save_to_disk(tmp_path / "tokenized" / "val2_examples")
+    save_pair_dataset_from_example_dataset(train_examples, pair_paths["train"], split_name="train")
+    save_pair_dataset_from_example_dataset(val_examples, pair_paths["val"], split_name="val")
+    save_pair_dataset_from_example_dataset(
+        val2_examples,
+        str(tmp_path / "tokenized" / "val2_pairs"),
+        split_name="val2",
+    )
+
+    config_path = tmp_path / "reward_train.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model:",
+                "  protein_model_name_or_path: protein/dummy",
+                "  molecule_model_name_or_path: molecule/dummy",
+                "  fusion_hidden_dim: 8",
+                "  fusion_num_heads: 2",
+                "  dropout: 0.0",
+                "data:",
+                f"  train_parquet_path: {tmp_path / 'unused_train.parquet'}",
+                f"  val_parquet_path: {tmp_path / 'unused_val.parquet'}",
+                f"  test_parquet_path: {tmp_path / 'unused_test.parquet'}",
+                f"  tokenized_dataset_dir: {tmp_path / 'tokenized'}",
+                f"  val2_tokenized_dataset_dir: {tmp_path / 'tokenized'}",
+                "  tokenization_batch_size: 2",
+                "training:",
+                f"  output_dir: {tmp_path / 'trainer_output'}",
+                "  num_train_epochs: 1",
+                "  per_device_train_batch_size: 2",
+                "  per_device_eval_batch_size: 2",
+                "  logging_steps: 1",
+                "  fp16: false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    class _FakeTrainer:
+        def __init__(
+            self,
+            model,
+            args,
+            train_dataset,
+            eval_dataset,
+            data_collator,
+            val2_eval_dataset=None,
+        ):
+            captured["val2_eval_dataset_len"] = len(val2_eval_dataset)
+
+        def train(self):
+            return None
+
+        def save_model(self, output_dir):
+            captured["save_model_output_dir"] = output_dir
+
+        def evaluate(self):
+            return {"eval_loss": 0.5, "eval_val2_loss": 0.4}
+
+    monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
+    monkeypatch.setattr("reward_model.training.entry.RewardModel", lambda config: object())
+    monkeypatch.setattr("reward_model.training.entry.create_training_arguments", lambda config: object())
+
+    summary = train_reward_model_from_config(str(config_path))
+
+    assert captured["val2_eval_dataset_len"] == 1
+    assert summary["val2_examples"] == 2
+    assert summary["val2_pairs"] == 1
+    assert summary["eval_metrics"]["eval_val2_loss"] == pytest.approx(0.4)
 
 
 def test_train_reward_model_from_config_requires_saved_pair_datasets(tmp_path):

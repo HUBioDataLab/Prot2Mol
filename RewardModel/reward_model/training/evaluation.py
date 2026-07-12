@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from collections import defaultdict
 from typing import Any, Dict, Mapping, Sequence
 
@@ -16,6 +18,8 @@ from sklearn.metrics import (
 )
 
 from .data import RewardPairCollator, RewardPairDataset
+
+ASSAY_SPEARMAN_LOG_FILENAME = "eval_assay_spearman.jsonl"
 
 
 def compute_classification_metrics(
@@ -53,13 +57,34 @@ def compute_groupwise_spearman(
     pchembl_values: Sequence[float],
     min_group_size: int = 3,
 ) -> Dict[str, float]:
+    metrics, _ = _compute_groupwise_spearman_with_records(
+        group_ids=group_ids,
+        ranking_scores=ranking_scores,
+        pchembl_values=pchembl_values,
+        min_group_size=min_group_size,
+    )
+    return metrics
+
+
+def _split_group_id(group_id: str) -> tuple[str, str]:
+    target_chembl_id, assay_id = group_id.split("__", 1)
+    return target_chembl_id, assay_id
+
+
+def _compute_groupwise_spearman_with_records(
+    *,
+    group_ids: Sequence[str],
+    ranking_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_group_size: int = 3,
+) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     grouped_scores: Dict[str, list[float]] = defaultdict(list)
     grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
     for group_id, score, pchembl in zip(group_ids, ranking_scores, pchembl_values):
         grouped_scores[str(group_id)].append(float(score))
         grouped_pchembl[str(group_id)].append(float(pchembl))
 
-    correlations: list[float] = []
+    assay_records: list[Dict[str, float | int | str]] = []
     for group_id in sorted(grouped_scores):
         scores = grouped_scores[group_id]
         pchembls = grouped_pchembl[group_id]
@@ -68,16 +93,74 @@ def compute_groupwise_spearman(
         if len(set(pchembls)) == 1:
             continue
         result = spearmanr(scores, pchembls)
-        correlations.append(float(getattr(result, "statistic", result[0])))
+        target_chembl_id, assay_id = _split_group_id(group_id)
+        assay_records.append(
+            {
+                "group_id": group_id,
+                "target_chembl_id": target_chembl_id,
+                "assay_id": assay_id,
+                "num_examples": len(scores),
+                "spearman": float(getattr(result, "statistic", result[0])),
+            }
+        )
 
-    if not correlations:
-        return {
-            "eval_spearman": float("nan"),
-            "eval_spearman_num_groups": 0.0,
-        }
+    if not assay_records:
+        return (
+            {
+                "eval_spearman": float("nan"),
+                "eval_spearman_num_groups": 0.0,
+            },
+            assay_records,
+        )
+
+    weighted_sum = sum(
+        float(record["spearman"]) * int(record["num_examples"])
+        for record in assay_records
+    )
+    total_weight = sum(int(record["num_examples"]) for record in assay_records)
+    return (
+        {
+            "eval_spearman": float(weighted_sum / total_weight),
+            "eval_spearman_num_groups": float(len(assay_records)),
+        },
+        assay_records,
+    )
+
+
+def _append_assay_spearman_log(
+    trainer,
+    metrics: Mapping[str, float],
+    assay_records: Sequence[Mapping[str, float | int | str]],
+    *,
+    metric_key_prefix: str,
+) -> None:
+    if not trainer.is_world_process_zero():
+        return
+
+    os.makedirs(trainer.args.output_dir, exist_ok=True)
+    filename = (
+        ASSAY_SPEARMAN_LOG_FILENAME
+        if metric_key_prefix == "eval"
+        else f"{metric_key_prefix}_assay_spearman.jsonl"
+    )
+    path = os.path.join(trainer.args.output_dir, filename)
+    record = {
+        "global_step": int(trainer.state.global_step),
+        "epoch": trainer.state.epoch,
+        "weighted_spearman": metrics[f"{metric_key_prefix}_spearman"],
+        "num_eligible_groups": metrics[f"{metric_key_prefix}_spearman_num_groups"],
+        "assays": list(assay_records),
+    }
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _with_metric_prefix(metrics: Mapping[str, float], metric_key_prefix: str) -> Dict[str, float]:
+    if metric_key_prefix == "eval":
+        return dict(metrics)
     return {
-        "eval_spearman": float(np.mean(correlations)),
-        "eval_spearman_num_groups": float(len(correlations)),
+        key.replace("eval_", f"{metric_key_prefix}_", 1): value
+        for key, value in metrics.items()
     }
 
 
@@ -170,6 +253,8 @@ def compute_reward_model_eval_metrics(
     trainer,
     model,
     eval_dataset: RewardPairDataset,
+    *,
+    metric_key_prefix: str = "eval",
 ) -> Dict[str, float]:
     batch_size = int(trainer.args.per_device_eval_batch_size)
     example_metrics_source = _score_example_dataset(
@@ -183,14 +268,13 @@ def compute_reward_model_eval_metrics(
         example_metrics_source["labels"],
         threshold=0.5,
     )
-    metrics.update(
-        compute_groupwise_spearman(
-            group_ids=example_metrics_source["group_ids"],
-            ranking_scores=example_metrics_source["ranking_scores"],
-            pchembl_values=example_metrics_source["pchembl_values"],
-            min_group_size=3,
-        )
+    spearman_metrics, assay_records = _compute_groupwise_spearman_with_records(
+        group_ids=example_metrics_source["group_ids"],
+        ranking_scores=example_metrics_source["ranking_scores"],
+        pchembl_values=example_metrics_source["pchembl_values"],
+        min_group_size=3,
     )
+    metrics.update(spearman_metrics)
     metrics.update(
         _score_pair_dataset(
             trainer,
@@ -198,5 +282,12 @@ def compute_reward_model_eval_metrics(
             eval_dataset,
             batch_size=batch_size,
         )
+    )
+    metrics = _with_metric_prefix(metrics, metric_key_prefix)
+    _append_assay_spearman_log(
+        trainer,
+        metrics,
+        assay_records,
+        metric_key_prefix=metric_key_prefix,
     )
     return metrics

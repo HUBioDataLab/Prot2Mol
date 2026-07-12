@@ -19,6 +19,10 @@ from .trainer import RewardModelTrainer, create_training_arguments
 from ..model import RewardModel
 
 
+def _split_dataset_path(tokenized_dataset_dir: str, split_name: str, dataset_kind: str) -> str:
+    return os.path.join(os.path.abspath(tokenized_dataset_dir), f"{split_name}_{dataset_kind}")
+
+
 def prepare_training_examples_from_config(config_path: str) -> Dict[str, Any]:
     config = load_reward_training_config(config_path)
     artifacts = prepare_tokenized_split_datasets(config.data, config.model)
@@ -112,6 +116,33 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
 
     train_dataset = RewardPairDataset(train_examples, train_pairs)
     eval_dataset = RewardPairDataset(val_examples, eval_pairs)
+    val2_eval_dataset = None
+    val2_examples = None
+    val2_pairs = None
+    if config.data.val2_tokenized_dataset_dir is not None:
+        val2_examples_path = _split_dataset_path(
+            config.data.val2_tokenized_dataset_dir,
+            "val2",
+            "examples",
+        )
+        val2_pairs_path = _split_dataset_path(
+            config.data.val2_tokenized_dataset_dir,
+            "val2",
+            "pairs",
+        )
+        missing_val2_paths = [
+            path
+            for path in (val2_examples_path, val2_pairs_path)
+            if not os.path.exists(path)
+        ]
+        if missing_val2_paths:
+            raise FileNotFoundError(
+                "Semi-seen val2 datasets not found. "
+                f"Missing: {missing_val2_paths}."
+            )
+        val2_examples = load_tokenized_example_dataset(val2_examples_path)
+        val2_pairs = load_saved_pair_dataset(val2_pairs_path)
+        val2_eval_dataset = RewardPairDataset(val2_examples, val2_pairs)
     collator = RewardPairCollator()
 
     trainer = RewardModelTrainer(
@@ -119,6 +150,7 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         args=create_training_arguments(config.training),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        val2_eval_dataset=val2_eval_dataset,
         data_collator=collator,
     )
     trainer.train()
@@ -136,4 +168,12 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         "val_pairs": len(eval_pairs),
         "output_dir": os.path.abspath(config.training.output_dir),
         "eval_metrics": eval_metrics,
+        **(
+            {}
+            if val2_eval_dataset is None
+            else {
+                "val2_examples": len(val2_examples),
+                "val2_pairs": len(val2_pairs),
+            }
+        ),
     }

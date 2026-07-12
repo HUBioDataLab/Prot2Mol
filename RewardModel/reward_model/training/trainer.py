@@ -86,8 +86,9 @@ def _validate_training_mode_environment(config: RewardTrainerConfig) -> None:
 
 
 class RewardModelTrainer(Trainer):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, val2_eval_dataset=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.val2_eval_dataset = val2_eval_dataset
         self._reset_train_component_accumulator()
         self._reset_eval_component_accumulator()
 
@@ -220,7 +221,12 @@ class RewardModelTrainer(Trainer):
         labels = inputs["activity_labels"].detach()
         return (loss, logits, labels)
 
-    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
+    def _evaluate_reward_dataset(
+        self,
+        eval_dataset,
+        ignore_keys=None,
+        metric_key_prefix: str = "eval",
+    ) -> Dict[str, float]:
         self._reset_eval_component_accumulator()
         metrics = super().evaluate(
             eval_dataset=eval_dataset,
@@ -235,12 +241,29 @@ class RewardModelTrainer(Trainer):
             self,
             self.model,
             active_eval_dataset,
+            metric_key_prefix=metric_key_prefix,
         )
         metrics.update(component_metrics)
         metrics.update(reward_metrics)
         extra_metrics = {**component_metrics, **reward_metrics}
         if extra_metrics:
             self.log(extra_metrics)
+        return metrics
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
+        metrics = self._evaluate_reward_dataset(
+            eval_dataset=eval_dataset,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+        if eval_dataset is None and metric_key_prefix == "eval" and self.val2_eval_dataset is not None:
+            metrics.update(
+                self._evaluate_reward_dataset(
+                    eval_dataset=self.val2_eval_dataset,
+                    ignore_keys=ignore_keys,
+                    metric_key_prefix="eval_val2",
+                )
+            )
         return metrics
 
     def log(self, logs, start_time=None):
