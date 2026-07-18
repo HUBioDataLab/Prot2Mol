@@ -9,6 +9,7 @@ from benchmark_reward_model import (
     _build_synthetic_pair_dataset,
     _gradient_norms_close,
     _max_gradient_signature_errors,
+    _metrics_close,
     _percentile,
 )
 
@@ -93,3 +94,13 @@ def test_synthetic_benchmark_dataset_has_fixed_storage_and_pair_protein_reuse():
     assert first_pair["positive"]["molecule_input_ids"] != first_pair["negative"][
         "molecule_input_ids"
     ]
+
+
+def test_validation_metric_comparison_treats_matching_nans_as_equal():
+    close, max_error = _metrics_close(
+        {"eval_loss": 0.5, "eval_spearman": float("nan")},
+        {"eval_loss": 0.5, "eval_spearman": float("nan")},
+    )
+
+    assert close
+    assert max_error == 0.0

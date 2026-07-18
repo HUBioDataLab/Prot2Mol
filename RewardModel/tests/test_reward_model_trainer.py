@@ -2,6 +2,7 @@ import json
 import os
 
 import pytest
+import torch
 from datasets import Dataset
 
 from conftest import DummyEncoder, DummyTokenizer
@@ -267,6 +268,14 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     )
 
     train_result = trainer.train()
+
+    def _unexpected_pair_rescore(*args, **kwargs):
+        raise AssertionError("Evaluation must reuse pair scores from prediction_step")
+
+    monkeypatch.setattr(
+        "reward_model.training.evaluation._score_pair_dataset",
+        _unexpected_pair_rescore,
+    )
     eval_metrics = trainer.evaluate()
     save_dir = tmp_path / "saved_model"
     trainer.save_model(str(save_dir))
@@ -334,6 +343,34 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         molecule_bundle=molecule_bundle,
     )
     assert reloaded.config.fusion_hidden_dim == 10
+
+
+def test_eval_pairwise_accumulator_matches_reference_accuracy():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer._reset_eval_component_accumulator()
+    trainer._record_eval_components(
+        pair_loss=torch.tensor(0.5),
+        classification_loss=torch.tensor(0.25),
+        total_loss=torch.tensor(0.75),
+        num_pairs=torch.tensor(3),
+    )
+    ranking_scores = torch.tensor([2.0, 1.5, 0.0, 1.0, 2.0, -1.0])
+    positive_indices = torch.tensor([0, 1, 2])
+    negative_indices = torch.tensor([3, 4, 5])
+
+    trainer._record_eval_pairwise_scores(
+        ranking_scores,
+        positive_indices,
+        negative_indices,
+    )
+    metrics = trainer._consume_eval_component_logs("eval")
+
+    expected = compute_pairwise_accuracy(
+        ranking_scores[positive_indices].tolist(),
+        ranking_scores[negative_indices].tolist(),
+    )
+    assert metrics["eval_pairwise_accuracy"] == pytest.approx(expected)
+    assert metrics["eval_pairwise_accuracy"] == pytest.approx(2.0 / 3.0)
 
 
 def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_set(tmp_path):

@@ -157,6 +157,8 @@ class RewardModelTrainer(Trainer):
             "num_pairs": 0.0,
         }
         self._eval_component_count = 0
+        self._eval_pairwise_correct = 0
+        self._eval_pairwise_count = 0
 
     def _get_train_sampler(self, train_dataset=None):
         active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
@@ -213,6 +215,21 @@ class RewardModelTrainer(Trainer):
         self._eval_component_sums["num_pairs"] += self._to_scalar(num_pairs)
         self._eval_component_count += 1
 
+    def _record_eval_pairwise_scores(
+        self,
+        ranking_score: torch.Tensor,
+        positive_indices: torch.Tensor,
+        negative_indices: torch.Tensor,
+    ) -> None:
+        positive_indices = positive_indices.to(device=ranking_score.device, dtype=torch.long)
+        negative_indices = negative_indices.to(device=ranking_score.device, dtype=torch.long)
+        correct = ranking_score.index_select(0, positive_indices) > ranking_score.index_select(
+            0,
+            negative_indices,
+        )
+        self._eval_pairwise_correct += int(correct.sum().item())
+        self._eval_pairwise_count += int(correct.numel())
+
     def _consume_train_component_logs(self) -> Dict[str, float]:
         if self._train_component_count == 0:
             return {}
@@ -236,6 +253,26 @@ class RewardModelTrainer(Trainer):
             f"{metric_key_prefix}_total_loss": self._eval_component_sums["total_loss"] / denom,
             f"{metric_key_prefix}_num_pairs": self._eval_component_sums["num_pairs"] / denom,
         }
+        pairwise_correct = self._eval_pairwise_correct
+        pairwise_count = self._eval_pairwise_count
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            count_device = next(self.model.parameters()).device
+            pairwise_counts = torch.tensor(
+                [pairwise_correct, pairwise_count],
+                dtype=torch.long,
+                device=count_device,
+            )
+            torch.distributed.all_reduce(
+                pairwise_counts,
+                op=torch.distributed.ReduceOp.SUM,
+            )
+            pairwise_correct, pairwise_count = (
+                int(value) for value in pairwise_counts.cpu().tolist()
+            )
+        if pairwise_count > 0:
+            logs[f"{metric_key_prefix}_pairwise_accuracy"] = (
+                pairwise_correct / pairwise_count
+            )
         self._reset_eval_component_accumulator()
         return logs
 
@@ -282,6 +319,11 @@ class RewardModelTrainer(Trainer):
             total_loss=outputs.loss,
             num_pairs=inputs.get("num_pairs"),
         )
+        self._record_eval_pairwise_scores(
+            outputs.ranking_score.detach(),
+            inputs["positive_indices"],
+            inputs["negative_indices"],
+        )
 
         if prediction_loss_only or self.compute_metrics is None:
             return (loss, None, None)
@@ -306,11 +348,15 @@ class RewardModelTrainer(Trainer):
         if not isinstance(active_eval_dataset, RewardPairDataset):
             raise TypeError("RewardModelTrainer expects eval_dataset to be a RewardPairDataset")
         component_metrics = self._consume_eval_component_logs(metric_key_prefix)
+        pairwise_accuracy = component_metrics.get(
+            f"{metric_key_prefix}_pairwise_accuracy"
+        )
         reward_metrics = compute_reward_model_eval_metrics(
             self,
             self.model,
             active_eval_dataset,
             metric_key_prefix=metric_key_prefix,
+            pairwise_accuracy=pairwise_accuracy,
         )
         metrics.update(component_metrics)
         metrics.update(reward_metrics)

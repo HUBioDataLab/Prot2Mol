@@ -250,6 +250,7 @@ def compute_reward_model_eval_metrics(
     eval_dataset: RewardPairDataset,
     *,
     metric_key_prefix: str = "eval",
+    pairwise_accuracy: float | None = None,
 ) -> Dict[str, float]:
     batch_size = int(trainer.args.per_device_eval_batch_size)
     example_metrics_source = _score_example_dataset(
@@ -270,14 +271,17 @@ def compute_reward_model_eval_metrics(
         min_group_size=3,
     )
     metrics.update(spearman_metrics)
-    metrics.update(
-        _score_pair_dataset(
-            trainer,
-            model,
-            eval_dataset,
-            batch_size=batch_size,
+    if pairwise_accuracy is None:
+        metrics.update(
+            _score_pair_dataset(
+                trainer,
+                model,
+                eval_dataset,
+                batch_size=batch_size,
+            )
         )
-    )
+    else:
+        metrics["eval_pairwise_accuracy"] = float(pairwise_accuracy)
     metrics = _with_metric_prefix(metrics, metric_key_prefix)
     _append_assay_spearman_log(
         trainer,

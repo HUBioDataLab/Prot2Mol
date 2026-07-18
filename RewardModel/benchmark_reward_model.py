@@ -8,6 +8,7 @@ import random
 import statistics
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
 import numpy as np
@@ -19,6 +20,7 @@ from reward_model.training import (
     LengthBucketSampler,
     RewardPairCollator,
     RewardPairDataset,
+    compute_reward_model_eval_metrics,
     get_saved_pair_dataset_paths,
     get_tokenized_split_dataset_paths,
     load_reward_training_config,
@@ -87,6 +89,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow use outside the assigned physical GPU 0 (disabled for shared-server runs)",
     )
+    parser.add_argument(
+        "--benchmark-validation",
+        action="store_true",
+        help="Compare legacy metric rescoring with reuse of pair scores",
+    )
+    parser.add_argument("--validation-repeats", type=int, default=2)
     return parser.parse_args()
 
 
@@ -99,6 +107,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("correctness_pairs must be > 0")
     if args.synthetic_pairs < 0:
         raise ValueError("synthetic_pairs must be >= 0")
+    if args.validation_repeats <= 0:
+        raise ValueError("validation_repeats must be > 0")
     if not args.allow_nonzero_visible_device and os.environ.get("CUDA_VISIBLE_DEVICES") != "0":
         raise RuntimeError(
             "Shared-server safety check failed: CUDA_VISIBLE_DEVICES must be exactly '0'"
@@ -729,6 +739,191 @@ def _load_dataset(config):
     return RewardPairDataset(train_examples, train_pairs)
 
 
+class _ValidationTrainerShim:
+    def __init__(
+        self,
+        *,
+        model: RewardModel,
+        batch_size: int,
+        device: torch.device,
+    ):
+        self.args = SimpleNamespace(
+            per_device_eval_batch_size=batch_size,
+            output_dir=".",
+        )
+        self.data_collator = _make_collator(model, dynamic_padding=True)
+        self.state = SimpleNamespace(global_step=0, epoch=0.0)
+        self.device = device
+
+    def _prepare_inputs(self, inputs: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            key: value.to(device=self.device, non_blocking=True)
+            if isinstance(value, torch.Tensor)
+            else value
+            for key, value in inputs.items()
+        }
+
+    @staticmethod
+    def _build_model_inputs(inputs: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "protein_input_ids": inputs["protein_input_ids"],
+            "protein_attention_mask": inputs["protein_attention_mask"],
+            "molecule_input_ids": inputs["molecule_input_ids"],
+            "molecule_attention_mask": inputs["molecule_attention_mask"],
+            "activity_labels": inputs["activity_labels"],
+            "positive_indices": inputs["positive_indices"],
+            "negative_indices": inputs["negative_indices"],
+            "return_dict": True,
+        }
+
+    @staticmethod
+    def is_world_process_zero() -> bool:
+        return False
+
+
+def _metrics_close(
+    baseline: Mapping[str, float],
+    optimized: Mapping[str, float],
+) -> tuple[bool, float]:
+    if baseline.keys() != optimized.keys():
+        return False, float("inf")
+    max_absolute_error = 0.0
+    for key in baseline:
+        baseline_value = float(baseline[key])
+        optimized_value = float(optimized[key])
+        if math.isnan(baseline_value) and math.isnan(optimized_value):
+            continue
+        max_absolute_error = max(
+            max_absolute_error,
+            abs(baseline_value - optimized_value),
+        )
+        if not math.isclose(
+            baseline_value,
+            optimized_value,
+            rel_tol=1e-7,
+            abs_tol=1e-8,
+        ):
+            return False, max_absolute_error
+    return True, max_absolute_error
+
+
+def _timed_validation_metrics(
+    *,
+    trainer: _ValidationTrainerShim,
+    model: RewardModel,
+    dataset: RewardPairDataset,
+    pairwise_accuracy: float | None,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
+    device: torch.device,
+) -> tuple[Dict[str, float], float, float]:
+    torch.cuda.synchronize(device)
+    torch.cuda.reset_peak_memory_stats(device)
+    start = time.perf_counter()
+    with torch.no_grad(), torch.autocast(
+        device_type="cuda",
+        dtype=amp_dtype,
+        enabled=amp_enabled,
+    ):
+        metrics = compute_reward_model_eval_metrics(
+            trainer,
+            model,
+            dataset,
+            pairwise_accuracy=pairwise_accuracy,
+        )
+    torch.cuda.synchronize(device)
+    elapsed = time.perf_counter() - start
+    peak_allocated_gib = torch.cuda.max_memory_allocated(device) / (1024**3)
+    return metrics, elapsed, peak_allocated_gib
+
+
+def _benchmark_validation_duplication(
+    *,
+    model: RewardModel,
+    dataset: RewardPairDataset,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> Dict[str, Any]:
+    model.eval()
+    model.config.deduplicate_protein_inputs = True
+    model.config.deduplicate_molecule_inputs = True
+    model.config.fusion_attention_backend = "sdpa"
+    model.fusion.attention_backend = "sdpa"
+    trainer = _ValidationTrainerShim(
+        model=model,
+        batch_size=args.batch_size,
+        device=device,
+    )
+    amp_enabled, amp_dtype = _autocast_settings(args.precision)
+
+    reference_metrics, _, _ = _timed_validation_metrics(
+        trainer=trainer,
+        model=model,
+        dataset=dataset,
+        pairwise_accuracy=None,
+        amp_enabled=amp_enabled,
+        amp_dtype=amp_dtype,
+        device=device,
+    )
+    pairwise_accuracy = reference_metrics["eval_pairwise_accuracy"]
+    legacy_times: list[float] = []
+    optimized_times: list[float] = []
+    legacy_memory: list[float] = []
+    optimized_memory: list[float] = []
+    latest_legacy = reference_metrics
+    latest_optimized = reference_metrics
+    for repeat in range(args.validation_repeats):
+        order = ("legacy", "optimized") if repeat % 2 == 0 else ("optimized", "legacy")
+        for mode in order:
+            metrics, elapsed, peak_memory = _timed_validation_metrics(
+                trainer=trainer,
+                model=model,
+                dataset=dataset,
+                pairwise_accuracy=None if mode == "legacy" else pairwise_accuracy,
+                amp_enabled=amp_enabled,
+                amp_dtype=amp_dtype,
+                device=device,
+            )
+            if mode == "legacy":
+                latest_legacy = metrics
+                legacy_times.append(elapsed)
+                legacy_memory.append(peak_memory)
+            else:
+                latest_optimized = metrics
+                optimized_times.append(elapsed)
+                optimized_memory.append(peak_memory)
+
+    metrics_equal, metric_max_absolute_error = _metrics_close(
+        latest_legacy,
+        latest_optimized,
+    )
+    legacy_seconds = statistics.mean(legacy_times)
+    optimized_seconds = statistics.mean(optimized_times)
+    pair_batches = math.ceil(len(dataset) / args.batch_size)
+    example_batches = math.ceil(len(dataset.example_dataset) / args.batch_size)
+    before_total_batches = pair_batches * 2 + example_batches
+    after_total_batches = pair_batches + example_batches
+    return {
+        "metrics_equal": metrics_equal,
+        "metric_max_absolute_error": metric_max_absolute_error,
+        "pairwise_accuracy": pairwise_accuracy,
+        "legacy_metric_phase_seconds_mean": legacy_seconds,
+        "optimized_metric_phase_seconds_mean": optimized_seconds,
+        "metric_phase_speedup": legacy_seconds / optimized_seconds,
+        "metric_phase_time_reduction_percent": 100.0
+        * (legacy_seconds - optimized_seconds)
+        / legacy_seconds,
+        "legacy_peak_memory_allocated_gib_mean": statistics.mean(legacy_memory),
+        "optimized_peak_memory_allocated_gib_mean": statistics.mean(optimized_memory),
+        "pair_forward_batches_removed": pair_batches,
+        "estimated_total_forward_batches_before": before_total_batches,
+        "estimated_total_forward_batches_after": after_total_batches,
+        "estimated_total_forward_batch_reduction_percent": 100.0
+        * (before_total_batches - after_total_batches)
+        / before_total_batches,
+    }
+
+
 def main() -> None:
     args = _parse_args()
     _validate_args(args)
@@ -832,6 +1027,19 @@ def main() -> None:
             )
             / manual_result["peak_memory_allocated_gib"],
         }
+    if args.benchmark_validation:
+        report["validation_duplication"] = _benchmark_validation_duplication(
+            model=model,
+            dataset=dataset,
+            args=args,
+            device=device,
+        )
+        print(
+            json.dumps({"validation_duplication": report["validation_duplication"]}),
+            flush=True,
+        )
+        if not report["validation_duplication"]["metrics_equal"]:
+            raise RuntimeError("Validation metric reuse changed metric values")
     print("BENCHMARK_REPORT=" + json.dumps(report, sort_keys=True), flush=True)
 
 
