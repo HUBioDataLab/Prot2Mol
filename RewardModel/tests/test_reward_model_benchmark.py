@@ -1,7 +1,12 @@
+from types import SimpleNamespace
+
 import torch
+
+from conftest import DummyTokenizer
 
 from benchmark_reward_model import (
     VARIANTS,
+    _build_synthetic_pair_dataset,
     _gradient_norms_close,
     _max_gradient_signature_errors,
     _percentile,
@@ -60,3 +65,28 @@ def test_benchmark_gradient_closeness_handles_near_zero_norms():
 
     assert _gradient_norms_close(baseline, optimized)
     assert not _gradient_norms_close(baseline, {**optimized, "large": (100.02, 0.0)})
+
+
+def test_synthetic_benchmark_dataset_has_fixed_storage_and_pair_protein_reuse():
+    model = SimpleNamespace(
+        config=SimpleNamespace(protein_max_length=16, molecule_max_length=8),
+        protein_encoder=SimpleNamespace(config=SimpleNamespace(vocab_size=24)),
+        molecule_encoder=SimpleNamespace(config=SimpleNamespace(vocab_size=32)),
+        protein_tokenizer=DummyTokenizer(pad_token_id=1),
+        molecule_tokenizer=DummyTokenizer(pad_token_id=0),
+    )
+
+    dataset = _build_synthetic_pair_dataset(model, num_pairs=8, seed=42)
+
+    assert len(dataset) == 8
+    assert len(dataset.example_dataset) == 16
+    first_pair = dataset[0]
+    assert len(first_pair["positive"]["protein_input_ids"]) == 16
+    assert len(first_pair["positive"]["molecule_input_ids"]) == 8
+    assert (
+        first_pair["positive"]["protein_input_ids"]
+        == first_pair["negative"]["protein_input_ids"]
+    )
+    assert first_pair["positive"]["molecule_input_ids"] != first_pair["negative"][
+        "molecule_input_ids"
+    ]

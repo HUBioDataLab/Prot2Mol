@@ -58,6 +58,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-steps", type=int, default=2)
     parser.add_argument("--measure-steps", type=int, default=8)
     parser.add_argument("--correctness-pairs", type=int, default=2)
+    parser.add_argument(
+        "--synthetic-pairs",
+        type=int,
+        default=0,
+        help=(
+            "Use this many deterministic in-memory ranking pairs instead of loading "
+            "tokenized datasets from the config (0 loads the real dataset)"
+        ),
+    )
     parser.add_argument("--num-workers", type=int, choices=range(0, 11), default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
@@ -86,6 +95,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("measure_steps must be > 0")
     if args.correctness_pairs <= 0:
         raise ValueError("correctness_pairs must be > 0")
+    if args.synthetic_pairs < 0:
+        raise ValueError("synthetic_pairs must be >= 0")
     if not args.allow_nonzero_visible_device and os.environ.get("CUDA_VISIBLE_DEVICES") != "0":
         raise RuntimeError(
             "Shared-server safety check failed: CUDA_VISIBLE_DEVICES must be exactly '0'"
@@ -501,8 +512,152 @@ def _run_correctness_check(
     return result
 
 
-def _load_dataset(config_path: str):
-    config = load_reward_training_config(config_path)
+def _random_token_row(
+    *,
+    active_length: int,
+    max_length: int,
+    vocab_size: int,
+    pad_token_id: int,
+    generator: torch.Generator,
+) -> tuple[list[int], list[int]]:
+    if active_length <= 0 or active_length > max_length:
+        raise ValueError("active_length must be in [1, max_length]")
+    if vocab_size <= 1:
+        raise ValueError("vocab_size must be > 1")
+    active = torch.randint(
+        low=0,
+        high=vocab_size,
+        size=(active_length,),
+        generator=generator,
+        dtype=torch.long,
+    )
+    replacement_id = (pad_token_id + 1) % vocab_size
+    active = torch.where(active == pad_token_id, replacement_id, active)
+    padding_length = max_length - active_length
+    return (
+        active.tolist() + [pad_token_id] * padding_length,
+        [1] * active_length + [0] * padding_length,
+    )
+
+
+def _build_synthetic_pair_dataset(
+    model: RewardModel,
+    *,
+    num_pairs: int,
+    seed: int,
+) -> RewardPairDataset:
+    from datasets import Dataset
+
+    if num_pairs <= 0:
+        raise ValueError("num_pairs must be > 0")
+    protein_max_length = int(model.config.protein_max_length)
+    molecule_max_length = int(model.config.molecule_max_length)
+    protein_lengths = sorted(
+        {
+            max(4, protein_max_length // 4),
+            max(4, protein_max_length // 2),
+            max(4, (3 * protein_max_length) // 4),
+            protein_max_length,
+        }
+    )
+    molecule_lengths = sorted(
+        {
+            max(4, molecule_max_length // 4),
+            max(4, molecule_max_length // 2),
+            max(4, (3 * molecule_max_length) // 4),
+            molecule_max_length,
+        }
+    )
+    protein_vocab_size = int(model.protein_encoder.config.vocab_size)
+    molecule_vocab_size = int(model.molecule_encoder.config.vocab_size)
+    protein_pad_token_id = int(getattr(model.protein_tokenizer, "pad_token_id", 0) or 0)
+    molecule_pad_token_id = int(getattr(model.molecule_tokenizer, "pad_token_id", 0) or 0)
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    molecule_library_size = max(8, min(32, num_pairs))
+    molecule_library: list[tuple[list[int], list[int], int]] = []
+    for molecule_index in range(molecule_library_size):
+        molecule_length = molecule_lengths[molecule_index % len(molecule_lengths)]
+        molecule_ids, molecule_mask = _random_token_row(
+            active_length=molecule_length,
+            max_length=molecule_max_length,
+            vocab_size=molecule_vocab_size,
+            pad_token_id=molecule_pad_token_id,
+            generator=generator,
+        )
+        molecule_library.append((molecule_ids, molecule_mask, molecule_length))
+
+    example_columns: Dict[str, list[Any]] = {
+        "example_id": [],
+        "group_id": [],
+        "target_chembl_id": [],
+        "assay_id": [],
+        "compound_id": [],
+        "pchembl_value": [],
+        "binary_label": [],
+        "protein_input_ids": [],
+        "protein_attention_mask": [],
+        "protein_length": [],
+        "molecule_input_ids": [],
+        "molecule_attention_mask": [],
+        "molecule_length": [],
+    }
+    pair_columns: Dict[str, list[Any]] = {
+        "positive_example_id": [],
+        "negative_example_id": [],
+        "group_id": [],
+        "positive_pchembl": [],
+        "negative_pchembl": [],
+    }
+
+    for pair_index in range(num_pairs):
+        protein_length = protein_lengths[pair_index % len(protein_lengths)]
+        protein_ids, protein_mask = _random_token_row(
+            active_length=protein_length,
+            max_length=protein_max_length,
+            vocab_size=protein_vocab_size,
+            pad_token_id=protein_pad_token_id,
+            generator=generator,
+        )
+        group_id = f"SYNTH_TARGET_{pair_index}__SYNTH_ASSAY_{pair_index}"
+        positive_id = pair_index * 2
+        negative_id = positive_id + 1
+        pair_columns["positive_example_id"].append(positive_id)
+        pair_columns["negative_example_id"].append(negative_id)
+        pair_columns["group_id"].append(group_id)
+        pair_columns["positive_pchembl"].append(8.0)
+        pair_columns["negative_pchembl"].append(5.0)
+
+        for polarity, example_id, pchembl, label, library_offset in (
+            ("positive", positive_id, 8.0, 1, 0),
+            ("negative", negative_id, 5.0, 0, 1),
+        ):
+            molecule_index = (pair_index * 2 + library_offset) % molecule_library_size
+            molecule_ids, molecule_mask, molecule_length = molecule_library[molecule_index]
+            example_columns["example_id"].append(example_id)
+            example_columns["group_id"].append(group_id)
+            example_columns["target_chembl_id"].append(f"SYNTH_TARGET_{pair_index}")
+            example_columns["assay_id"].append(f"SYNTH_ASSAY_{pair_index}")
+            example_columns["compound_id"].append(
+                f"SYNTH_COMPOUND_{molecule_index}_{polarity}"
+            )
+            example_columns["pchembl_value"].append(pchembl)
+            example_columns["binary_label"].append(label)
+            example_columns["protein_input_ids"].append(list(protein_ids))
+            example_columns["protein_attention_mask"].append(list(protein_mask))
+            example_columns["protein_length"].append(protein_length)
+            example_columns["molecule_input_ids"].append(list(molecule_ids))
+            example_columns["molecule_attention_mask"].append(list(molecule_mask))
+            example_columns["molecule_length"].append(molecule_length)
+
+    return RewardPairDataset(
+        Dataset.from_dict(example_columns),
+        Dataset.from_dict(pair_columns),
+    )
+
+
+def _load_dataset(config):
     example_paths = get_tokenized_split_dataset_paths(config.data.tokenized_dataset_dir)
     pair_paths = get_saved_pair_dataset_paths(config.data.tokenized_dataset_dir)
     train_examples = load_tokenized_example_dataset(example_paths["train"])
@@ -515,13 +670,22 @@ def main() -> None:
     _validate_args(args)
     _seed_everything(args.seed)
     device = torch.device("cuda", 0)
-    config, dataset = _load_dataset(args.config)
+    config = load_reward_training_config(args.config)
+    model = RewardModel(config.model).to(device)
+    dataset = (
+        _build_synthetic_pair_dataset(
+            model,
+            num_pairs=args.synthetic_pairs,
+            seed=args.seed,
+        )
+        if args.synthetic_pairs
+        else _load_dataset(config)
+    )
     if len(dataset) < args.batch_size:
         raise RuntimeError(
             f"Pair dataset has {len(dataset)} rows, fewer than batch size {args.batch_size}"
         )
 
-    model = RewardModel(config.model).to(device)
     report: Dict[str, Any] = {
         "benchmark": {
             "config": os.path.abspath(args.config),
@@ -534,6 +698,7 @@ def main() -> None:
             "precision": args.precision,
             "dataset_pairs": len(dataset),
             "dataset_examples": len(dataset.example_dataset),
+            "synthetic_dataset": bool(args.synthetic_pairs),
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "device_name": torch.cuda.get_device_name(device),
             "torch_version": torch.__version__,
