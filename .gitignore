@@ -1,2 +1,8 @@
 models/
 data/
+*.log
+*__pycache__*
+analysis/
+*.ipynb
+prot2mol_env/
+wandb/
