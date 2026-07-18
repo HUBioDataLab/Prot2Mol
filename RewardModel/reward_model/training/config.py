@@ -55,6 +55,9 @@ class RewardTrainerConfig:
     max_grad_norm: float = 1.0
     logging_steps: int = 10
     dataloader_num_workers: int = 0
+    dynamic_padding: bool = True
+    length_bucketing: bool = True
+    length_bucket_size_multiplier: int = 50
     seed: int = 42
     fp16: bool = False
     save_safetensors: bool = False
@@ -94,6 +97,12 @@ class RewardTrainerConfig:
             raise ValueError("logging_steps must be > 0")
         if self.dataloader_num_workers < 0:
             raise ValueError("dataloader_num_workers must be >= 0")
+        if not isinstance(self.dynamic_padding, bool):
+            raise ValueError("dynamic_padding must be a boolean")
+        if not isinstance(self.length_bucketing, bool):
+            raise ValueError("length_bucketing must be a boolean")
+        if self.length_bucket_size_multiplier <= 0:
+            raise ValueError("length_bucket_size_multiplier must be > 0")
         if self.save_total_limit <= 0:
             raise ValueError("save_total_limit must be > 0")
         if self.training_mode not in VALID_TRAINING_MODES:

@@ -24,3 +24,15 @@ def test_reward_model_config_rejects_invalid_head_shape():
         assert False, "Expected invalid hidden/head combination to raise"
     except ValueError as exc:
         assert "divisible" in str(exc)
+
+
+def test_reward_model_config_loads_legacy_payload_with_deduplication_defaults():
+    config = RewardModelConfig.from_dict(
+        {
+            "protein_model_name_or_path": "protein/legacy",
+            "molecule_model_name_or_path": "molecule/legacy",
+        }
+    )
+
+    assert config.deduplicate_protein_inputs is True
+    assert config.deduplicate_molecule_inputs is True

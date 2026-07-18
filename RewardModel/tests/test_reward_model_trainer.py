@@ -23,6 +23,7 @@ from reward_model.training import (
     save_pair_dataset_from_example_dataset,
 )
 from reward_model.training.entry import train_reward_model_from_config
+from reward_model.training.trainer import LengthBucketSampler
 
 
 def _dummy_bundles():
@@ -365,6 +366,47 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     )
 
     assert "wandb" not in list(args.report_to)
+
+
+def test_create_training_arguments_enables_length_bucketing_by_default(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            length_bucket_size_multiplier=7,
+            fp16=False,
+        )
+    )
+
+    assert args.reward_length_bucketing is True
+    assert args.length_bucket_size_multiplier == 7
+
+
+def test_length_bucket_sampler_groups_similar_lengths_and_changes_by_epoch():
+    lengths = [1, 2, 3, 4, 100, 101, 102, 103]
+    fully_grouped_sampler = LengthBucketSampler(
+        lengths,
+        batch_size=2,
+        bucket_size_multiplier=4,
+        seed=11,
+    )
+
+    first_epoch = list(fully_grouped_sampler)
+    batches = [first_epoch[start : start + 2] for start in range(0, len(first_epoch), 2)]
+    assert sorted(first_epoch) == list(range(len(lengths)))
+    assert all(
+        max(lengths[index] for index in batch) - min(lengths[index] for index in batch) <= 1
+        for batch in batches
+    )
+
+    epoch_sampler = LengthBucketSampler(
+        lengths,
+        batch_size=2,
+        bucket_size_multiplier=2,
+        seed=11,
+    )
+    epoch_zero = list(epoch_sampler)
+    epoch_sampler.set_epoch(1)
+    assert list(epoch_sampler) != epoch_zero
 
 
 def test_create_training_arguments_rejects_distributed_env_by_default(tmp_path, monkeypatch):

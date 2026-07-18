@@ -143,10 +143,23 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         val2_examples = load_tokenized_example_dataset(val2_examples_path)
         val2_pairs = load_saved_pair_dataset(val2_pairs_path)
         val2_eval_dataset = RewardPairDataset(val2_examples, val2_pairs)
-    collator = RewardPairCollator()
+    model = RewardModel(config.model)
+    collator = RewardPairCollator(
+        dynamic_padding=config.training.dynamic_padding,
+        protein_pad_token_id=getattr(
+            getattr(model, "protein_tokenizer", None),
+            "pad_token_id",
+            0,
+        ),
+        molecule_pad_token_id=getattr(
+            getattr(model, "molecule_tokenizer", None),
+            "pad_token_id",
+            0,
+        ),
+    )
 
     trainer = RewardModelTrainer(
-        model=RewardModel(config.model),
+        model=model,
         args=create_training_arguments(config.training),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,

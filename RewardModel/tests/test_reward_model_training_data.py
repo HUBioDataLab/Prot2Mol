@@ -325,6 +325,8 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     assert train_dataset[0]["binary_label"] == 0
     assert len(train_dataset[0]["protein_input_ids"]) == 6
     assert len(train_dataset[0]["molecule_input_ids"]) == 8
+    assert train_dataset[0]["protein_length"] == 5
+    assert train_dataset[0]["molecule_length"] == 6
 
     assert "assay_group_id" not in train_dataset.column_names
     assert "source" not in train_dataset.column_names
@@ -528,7 +530,7 @@ def test_positive_dependent_pair_rule_accepts_and_rejects_expected_negatives():
     assert not is_valid_negative_for_positive(6.5, 5.8)
 
 
-def test_reward_pair_collator_flattens_pairs_and_preserves_duplicate_rows():
+def test_reward_pair_collator_flattens_pairs_dynamically_and_preserves_duplicate_rows():
     dataset = Dataset.from_list(_tokenized_example_rows())
     pair_dataset = Dataset.from_list([
         {
@@ -551,8 +553,8 @@ def test_reward_pair_collator_flattens_pairs_and_preserves_duplicate_rows():
 
     batch = collator([pair_dataset[0], pair_dataset[1]])
 
-    assert batch["protein_input_ids"].shape == (4, 4)
-    assert batch["molecule_input_ids"].shape == (4, 5)
+    assert batch["protein_input_ids"].shape == (4, 3)
+    assert batch["molecule_input_ids"].shape == (4, 2)
     assert batch["activity_labels"].shape == (4,)
     assert batch["positive_indices"].tolist() == [0, 1]
     assert batch["negative_indices"].tolist() == [2, 3]
@@ -564,3 +566,91 @@ def test_reward_pair_collator_flattens_pairs_and_preserves_duplicate_rows():
         batch["activity_labels"],
         torch.tensor([1.0, 1.0, 0.0, 1.0]),
     )
+
+
+def test_reward_pair_collator_can_preserve_legacy_fixed_width_batches():
+    dataset = Dataset.from_list(_tokenized_example_rows())
+    pair_records = Dataset.from_list(
+        [
+            {
+                "positive_example_id": 2,
+                "negative_example_id": 0,
+                "group_id": "T1__A1",
+                "positive_pchembl": 7.0,
+                "negative_pchembl": 4.0,
+            }
+        ]
+    )
+    pair_dataset = RewardPairDataset(dataset, pair_records)
+
+    batch = RewardPairCollator(dynamic_padding=False)([pair_dataset[0]])
+
+    assert batch["protein_input_ids"].shape == (2, 4)
+    assert batch["molecule_input_ids"].shape == (2, 5)
+
+
+def test_reward_pair_collator_pads_variable_width_legacy_rows_before_trimming():
+    rows = _tokenized_example_rows()[:2]
+    rows[0]["protein_input_ids"] = rows[0]["protein_input_ids"][:3]
+    rows[0]["protein_attention_mask"] = rows[0]["protein_attention_mask"][:3]
+    rows[0]["molecule_input_ids"] = rows[0]["molecule_input_ids"][:2]
+    rows[0]["molecule_attention_mask"] = rows[0]["molecule_attention_mask"][:2]
+    dataset = Dataset.from_list(rows)
+    pair_records = Dataset.from_list(
+        [
+            {
+                "positive_example_id": 1,
+                "negative_example_id": 0,
+                "group_id": "T1__A1",
+                "positive_pchembl": 6.0,
+                "negative_pchembl": 4.0,
+            }
+        ]
+    )
+    pair_dataset = RewardPairDataset(dataset, pair_records)
+
+    batch = RewardPairCollator(dynamic_padding=True)([pair_dataset[0]])
+
+    assert batch["protein_input_ids"].shape == (2, 3)
+    assert batch["molecule_input_ids"].shape == (2, 2)
+    assert batch["protein_attention_mask"].all()
+    assert batch["molecule_attention_mask"].all()
+
+
+def test_reward_pair_dataset_derives_bucket_lengths_for_old_and_new_datasets():
+    rows = _tokenized_example_rows()[:3]
+    old_examples = Dataset.from_list(rows)
+    new_examples = Dataset.from_list(
+        [
+            {
+                **row,
+                "protein_length": sum(row["protein_attention_mask"]),
+                "molecule_length": sum(row["molecule_attention_mask"]),
+            }
+            for row in rows
+        ]
+    )
+    pair_records = Dataset.from_list(
+        [
+            {
+                "positive_example_id": 2,
+                "negative_example_id": 0,
+                "group_id": "T1__A1",
+                "positive_pchembl": 7.0,
+                "negative_pchembl": 4.0,
+            },
+            {
+                "positive_example_id": 2,
+                "negative_example_id": 1,
+                "group_id": "T1__A1",
+                "positive_pchembl": 7.0,
+                "negative_pchembl": 6.0,
+            },
+        ]
+    )
+
+    old_lengths = RewardPairDataset(old_examples, pair_records).get_pair_sequence_lengths()
+    new_lengths = RewardPairDataset(new_examples, pair_records).get_pair_sequence_lengths()
+
+    assert list(old_lengths) == [5, 5]
+    assert list(new_lengths) == list(old_lengths)

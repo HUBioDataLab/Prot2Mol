@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Any, Dict, Optional
+from array import array
+from typing import Any, Dict, Iterator, Optional, Sequence
 
 import torch
+from torch.utils.data import Sampler
 from transformers import Trainer, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 
@@ -22,6 +24,52 @@ REQUIRED_DISTRIBUTED_ENV_VARS = (
     "MASTER_ADDR",
     "MASTER_PORT",
 )
+
+
+class LengthBucketSampler(Sampler[int]):
+    """Shuffle globally, then sort bounded pools into length-homogeneous batches."""
+
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        *,
+        batch_size: int,
+        bucket_size_multiplier: int,
+        seed: int,
+    ):
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+        if bucket_size_multiplier <= 0:
+            raise ValueError("bucket_size_multiplier must be > 0")
+        self.lengths = (
+            lengths
+            if isinstance(lengths, array)
+            else array("I", (int(length) for length in lengths))
+        )
+        self.batch_size = int(batch_size)
+        self.bucket_size = self.batch_size * int(bucket_size_multiplier)
+        self.seed = int(seed)
+        self.epoch = 0
+
+    def __len__(self) -> int:
+        return len(self.lengths)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self) -> Iterator[int]:
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        shuffled_indices = torch.randperm(
+            len(self.lengths),
+            generator=generator,
+            dtype=torch.int32,
+        )
+
+        for start in range(0, len(shuffled_indices), self.bucket_size):
+            bucket = shuffled_indices[start : start + self.bucket_size].tolist()
+            bucket.sort(key=self.lengths.__getitem__, reverse=True)
+            yield from bucket
 
 
 def _safe_int(value: Optional[str], default: int) -> int:
@@ -109,6 +157,27 @@ class RewardModelTrainer(Trainer):
             "num_pairs": 0.0,
         }
         self._eval_component_count = 0
+
+    def _get_train_sampler(self, train_dataset=None):
+        active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
+        if (
+            getattr(self.args, "reward_length_bucketing", False)
+            and isinstance(active_train_dataset, RewardPairDataset)
+        ):
+            data_seed = self.args.data_seed if self.args.data_seed is not None else self.args.seed
+            return LengthBucketSampler(
+                active_train_dataset.get_pair_sequence_lengths(),
+                batch_size=int(getattr(self, "_train_batch_size", self.args.train_batch_size)),
+                bucket_size_multiplier=int(
+                    getattr(self.args, "length_bucket_size_multiplier", 50)
+                ),
+                seed=int(data_seed),
+            )
+
+        parent_sampler = super()._get_train_sampler
+        if "train_dataset" in inspect.signature(parent_sampler).parameters:
+            return parent_sampler(train_dataset)
+        return parent_sampler()
 
     @staticmethod
     def _to_scalar(value: Any) -> float:
@@ -325,7 +394,10 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
     elif "eval_strategy" in init_params:
         args_kwargs["eval_strategy"] = schedule_strategy
     try:
-        return TrainingArguments(**args_kwargs)
+        training_args = TrainingArguments(**args_kwargs)
+        training_args.reward_length_bucketing = config.length_bucketing
+        training_args.length_bucket_size_multiplier = config.length_bucket_size_multiplier
+        return training_args
     except ImportError as exc:
         raise ImportError(
             "RewardModel training via Hugging Face Trainer requires the 'accelerate' package. "

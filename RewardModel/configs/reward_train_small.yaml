@@ -11,6 +11,8 @@ model:
   pair_loss_weight: 1.0
   classification_loss_weight: 0.5
   bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
 
 data:
   train_parquet_path: ../../../dummy/train.parquet
@@ -31,6 +33,9 @@ training:
   max_grad_norm: 1.0
   logging_steps: 1
   dataloader_num_workers: 0
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
   seed: 42
   fp16: true
   save_safetensors: false

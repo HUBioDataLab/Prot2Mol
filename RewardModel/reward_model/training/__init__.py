@@ -32,7 +32,7 @@ from .entry import (
     prepare_training_examples_from_config,
     train_reward_model_from_config,
 )
-from .trainer import RewardModelTrainer, create_training_arguments
+from .trainer import LengthBucketSampler, RewardModelTrainer, create_training_arguments
 
 __all__ = [
     "PairBuildStats",
@@ -40,6 +40,7 @@ __all__ = [
     "PAIR_DATASET_FEATURES",
     "RewardPairCollator",
     "RewardPairDataset",
+    "LengthBucketSampler",
     "RewardModelTrainer",
     "RewardTrainerConfig",
     "RewardTrainingConfigBundle",

@@ -164,25 +164,11 @@ def _with_metric_prefix(metrics: Mapping[str, float], metric_key_prefix: str) ->
     }
 
 
-def _collate_example_rows(rows: Sequence[Mapping[str, Any]]) -> Dict[str, torch.Tensor]:
-    return {
-        "protein_input_ids": torch.tensor(
-            [row["protein_input_ids"] for row in rows],
-            dtype=torch.long,
-        ),
-        "protein_attention_mask": torch.tensor(
-            [row["protein_attention_mask"] for row in rows],
-            dtype=torch.long,
-        ),
-        "molecule_input_ids": torch.tensor(
-            [row["molecule_input_ids"] for row in rows],
-            dtype=torch.long,
-        ),
-        "molecule_attention_mask": torch.tensor(
-            [row["molecule_attention_mask"] for row in rows],
-            dtype=torch.long,
-        ),
-    }
+def _collate_example_rows(
+    rows: Sequence[Mapping[str, Any]],
+    collator: RewardPairCollator,
+) -> Dict[str, torch.Tensor]:
+    return collator.collate_example_tokens(rows)
 
 
 def _score_example_dataset(
@@ -197,10 +183,15 @@ def _score_example_dataset(
     labels: list[float] = []
     group_ids: list[str] = []
     pchembl_values: list[float] = []
+    collator = (
+        trainer.data_collator
+        if isinstance(trainer.data_collator, RewardPairCollator)
+        else RewardPairCollator()
+    )
 
     for start in range(0, len(example_dataset), batch_size):
         rows = [dict(example_dataset[index]) for index in range(start, min(start + batch_size, len(example_dataset)))]
-        model_inputs = trainer._prepare_inputs(_collate_example_rows(rows))
+        model_inputs = trainer._prepare_inputs(_collate_example_rows(rows, collator))
         with torch.no_grad():
             outputs = model(return_dict=True, **model_inputs)
         ranking_scores.extend(outputs.ranking_score.detach().cpu().tolist())
@@ -225,7 +216,11 @@ def _score_pair_dataset(
     *,
     batch_size: int,
 ) -> Dict[str, float]:
-    collator = RewardPairCollator()
+    collator = (
+        trainer.data_collator
+        if isinstance(trainer.data_collator, RewardPairCollator)
+        else RewardPairCollator()
+    )
     positive_scores: list[float] = []
     negative_scores: list[float] = []
 

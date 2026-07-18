@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import shutil
+from array import array
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Mapping, Sequence, Tuple
@@ -40,8 +41,10 @@ TOKENIZED_DATASET_COLUMNS = (
     "binary_label",
     "protein_input_ids",
     "protein_attention_mask",
+    "protein_length",
     "molecule_input_ids",
     "molecule_attention_mask",
+    "molecule_length",
 )
 
 PAIR_DATASET_COLUMNS = (
@@ -264,7 +267,7 @@ def _tokenize_example_rows(
         molecule_tokenizer=molecule_tokenizer,
     )
 
-    def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[List[int]]]:
+    def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[Any]]:
         protein_batch = batch_encode_texts(
             tokenizer=protein_tokenizer,
             texts=batch["protein_sequence"],
@@ -278,8 +281,10 @@ def _tokenize_example_rows(
         return {
             "protein_input_ids": protein_batch["input_ids"].tolist(),
             "protein_attention_mask": protein_batch["attention_mask"].tolist(),
+            "protein_length": protein_batch["attention_mask"].sum(dim=1).tolist(),
             "molecule_input_ids": molecule_batch["input_ids"].tolist(),
             "molecule_attention_mask": molecule_batch["attention_mask"].tolist(),
+            "molecule_length": molecule_batch["attention_mask"].sum(dim=1).tolist(),
         }
 
     tokenized = dataset.map(
@@ -449,7 +454,6 @@ def save_pair_dataset_from_example_dataset(
                 features=PAIR_DATASET_FEATURES,
                 cache_dir=cache_dir,
                 keep_in_memory=False,
-                fingerprint=f"reward-pairs-{split_name}-{len(example_dataset)}-{stats.num_pairs}",
             )
 
         pair_dataset.save_to_disk(resolved_output_path)
@@ -482,6 +486,8 @@ class RewardPairDataset(TorchDataset):
             int(example_id): index
             for index, example_id in enumerate(example_dataset["example_id"])
         }
+        self._example_sequence_lengths: Tuple[array, array] | None = None
+        self._pair_sequence_lengths: array | None = None
 
     def __len__(self) -> int:
         return len(self.pair_dataset)
@@ -497,8 +503,153 @@ class RewardPairDataset(TorchDataset):
             "pair": dict(pair_record),
         }
 
+    def _load_example_sequence_lengths(self) -> Tuple[array, array]:
+        if self._example_sequence_lengths is not None:
+            return self._example_sequence_lengths
+
+        columns = set(self.example_dataset.column_names)
+        if {"protein_length", "molecule_length"}.issubset(columns):
+            protein_lengths = array(
+                "I",
+                (int(value) for value in self.example_dataset["protein_length"]),
+            )
+            molecule_lengths = array(
+                "I",
+                (int(value) for value in self.example_dataset["molecule_length"]),
+            )
+        else:
+            protein_lengths = array("I")
+            molecule_lengths = array("I")
+            scan_batch_size = 4096
+            for start in range(0, len(self.example_dataset), scan_batch_size):
+                stop = min(start + scan_batch_size, len(self.example_dataset))
+                rows = self.example_dataset[start:stop]
+                protein_lengths.extend(
+                    max(1, sum(int(value) for value in mask))
+                    for mask in rows["protein_attention_mask"]
+                )
+                molecule_lengths.extend(
+                    max(1, sum(int(value) for value in mask))
+                    for mask in rows["molecule_attention_mask"]
+                )
+
+        self._example_sequence_lengths = (protein_lengths, molecule_lengths)
+        return self._example_sequence_lengths
+
+    def get_pair_sequence_lengths(self) -> Sequence[int]:
+        """Return a scalar length proxy for grouping similarly sized pair batches."""
+        if self._pair_sequence_lengths is not None:
+            return self._pair_sequence_lengths
+
+        protein_lengths, molecule_lengths = self._load_example_sequence_lengths()
+        pair_lengths = array("I")
+        scan_batch_size = 4096
+        for start in range(0, len(self.pair_dataset), scan_batch_size):
+            stop = min(start + scan_batch_size, len(self.pair_dataset))
+            rows = self.pair_dataset[start:stop]
+            for positive_id, negative_id in zip(
+                rows["positive_example_id"],
+                rows["negative_example_id"],
+            ):
+                positive_index = self.example_id_to_index[int(positive_id)]
+                negative_index = self.example_id_to_index[int(negative_id)]
+                pair_lengths.append(
+                    max(protein_lengths[positive_index], protein_lengths[negative_index])
+                    + max(molecule_lengths[positive_index], molecule_lengths[negative_index])
+                )
+
+        self._pair_sequence_lengths = pair_lengths
+        return self._pair_sequence_lengths
+
 
 class RewardPairCollator:
+    def __init__(
+        self,
+        *,
+        dynamic_padding: bool = True,
+        protein_pad_token_id: int | None = 0,
+        molecule_pad_token_id: int | None = 0,
+    ):
+        self.dynamic_padding = bool(dynamic_padding)
+        self.protein_pad_token_id = int(protein_pad_token_id or 0)
+        self.molecule_pad_token_id = int(molecule_pad_token_id or 0)
+
+    def _collate_tokens(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        input_key: str,
+        mask_key: str,
+        pad_token_id: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        max_width = max(len(row[input_key]) for row in rows)
+        if max_width <= 0:
+            raise ValueError(f"{input_key} rows must contain at least one token")
+        if any(len(row[input_key]) != len(row[mask_key]) for row in rows):
+            raise ValueError(f"{input_key} and {mask_key} rows must have matching lengths")
+
+        row_widths = {len(row[input_key]) for row in rows}
+        if len(row_widths) == 1:
+            input_ids = torch.tensor(
+                [row[input_key] for row in rows],
+                dtype=torch.long,
+            )
+            attention_mask = torch.tensor(
+                [row[mask_key] for row in rows],
+                dtype=torch.long,
+            )
+        else:
+            input_ids = torch.full(
+                (len(rows), max_width),
+                fill_value=pad_token_id,
+                dtype=torch.long,
+            )
+            attention_mask = torch.zeros((len(rows), max_width), dtype=torch.long)
+            for row_index, row in enumerate(rows):
+                row_input_ids = row[input_key]
+                row_attention_mask = row[mask_key]
+                row_width = len(row_input_ids)
+                input_ids[row_index, :row_width] = torch.as_tensor(row_input_ids, dtype=torch.long)
+                attention_mask[row_index, :row_width] = torch.as_tensor(
+                    row_attention_mask,
+                    dtype=torch.long,
+                )
+
+        if not self.dynamic_padding:
+            return input_ids, attention_mask
+
+        active_columns = attention_mask.bool().any(dim=0).nonzero(as_tuple=False).flatten()
+        if active_columns.numel() == 0:
+            return input_ids[:, :1], attention_mask[:, :1]
+        last_active = int(active_columns[-1].item()) + 1
+        return (
+            input_ids[:, :last_active],
+            attention_mask[:, :last_active],
+        )
+
+    def collate_example_tokens(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, torch.Tensor]:
+        protein_input_ids, protein_attention_mask = self._collate_tokens(
+            rows,
+            input_key="protein_input_ids",
+            mask_key="protein_attention_mask",
+            pad_token_id=self.protein_pad_token_id,
+        )
+        molecule_input_ids, molecule_attention_mask = self._collate_tokens(
+            rows,
+            input_key="molecule_input_ids",
+            mask_key="molecule_attention_mask",
+            pad_token_id=self.molecule_pad_token_id,
+        )
+        return {
+            "protein_input_ids": protein_input_ids,
+            "protein_attention_mask": protein_attention_mask,
+            "molecule_input_ids": molecule_input_ids,
+            "molecule_attention_mask": molecule_attention_mask,
+        }
+
     def __call__(self, features: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         if not features:
             raise ValueError("RewardPairCollator received an empty batch")
@@ -507,24 +658,10 @@ class RewardPairCollator:
         negative_rows = [dict(feature["negative"]) for feature in features]
         all_rows = positive_rows + negative_rows
         num_pairs = len(features)
+        token_batch = self.collate_example_tokens(all_rows)
 
         return {
-            "protein_input_ids": torch.tensor(
-                [row["protein_input_ids"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "protein_attention_mask": torch.tensor(
-                [row["protein_attention_mask"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "molecule_input_ids": torch.tensor(
-                [row["molecule_input_ids"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "molecule_attention_mask": torch.tensor(
-                [row["molecule_attention_mask"] for row in all_rows],
-                dtype=torch.long,
-            ),
+            **token_batch,
             "activity_labels": torch.tensor(
                 [float(row["binary_label"]) for row in all_rows],
                 dtype=torch.float32,

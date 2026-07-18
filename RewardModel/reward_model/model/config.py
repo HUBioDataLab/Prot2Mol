@@ -26,6 +26,8 @@ class RewardModelConfig:
     pair_loss_weight: float = 1.0
     classification_loss_weight: float = 0.5
     bce_pos_weight: float = 1.0
+    deduplicate_protein_inputs: bool = True
+    deduplicate_molecule_inputs: bool = True
 
     def __post_init__(self) -> None:
         self.validate()
@@ -57,6 +59,10 @@ class RewardModelConfig:
             raise ValueError("dropout must be in [0.0, 1.0)")
         if self.bce_pos_weight <= 0.0:
             raise ValueError("bce_pos_weight must be > 0")
+        if not isinstance(self.deduplicate_protein_inputs, bool):
+            raise ValueError("deduplicate_protein_inputs must be a boolean")
+        if not isinstance(self.deduplicate_molecule_inputs, bool):
+            raise ValueError("deduplicate_molecule_inputs must be a boolean")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

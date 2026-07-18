@@ -83,6 +83,53 @@ class RewardModel(nn.Module):
     ) -> torch.Tensor:
         return encode_tokens(self.molecule_encoder, input_ids=input_ids, attention_mask=attention_mask)
 
+    @staticmethod
+    def _deduplicated_encode(
+        encode_fn,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        *,
+        enabled: bool,
+    ) -> torch.Tensor:
+        """Encode identical rows once while preserving the original batch and gradients."""
+        if not enabled or input_ids.size(0) <= 1:
+            return encode_fn(input_ids=input_ids, attention_mask=attention_mask)
+
+        if attention_mask is None:
+            unique_keys, inverse_indices = torch.unique(
+                input_ids,
+                dim=0,
+                return_inverse=True,
+            )
+            unique_input_ids = unique_keys
+            unique_attention_mask = None
+        else:
+            if attention_mask.shape != input_ids.shape:
+                raise ValueError("attention_mask must have the same shape as input_ids")
+            row_keys = torch.cat(
+                [input_ids, attention_mask.to(dtype=input_ids.dtype)],
+                dim=1,
+            )
+            unique_keys, inverse_indices = torch.unique(
+                row_keys,
+                dim=0,
+                return_inverse=True,
+            )
+            sequence_length = input_ids.size(1)
+            unique_input_ids = unique_keys[:, :sequence_length]
+            unique_attention_mask = unique_keys[:, sequence_length:].to(
+                dtype=attention_mask.dtype
+            )
+
+        if unique_input_ids.size(0) == input_ids.size(0):
+            return encode_fn(input_ids=input_ids, attention_mask=attention_mask)
+
+        unique_tokens = encode_fn(
+            input_ids=unique_input_ids,
+            attention_mask=unique_attention_mask,
+        )
+        return unique_tokens.index_select(0, inverse_indices)
+
     def _model_device(self) -> torch.device:
         return next(self.parameters()).device
 
@@ -160,13 +207,17 @@ class RewardModel(nn.Module):
         return_token_embeddings: bool = False,
         return_dict: bool = True,
     ) -> RewardModelOutput | tuple[torch.Tensor, ...]:
-        protein_tokens = self.encode_protein(
-            input_ids=protein_input_ids,
-            attention_mask=protein_attention_mask,
+        protein_tokens = self._deduplicated_encode(
+            self.encode_protein,
+            protein_input_ids,
+            protein_attention_mask,
+            enabled=self._config.deduplicate_protein_inputs,
         )
-        molecule_tokens = self.encode_molecule(
-            input_ids=molecule_input_ids,
-            attention_mask=molecule_attention_mask,
+        molecule_tokens = self._deduplicated_encode(
+            self.encode_molecule,
+            molecule_input_ids,
+            molecule_attention_mask,
+            enabled=self._config.deduplicate_molecule_inputs,
         )
 
         protein_mask = normalize_mask(protein_attention_mask, protein_tokens)
