@@ -406,7 +406,12 @@ def _correctness_pass(
         outputs = model(return_dict=True, **batch)
     if outputs.loss is None:
         raise RuntimeError("RewardModel did not produce a correctness loss")
-    outputs.loss.backward()
+    loss_scale = 65536.0 if amp_enabled and amp_dtype == torch.float16 else 1.0
+    (outputs.loss * loss_scale).backward()
+    if loss_scale != 1.0:
+        for parameter in model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.div_(loss_scale)
     result = {
         "ranking_score": outputs.ranking_score.detach().float().cpu(),
         "activity_logits": outputs.activity_logits.detach().float().cpu(),
