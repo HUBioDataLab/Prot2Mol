@@ -405,6 +405,19 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     assert "wandb" not in list(args.report_to)
 
 
+def test_create_training_arguments_supports_fused_adamw(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            optim="adamw_torch_fused",
+            fp16=False,
+        )
+    )
+
+    optim_value = args.optim.value if hasattr(args.optim, "value") else str(args.optim)
+    assert optim_value == "adamw_torch_fused"
+
+
 def test_create_training_arguments_enables_length_bucketing_by_default(tmp_path):
     args = create_training_arguments(
         RewardTrainerConfig(

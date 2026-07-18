@@ -60,6 +60,7 @@ class RewardTrainerConfig:
     length_bucket_size_multiplier: int = 50
     seed: int = 42
     fp16: bool = False
+    optim: str = "adamw_torch"
     save_safetensors: bool = False
     save_total_limit: int = 2
     training_mode: str = "single_gpu"
@@ -97,6 +98,8 @@ class RewardTrainerConfig:
             raise ValueError("logging_steps must be > 0")
         if self.dataloader_num_workers < 0:
             raise ValueError("dataloader_num_workers must be >= 0")
+        if not isinstance(self.optim, str) or not self.optim:
+            raise ValueError("optim must be a non-empty string")
         if not isinstance(self.dynamic_padding, bool):
             raise ValueError("dynamic_padding must be a boolean")
         if not isinstance(self.length_bucketing, bool):

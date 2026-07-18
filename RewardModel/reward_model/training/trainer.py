@@ -414,6 +414,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         dataloader_num_workers=config.dataloader_num_workers,
         seed=config.seed,
         fp16=config.fp16,
+        optim=config.optim,
         save_total_limit=config.save_total_limit,
         remove_unused_columns=False,
         disable_tqdm=True,
