@@ -35,6 +35,7 @@ class BenchmarkVariant:
     length_bucketing: bool
     deduplicate_inputs: bool
     fusion_attention_backend: str = "manual"
+    fused_optimizer: bool = False
 
 
 VARIANTS = {
@@ -43,6 +44,7 @@ VARIANTS = {
     "dynamic_padding_dedup": BenchmarkVariant(True, False, True),
     "optimized": BenchmarkVariant(True, True, True),
     "optimized_sdpa": BenchmarkVariant(True, True, True, "sdpa"),
+    "optimized_sdpa_fused": BenchmarkVariant(True, True, True, "sdpa", True),
 }
 
 
@@ -281,7 +283,12 @@ def _run_variant(
     loader_setup_seconds = time.perf_counter() - loader_setup_start
     iterator: Iterable[Mapping[str, Any]] = iter(dataloader)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0, weight_decay=0.0)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=0.0,
+        weight_decay=0.0,
+        fused=variant.fused_optimizer,
+    )
     amp_enabled, amp_dtype = _autocast_settings(args.precision)
     scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled and amp_dtype == torch.float16)
 
@@ -338,6 +345,7 @@ def _run_variant(
             "length_bucketing": variant.length_bucketing,
             "deduplicate_inputs": variant.deduplicate_inputs,
             "fusion_attention_backend": variant.fusion_attention_backend,
+            "fused_optimizer": variant.fused_optimizer,
         },
         "loader_setup_seconds": loader_setup_seconds,
         "step_ms_mean": float(statistics.mean(step_times_ms)),
@@ -382,13 +390,20 @@ def _correctness_pass(
     *,
     deduplicate: bool,
     fusion_attention_backend: str,
+    amp_enabled: bool = False,
+    amp_dtype: torch.dtype = torch.float32,
 ) -> Dict[str, Any]:
     model.config.deduplicate_protein_inputs = deduplicate
     model.config.deduplicate_molecule_inputs = deduplicate
     model.config.fusion_attention_backend = fusion_attention_backend
     model.fusion.attention_backend = fusion_attention_backend
     model.zero_grad(set_to_none=True)
-    outputs = model(return_dict=True, **batch)
+    with torch.autocast(
+        device_type="cuda",
+        dtype=amp_dtype,
+        enabled=amp_enabled,
+    ):
+        outputs = model(return_dict=True, **batch)
     if outputs.loss is None:
         raise RuntimeError("RewardModel did not produce a correctness loss")
     outputs.loss.backward()
@@ -431,6 +446,9 @@ def _max_gradient_signature_errors(
 def _gradient_norms_close(
     baseline: Mapping[str, tuple[float, float]],
     optimized: Mapping[str, tuple[float, float]],
+    *,
+    rel_tol: float = 1e-4,
+    abs_tol: float = 1e-6,
 ) -> bool:
     if baseline.keys() != optimized.keys():
         return False
@@ -438,8 +456,8 @@ def _gradient_norms_close(
         math.isclose(
             baseline[name][0],
             optimized[name][0],
-            rel_tol=1e-4,
-            abs_tol=1e-6,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
         )
         for name in baseline
     )
@@ -448,6 +466,11 @@ def _gradient_norms_close(
 def _compare_correctness_passes(
     baseline: Mapping[str, Any],
     optimized: Mapping[str, Any],
+    *,
+    forward_atol: float = 1e-5,
+    forward_rtol: float = 1e-4,
+    gradient_atol: float = 1e-6,
+    gradient_rtol: float = 1e-4,
 ) -> Dict[str, Any]:
     score_error = float(
         (baseline["ranking_score"] - optimized["ranking_score"]).abs().max().item()
@@ -464,25 +487,27 @@ def _compare_correctness_passes(
         torch.allclose(
             baseline["ranking_score"],
             optimized["ranking_score"],
-            atol=1e-5,
-            rtol=1e-4,
+            atol=forward_atol,
+            rtol=forward_rtol,
         )
         and torch.allclose(
             baseline["activity_logits"],
             optimized["activity_logits"],
-            atol=1e-5,
-            rtol=1e-4,
+            atol=forward_atol,
+            rtol=forward_rtol,
         )
         and torch.allclose(
             baseline["loss"],
             optimized["loss"],
-            atol=1e-5,
-            rtol=1e-4,
+            atol=forward_atol,
+            rtol=forward_rtol,
         )
     )
     gradients_close = _gradient_norms_close(
         baseline["gradient_signature"],
         optimized["gradient_signature"],
+        rel_tol=gradient_rtol,
+        abs_tol=gradient_atol,
     )
     return {
         "passed": bool(
@@ -576,6 +601,61 @@ def _run_fusion_correctness_check(
     )
     result = {
         **_compare_correctness_passes(manual, sdpa),
+        "shapes": {
+            "protein": list(dynamic_cpu["protein_input_ids"].shape),
+            "molecule": list(dynamic_cpu["molecule_input_ids"].shape),
+        },
+    }
+    model.zero_grad(set_to_none=True)
+    torch.cuda.empty_cache()
+    return result
+
+
+def _run_precision_correctness_check(
+    *,
+    model: RewardModel,
+    dataset: RewardPairDataset,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> Dict[str, Any]:
+    features = [dataset[index] for index in range(args.correctness_pairs)]
+    dynamic_cpu = _make_collator(model, dynamic_padding=True)(features)
+    dynamic_batch = _tensor_batch_to_device(dynamic_cpu, device)
+    amp_enabled, amp_dtype = _autocast_settings(args.precision)
+
+    model.eval()
+    _seed_everything(args.seed)
+    fp32 = _correctness_pass(
+        model,
+        dynamic_batch,
+        deduplicate=True,
+        fusion_attention_backend="sdpa",
+    )
+    _seed_everything(args.seed)
+    mixed = _correctness_pass(
+        model,
+        dynamic_batch,
+        deduplicate=True,
+        fusion_attention_backend="sdpa",
+        amp_enabled=amp_enabled,
+        amp_dtype=amp_dtype,
+    )
+    if args.precision == "bf16":
+        tolerances = (1e-2, 5e-2, 1e-2, 5e-2)
+    elif args.precision == "fp16":
+        tolerances = (2e-3, 2e-2, 2e-3, 2e-2)
+    else:
+        tolerances = (1e-5, 1e-4, 1e-6, 1e-4)
+    result = {
+        **_compare_correctness_passes(
+            fp32,
+            mixed,
+            forward_atol=tolerances[0],
+            forward_rtol=tolerances[1],
+            gradient_atol=tolerances[2],
+            gradient_rtol=tolerances[3],
+        ),
+        "precision": args.precision,
         "shapes": {
             "protein": list(dynamic_cpu["protein_input_ids"].shape),
             "molecule": list(dynamic_cpu["molecule_input_ids"].shape),
@@ -981,6 +1061,15 @@ def main() -> None:
     print(json.dumps({"fusion_correctness": report["fusion_correctness"]}), flush=True)
     if not report["fusion_correctness"]["passed"]:
         raise RuntimeError("Manual-versus-SDPA fusion correctness check failed")
+    report["precision_correctness"] = _run_precision_correctness_check(
+        model=model,
+        dataset=dataset,
+        args=args,
+        device=device,
+    )
+    print(json.dumps({"precision_correctness": report["precision_correctness"]}), flush=True)
+    if not report["precision_correctness"]["passed"]:
+        raise RuntimeError("Mixed-precision correctness check failed")
 
     variants: Dict[str, Any] = {}
     for name in args.variants:
@@ -1026,6 +1115,17 @@ def main() -> None:
                 - sdpa_result["peak_memory_allocated_gib"]
             )
             / manual_result["peak_memory_allocated_gib"],
+        }
+    if "optimized_sdpa" in variants and "optimized_sdpa_fused" in variants:
+        standard_result = variants["optimized_sdpa"]
+        fused_result = variants["optimized_sdpa_fused"]
+        report["fused_optimizer_relative_to_standard"] = {
+            "speedup": standard_result["step_ms_mean"] / fused_result["step_ms_mean"],
+            "step_time_reduction_percent": 100.0
+            * (standard_result["step_ms_mean"] - fused_result["step_ms_mean"])
+            / standard_result["step_ms_mean"],
+            "peak_memory_change_gib": fused_result["peak_memory_allocated_gib"]
+            - standard_result["peak_memory_allocated_gib"],
         }
     if args.benchmark_validation:
         report["validation_duplication"] = _benchmark_validation_duplication(

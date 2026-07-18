@@ -18,6 +18,7 @@ def test_benchmark_variants_preserve_expected_before_after_switches():
     baseline = VARIANTS["baseline"]
     optimized = VARIANTS["optimized"]
     optimized_sdpa = VARIANTS["optimized_sdpa"]
+    optimized_sdpa_fused = VARIANTS["optimized_sdpa_fused"]
 
     assert baseline.dynamic_padding is False
     assert baseline.length_bucketing is False
@@ -27,6 +28,8 @@ def test_benchmark_variants_preserve_expected_before_after_switches():
     assert optimized.deduplicate_inputs is True
     assert optimized.fusion_attention_backend == "manual"
     assert optimized_sdpa.fusion_attention_backend == "sdpa"
+    assert optimized_sdpa.fused_optimizer is False
+    assert optimized_sdpa_fused.fused_optimizer is True
 
 
 def test_benchmark_percentile_uses_nearest_rank():
