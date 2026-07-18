@@ -82,6 +82,11 @@ class TokenFusion(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
         valid_pairs = row_mask[:, None, :, None] & col_mask[:, None, None, :]
+        fallback_column = torch.zeros_like(valid_pairs)
+        fallback_column[..., 0] = True
+        valid_pairs = valid_pairs | (
+            ~valid_pairs.any(dim=-1, keepdim=True) & fallback_column
+        )
         attended = F.scaled_dot_product_attention(
             query,
             key,

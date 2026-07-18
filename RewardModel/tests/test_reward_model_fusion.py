@@ -1,6 +1,7 @@
 import copy
 
 import torch
+import torch.nn.functional as F
 
 from reward_model.model.fusion import TokenFusion
 
@@ -72,6 +73,29 @@ def test_sdpa_fusion_zeroes_padded_query_rows():
     assert torch.count_nonzero(fused_protein[:, 1:]) == 0
     assert torch.isfinite(fused_protein).all()
     assert torch.isfinite(fused_molecule).all()
+
+
+def test_sdpa_fusion_never_sends_a_fully_masked_query(monkeypatch):
+    original_sdpa = F.scaled_dot_product_attention
+
+    def _checked_sdpa(query, key, value, *, attn_mask, **kwargs):
+        assert attn_mask.any(dim=-1).all()
+        return original_sdpa(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", _checked_sdpa)
+    fusion = TokenFusion(hidden_dim=8, num_heads=2, attention_backend="sdpa")
+    fusion(
+        torch.randn(1, 3, 8),
+        torch.randn(1, 2, 8),
+        torch.tensor([[1, 0, 0]], dtype=torch.long),
+        torch.tensor([[1, 1]], dtype=torch.long),
+    )
 
 
 def test_fusion_rejects_unknown_attention_backend():
