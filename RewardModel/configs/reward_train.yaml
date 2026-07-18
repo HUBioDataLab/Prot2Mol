@@ -5,6 +5,7 @@ model:
   molecule_max_length: 256
   fusion_hidden_dim: 512
   fusion_num_heads: 8
+  fusion_attention_backend: sdpa
   dropout: 0.1
   pooling_type: mean
   activity_threshold: 6.0

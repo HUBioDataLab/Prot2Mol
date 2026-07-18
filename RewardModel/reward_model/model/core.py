@@ -52,6 +52,7 @@ class RewardModel(nn.Module):
         self.fusion = TokenFusion(
             hidden_dim=self._config.fusion_hidden_dim,
             num_heads=self._config.fusion_num_heads,
+            attention_backend=self._config.fusion_attention_backend,
         )
         head_input_dim = self._config.fusion_hidden_dim * 2
         self.ranking_head = RewardMLPHead(

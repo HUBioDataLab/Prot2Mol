@@ -36,3 +36,13 @@ def test_reward_model_config_loads_legacy_payload_with_deduplication_defaults():
 
     assert config.deduplicate_protein_inputs is True
     assert config.deduplicate_molecule_inputs is True
+    assert config.fusion_attention_backend == "manual"
+
+
+def test_reward_model_config_rejects_unknown_fusion_attention_backend():
+    try:
+        RewardModelConfig(fusion_attention_backend="unknown")
+    except ValueError as exc:
+        assert "fusion_attention_backend" in str(exc)
+    else:
+        raise AssertionError("Expected an invalid fusion backend to be rejected")

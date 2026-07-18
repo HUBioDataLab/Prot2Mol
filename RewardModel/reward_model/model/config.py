@@ -6,6 +6,7 @@ from typing import Any, Dict, Mapping, Optional
 
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
+_VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
 
 
 @dataclass(eq=True)
@@ -20,6 +21,7 @@ class RewardModelConfig:
     molecule_max_length: int = 512
     fusion_hidden_dim: int = 512
     fusion_num_heads: int = 8
+    fusion_attention_backend: str = "manual"
     dropout: float = 0.1
     pooling_type: str = "mean"
     activity_threshold: float = 6.0
@@ -45,6 +47,11 @@ class RewardModelConfig:
             raise ValueError(
                 f"fusion_hidden_dim ({self.fusion_hidden_dim}) must be divisible by "
                 f"fusion_num_heads ({self.fusion_num_heads})"
+            )
+        if self.fusion_attention_backend not in _VALID_FUSION_ATTENTION_BACKENDS:
+            raise ValueError(
+                "fusion_attention_backend must be one of "
+                f"{sorted(_VALID_FUSION_ATTENTION_BACKENDS)}"
             )
         if self.pooling_type not in _VALID_POOLING_TYPES:
             raise ValueError(

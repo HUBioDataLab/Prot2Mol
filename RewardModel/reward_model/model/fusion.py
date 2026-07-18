@@ -27,7 +27,12 @@ def masked_pool(tokens: torch.Tensor, mask: torch.Tensor, pooling_type: str) -> 
 
 
 class TokenFusion(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        attention_backend: str = "manual",
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError(
@@ -37,6 +42,9 @@ class TokenFusion(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.head_size = hidden_dim // num_heads
+        self.attention_backend = attention_backend
+        if self.attention_backend not in {"manual", "sdpa"}:
+            raise ValueError("attention_backend must be 'manual' or 'sdpa'")
 
         self.query_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.key_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -62,6 +70,28 @@ class TokenFusion(nn.Module):
         alpha = torch.softmax(masked_logits, dim=2)
         return torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
 
+    def _sdpa(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        row_mask: torch.Tensor,
+        col_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+        valid_pairs = row_mask[:, None, :, None] & col_mask[:, None, None, :]
+        attended = F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=valid_pairs,
+            dropout_p=0.0,
+            is_causal=False,
+        )
+        return attended.transpose(1, 2).flatten(-2)
+
     def forward(
         self,
         protein_tokens: torch.Tensor,
@@ -80,24 +110,66 @@ class TokenFusion(nn.Module):
         molecule_k = self._apply_heads(self.key_m(molecule_tokens))
         molecule_v = self._apply_heads(self.value_m(molecule_tokens))
 
-        logits_pp = torch.einsum("blhd,bkhd->blkh", protein_q, protein_k) / math.sqrt(self.head_size)
-        logits_pm = torch.einsum("blhd,bkhd->blkh", protein_q, molecule_k) / math.sqrt(self.head_size)
-        logits_mp = torch.einsum("blhd,bkhd->blkh", molecule_q, protein_k) / math.sqrt(self.head_size)
-        logits_mm = torch.einsum("blhd,bkhd->blkh", molecule_q, molecule_k) / math.sqrt(self.head_size)
+        if self.attention_backend == "sdpa":
+            fused_protein = (
+                self._sdpa(
+                    protein_q,
+                    protein_k,
+                    protein_v,
+                    protein_mask,
+                    protein_mask,
+                )
+                + self._sdpa(
+                    protein_q,
+                    molecule_k,
+                    molecule_v,
+                    protein_mask,
+                    molecule_mask,
+                )
+            ) / 2.0
+            fused_molecule = (
+                self._sdpa(
+                    molecule_q,
+                    protein_k,
+                    protein_v,
+                    molecule_mask,
+                    protein_mask,
+                )
+                + self._sdpa(
+                    molecule_q,
+                    molecule_k,
+                    molecule_v,
+                    molecule_mask,
+                    molecule_mask,
+                )
+            ) / 2.0
+        else:
+            logits_pp = torch.einsum(
+                "blhd,bkhd->blkh", protein_q, protein_k
+            ) / math.sqrt(self.head_size)
+            logits_pm = torch.einsum(
+                "blhd,bkhd->blkh", protein_q, molecule_k
+            ) / math.sqrt(self.head_size)
+            logits_mp = torch.einsum(
+                "blhd,bkhd->blkh", molecule_q, protein_k
+            ) / math.sqrt(self.head_size)
+            logits_mm = torch.einsum(
+                "blhd,bkhd->blkh", molecule_q, molecule_k
+            ) / math.sqrt(self.head_size)
 
-        alpha_pp = self._masked_softmax(logits_pp, protein_mask, protein_mask)
-        alpha_pm = self._masked_softmax(logits_pm, protein_mask, molecule_mask)
-        alpha_mp = self._masked_softmax(logits_mp, molecule_mask, protein_mask)
-        alpha_mm = self._masked_softmax(logits_mm, molecule_mask, molecule_mask)
+            alpha_pp = self._masked_softmax(logits_pp, protein_mask, protein_mask)
+            alpha_pm = self._masked_softmax(logits_pm, protein_mask, molecule_mask)
+            alpha_mp = self._masked_softmax(logits_mp, molecule_mask, protein_mask)
+            alpha_mm = self._masked_softmax(logits_mm, molecule_mask, molecule_mask)
 
-        fused_protein = (
-            torch.einsum("blkh,bkhd->blhd", alpha_pp, protein_v).flatten(-2)
-            + torch.einsum("blkh,bkhd->blhd", alpha_pm, molecule_v).flatten(-2)
-        ) / 2.0
-        fused_molecule = (
-            torch.einsum("blkh,bkhd->blhd", alpha_mp, protein_v).flatten(-2)
-            + torch.einsum("blkh,bkhd->blhd", alpha_mm, molecule_v).flatten(-2)
-        ) / 2.0
+            fused_protein = (
+                torch.einsum("blkh,bkhd->blhd", alpha_pp, protein_v).flatten(-2)
+                + torch.einsum("blkh,bkhd->blhd", alpha_pm, molecule_v).flatten(-2)
+            ) / 2.0
+            fused_molecule = (
+                torch.einsum("blkh,bkhd->blhd", alpha_mp, protein_v).flatten(-2)
+                + torch.einsum("blkh,bkhd->blhd", alpha_mm, molecule_v).flatten(-2)
+            ) / 2.0
 
         fused_protein = fused_protein * protein_mask.unsqueeze(-1).to(fused_protein.dtype)
         fused_molecule = fused_molecule * molecule_mask.unsqueeze(-1).to(fused_molecule.dtype)

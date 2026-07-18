@@ -32,6 +32,7 @@ class BenchmarkVariant:
     dynamic_padding: bool
     length_bucketing: bool
     deduplicate_inputs: bool
+    fusion_attention_backend: str = "manual"
 
 
 VARIANTS = {
@@ -39,6 +40,7 @@ VARIANTS = {
     "dynamic_padding": BenchmarkVariant(True, False, False),
     "dynamic_padding_dedup": BenchmarkVariant(True, False, True),
     "optimized": BenchmarkVariant(True, True, True),
+    "optimized_sdpa": BenchmarkVariant(True, True, True, "sdpa"),
 }
 
 
@@ -253,6 +255,8 @@ def _run_variant(
     _seed_everything(args.seed)
     model.config.deduplicate_protein_inputs = variant.deduplicate_inputs
     model.config.deduplicate_molecule_inputs = variant.deduplicate_inputs
+    model.config.fusion_attention_backend = variant.fusion_attention_backend
+    model.fusion.attention_backend = variant.fusion_attention_backend
     model.train()
 
     loader_setup_start = time.perf_counter()
@@ -323,6 +327,7 @@ def _run_variant(
             "dynamic_padding": variant.dynamic_padding,
             "length_bucketing": variant.length_bucketing,
             "deduplicate_inputs": variant.deduplicate_inputs,
+            "fusion_attention_backend": variant.fusion_attention_backend,
         },
         "loader_setup_seconds": loader_setup_seconds,
         "step_ms_mean": float(statistics.mean(step_times_ms)),
@@ -366,9 +371,12 @@ def _correctness_pass(
     batch: Mapping[str, torch.Tensor],
     *,
     deduplicate: bool,
+    fusion_attention_backend: str,
 ) -> Dict[str, Any]:
     model.config.deduplicate_protein_inputs = deduplicate
     model.config.deduplicate_molecule_inputs = deduplicate
+    model.config.fusion_attention_backend = fusion_attention_backend
+    model.fusion.attention_backend = fusion_attention_backend
     model.zero_grad(set_to_none=True)
     outputs = model(return_dict=True, **batch)
     if outputs.loss is None:
@@ -427,27 +435,10 @@ def _gradient_norms_close(
     )
 
 
-def _run_correctness_check(
-    *,
-    model: RewardModel,
-    dataset: RewardPairDataset,
-    args: argparse.Namespace,
-    device: torch.device,
+def _compare_correctness_passes(
+    baseline: Mapping[str, Any],
+    optimized: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    if args.correctness_pairs > len(dataset):
-        raise ValueError("correctness_pairs exceeds the available pair dataset")
-    features = [dataset[index] for index in range(args.correctness_pairs)]
-    fixed_cpu = _make_collator(model, dynamic_padding=False)(features)
-    dynamic_cpu = _make_collator(model, dynamic_padding=True)(features)
-    fixed_batch = _tensor_batch_to_device(fixed_cpu, device)
-    dynamic_batch = _tensor_batch_to_device(dynamic_cpu, device)
-
-    model.eval()
-    _seed_everything(args.seed)
-    baseline = _correctness_pass(model, fixed_batch, deduplicate=False)
-    _seed_everything(args.seed)
-    optimized = _correctness_pass(model, dynamic_batch, deduplicate=True)
-
     score_error = float(
         (baseline["ranking_score"] - optimized["ranking_score"]).abs().max().item()
     )
@@ -483,7 +474,7 @@ def _run_correctness_check(
         baseline["gradient_signature"],
         optimized["gradient_signature"],
     )
-    result = {
+    return {
         "passed": bool(
             forward_close
             and gradients_close
@@ -498,11 +489,84 @@ def _run_correctness_check(
         "activity_logit_max_absolute_error": logit_error,
         "loss_absolute_error": loss_error,
         **gradient_errors,
+    }
+
+
+def _run_correctness_check(
+    *,
+    model: RewardModel,
+    dataset: RewardPairDataset,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> Dict[str, Any]:
+    if args.correctness_pairs > len(dataset):
+        raise ValueError("correctness_pairs exceeds the available pair dataset")
+    features = [dataset[index] for index in range(args.correctness_pairs)]
+    fixed_cpu = _make_collator(model, dynamic_padding=False)(features)
+    dynamic_cpu = _make_collator(model, dynamic_padding=True)(features)
+    fixed_batch = _tensor_batch_to_device(fixed_cpu, device)
+    dynamic_batch = _tensor_batch_to_device(dynamic_cpu, device)
+
+    model.eval()
+    _seed_everything(args.seed)
+    baseline = _correctness_pass(
+        model,
+        fixed_batch,
+        deduplicate=False,
+        fusion_attention_backend="manual",
+    )
+    _seed_everything(args.seed)
+    optimized = _correctness_pass(
+        model,
+        dynamic_batch,
+        deduplicate=True,
+        fusion_attention_backend="manual",
+    )
+    result = {
+        **_compare_correctness_passes(baseline, optimized),
         "fixed_shapes": {
             "protein": list(fixed_cpu["protein_input_ids"].shape),
             "molecule": list(fixed_cpu["molecule_input_ids"].shape),
         },
         "dynamic_shapes": {
+            "protein": list(dynamic_cpu["protein_input_ids"].shape),
+            "molecule": list(dynamic_cpu["molecule_input_ids"].shape),
+        },
+    }
+    model.zero_grad(set_to_none=True)
+    torch.cuda.empty_cache()
+    return result
+
+
+def _run_fusion_correctness_check(
+    *,
+    model: RewardModel,
+    dataset: RewardPairDataset,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> Dict[str, Any]:
+    features = [dataset[index] for index in range(args.correctness_pairs)]
+    dynamic_cpu = _make_collator(model, dynamic_padding=True)(features)
+    dynamic_batch = _tensor_batch_to_device(dynamic_cpu, device)
+
+    model.eval()
+    _seed_everything(args.seed)
+    manual = _correctness_pass(
+        model,
+        dynamic_batch,
+        deduplicate=True,
+        fusion_attention_backend="manual",
+    )
+    _seed_everything(args.seed)
+    sdpa = _correctness_pass(
+        model,
+        dynamic_batch,
+        deduplicate=True,
+        fusion_attention_backend="sdpa",
+    )
+    result = {
+        **_compare_correctness_passes(manual, sdpa),
+        "shapes": {
             "protein": list(dynamic_cpu["protein_input_ids"].shape),
             "molecule": list(dynamic_cpu["molecule_input_ids"].shape),
         },
@@ -662,7 +726,7 @@ def _load_dataset(config):
     pair_paths = get_saved_pair_dataset_paths(config.data.tokenized_dataset_dir)
     train_examples = load_tokenized_example_dataset(example_paths["train"])
     train_pairs = load_saved_pair_dataset(pair_paths["train"])
-    return config, RewardPairDataset(train_examples, train_pairs)
+    return RewardPairDataset(train_examples, train_pairs)
 
 
 def main() -> None:
@@ -713,6 +777,15 @@ def main() -> None:
     print(json.dumps({"correctness": report["correctness"]}), flush=True)
     if not report["correctness"]["passed"]:
         raise RuntimeError("Baseline-versus-optimized correctness check failed")
+    report["fusion_correctness"] = _run_fusion_correctness_check(
+        model=model,
+        dataset=dataset,
+        args=args,
+        device=device,
+    )
+    print(json.dumps({"fusion_correctness": report["fusion_correctness"]}), flush=True)
+    if not report["fusion_correctness"]["passed"]:
+        raise RuntimeError("Manual-versus-SDPA fusion correctness check failed")
 
     variants: Dict[str, Any] = {}
     for name in args.variants:
@@ -741,6 +814,23 @@ def main() -> None:
                 / baseline_memory,
             }
             for name, result in variants.items()
+        }
+    if "optimized" in variants and "optimized_sdpa" in variants:
+        manual_result = variants["optimized"]
+        sdpa_result = variants["optimized_sdpa"]
+        report["sdpa_relative_to_manual"] = {
+            "speedup": manual_result["step_ms_mean"] / sdpa_result["step_ms_mean"],
+            "step_time_reduction_percent": 100.0
+            * (manual_result["step_ms_mean"] - sdpa_result["step_ms_mean"])
+            / manual_result["step_ms_mean"],
+            "peak_memory_reduction_gib": manual_result["peak_memory_allocated_gib"]
+            - sdpa_result["peak_memory_allocated_gib"],
+            "peak_memory_reduction_percent": 100.0
+            * (
+                manual_result["peak_memory_allocated_gib"]
+                - sdpa_result["peak_memory_allocated_gib"]
+            )
+            / manual_result["peak_memory_allocated_gib"],
         }
     print("BENCHMARK_REPORT=" + json.dumps(report, sort_keys=True), flush=True)
 

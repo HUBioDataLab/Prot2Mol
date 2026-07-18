@@ -16,6 +16,7 @@ from benchmark_reward_model import (
 def test_benchmark_variants_preserve_expected_before_after_switches():
     baseline = VARIANTS["baseline"]
     optimized = VARIANTS["optimized"]
+    optimized_sdpa = VARIANTS["optimized_sdpa"]
 
     assert baseline.dynamic_padding is False
     assert baseline.length_bucketing is False
@@ -23,6 +24,8 @@ def test_benchmark_variants_preserve_expected_before_after_switches():
     assert optimized.dynamic_padding is True
     assert optimized.length_bucketing is True
     assert optimized.deduplicate_inputs is True
+    assert optimized.fusion_attention_backend == "manual"
+    assert optimized_sdpa.fusion_attention_backend == "sdpa"
 
 
 def test_benchmark_percentile_uses_nearest_rank():
