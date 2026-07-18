@@ -363,6 +363,7 @@ def _run_variant(
         "losses_finite": all(math.isfinite(loss) for loss in losses),
         "gradients_finite": _all_gradients_finite(model),
         "gradient_norm": _gradient_norm(model),
+        "loss_scale_final": float(scaler.get_scale()),
         "mean_batch": _mean_stats(shape_records),
     }
     print(json.dumps({"completed_variant": name, "result": result}), flush=True)
@@ -397,27 +398,40 @@ def _correctness_pass(
     model.config.deduplicate_molecule_inputs = deduplicate
     model.config.fusion_attention_backend = fusion_attention_backend
     model.fusion.attention_backend = fusion_attention_backend
-    model.zero_grad(set_to_none=True)
-    with torch.autocast(
-        device_type="cuda",
-        dtype=amp_dtype,
-        enabled=amp_enabled,
-    ):
-        outputs = model(return_dict=True, **batch)
-    if outputs.loss is None:
-        raise RuntimeError("RewardModel did not produce a correctness loss")
-    loss_scale = 65536.0 if amp_enabled and amp_dtype == torch.float16 else 1.0
-    (outputs.loss * loss_scale).backward()
-    if loss_scale != 1.0:
-        for parameter in model.parameters():
-            if parameter.grad is not None:
-                parameter.grad.div_(loss_scale)
+    loss_scales = (
+        [65536.0 / (2**power) for power in range(17)]
+        if amp_enabled and amp_dtype == torch.float16
+        else [1.0]
+    )
+    outputs = None
+    loss_scale = 1.0
+    for candidate_scale in loss_scales:
+        model.zero_grad(set_to_none=True)
+        with torch.autocast(
+            device_type="cuda",
+            dtype=amp_dtype,
+            enabled=amp_enabled,
+        ):
+            outputs = model(return_dict=True, **batch)
+        if outputs.loss is None:
+            raise RuntimeError("RewardModel did not produce a correctness loss")
+        (outputs.loss * candidate_scale).backward()
+        if candidate_scale != 1.0:
+            for parameter in model.parameters():
+                if parameter.grad is not None:
+                    parameter.grad.div_(candidate_scale)
+        loss_scale = candidate_scale
+        if _all_gradients_finite(model):
+            break
+    if outputs is None:
+        raise RuntimeError("RewardModel correctness pass did not execute")
     result = {
         "ranking_score": outputs.ranking_score.detach().float().cpu(),
         "activity_logits": outputs.activity_logits.detach().float().cpu(),
         "loss": outputs.loss.detach().float().cpu(),
         "gradient_signature": _gradient_signature(model),
         "gradients_finite": _all_gradients_finite(model),
+        "loss_scale": loss_scale,
     }
     model.zero_grad(set_to_none=True)
     return result
@@ -525,6 +539,8 @@ def _compare_correctness_passes(
         "gradients_close": bool(gradients_close),
         "baseline_gradients_finite": baseline["gradients_finite"],
         "optimized_gradients_finite": optimized["gradients_finite"],
+        "baseline_loss_scale": baseline["loss_scale"],
+        "optimized_loss_scale": optimized["loss_scale"],
         "ranking_score_max_absolute_error": score_error,
         "activity_logit_max_absolute_error": logit_error,
         "loss_absolute_error": loss_error,
