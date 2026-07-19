@@ -18,10 +18,10 @@ model:
   deduplicate_molecule_inputs: true
 
 data:
-  train_parquet_path: ../../../dummy/train.parquet
-  val_parquet_path: ../../../dummy/val.parquet
-  test_parquet_path: ../../../dummy/test.parquet
-  tokenized_dataset_dir: ../reward_model/data/tokenized/reward_train_examples_demo_10k
+  train_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl37_mmseqs50
   tokenization_batch_size: 16
   ranking_max_ligands: 16
   ranking_opportunity_divisor: 32
@@ -29,7 +29,7 @@ data:
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/train_10k_08_06_2026
+  output_dir: ../outputs/train_chembl37_mmseqs50
   num_train_epochs: 10
   per_device_train_batch_size: 8
   per_device_eval_batch_size: 8
