@@ -199,6 +199,11 @@ class RewardModelTrainer(Trainer):
             "num_examples": 0.0,
             "num_ranking_lists": 0.0,
             "num_ranked_examples": 0.0,
+            "ranking_loss_sum": 0.0,
+            "classification_correct": 0.0,
+            "classification_count": 0.0,
+            "ranking_pairwise_correct": 0.0,
+            "ranking_pairwise_count": 0.0,
         }
         self._train_component_count = 0
 
@@ -254,17 +259,61 @@ class RewardModelTrainer(Trainer):
         num_examples: Any,
         num_ranking_lists: Any,
         num_ranked_examples: Any,
+        activity_logits: torch.Tensor,
+        activity_labels: torch.Tensor,
+        ranking_score: torch.Tensor,
+        pchembl_values: Optional[torch.Tensor],
+        ranking_group_ids: Optional[torch.Tensor],
     ) -> None:
-        self._train_component_sums["ranking_loss"] += self._to_scalar(ranking_loss)
+        ranking_loss_value = self._to_scalar(ranking_loss)
+        num_ranking_lists_value = self._to_scalar(num_ranking_lists)
+        self._train_component_sums["ranking_loss"] += ranking_loss_value
         self._train_component_sums["classification_loss"] += self._to_scalar(classification_loss)
         self._train_component_sums["total_loss"] += self._to_scalar(total_loss)
         self._train_component_sums["num_examples"] += self._to_scalar(num_examples)
-        self._train_component_sums["num_ranking_lists"] += self._to_scalar(
-            num_ranking_lists
-        )
+        self._train_component_sums["num_ranking_lists"] += num_ranking_lists_value
         self._train_component_sums["num_ranked_examples"] += self._to_scalar(
             num_ranked_examples
         )
+        self._train_component_sums["ranking_loss_sum"] += (
+            ranking_loss_value * num_ranking_lists_value
+        )
+
+        with torch.no_grad():
+            logits = activity_logits.detach().reshape(-1)
+            labels = activity_labels.detach().to(device=logits.device).reshape(-1)
+            self._train_component_sums["classification_correct"] += float(
+                ((logits >= 0.0) == (labels >= 0.5)).sum().item()
+            )
+            self._train_component_sums["classification_count"] += float(
+                labels.numel()
+            )
+
+            if pchembl_values is not None and ranking_group_ids is not None:
+                scores = ranking_score.detach().reshape(-1)
+                targets = pchembl_values.detach().to(device=scores.device).reshape(-1)
+                group_ids = ranking_group_ids.detach().to(device=scores.device).reshape(-1)
+                same_group = (
+                    (group_ids[:, None] == group_ids[None, :])
+                    & (group_ids[:, None] >= 0)
+                )
+                comparable = (
+                    torch.triu(same_group, diagonal=1)
+                    & (targets[:, None] != targets[None, :])
+                )
+                comparison = (
+                    (scores[:, None] - scores[None, :])
+                    * (targets[:, None] - targets[None, :])
+                )
+                self._train_component_sums["ranking_pairwise_correct"] += float(
+                    (
+                        (comparison[comparable] > 0).float().sum()
+                        + 0.5 * (comparison[comparable] == 0).float().sum()
+                    ).item()
+                )
+                self._train_component_sums["ranking_pairwise_count"] += float(
+                    comparable.sum().item()
+                )
         self._train_component_count += 1
 
     def _consume_train_component_logs(self) -> Dict[str, float]:
@@ -279,6 +328,24 @@ class RewardModelTrainer(Trainer):
             "num_ranking_lists": self._train_component_sums["num_ranking_lists"] / denom,
             "num_ranked_examples": self._train_component_sums["num_ranked_examples"] / denom,
         }
+        ranked_example_count = self._train_component_sums["num_ranked_examples"]
+        if ranked_example_count > 0.0:
+            logs["ranking_loss_per_ranked_example"] = (
+                self._train_component_sums["ranking_loss_sum"]
+                / ranked_example_count
+            )
+        classification_count = self._train_component_sums["classification_count"]
+        if classification_count > 0.0:
+            logs["classification_accuracy"] = (
+                self._train_component_sums["classification_correct"]
+                / classification_count
+            )
+        ranking_pairwise_count = self._train_component_sums["ranking_pairwise_count"]
+        if ranking_pairwise_count > 0.0:
+            logs["ranking_pairwise_accuracy"] = (
+                self._train_component_sums["ranking_pairwise_correct"]
+                / ranking_pairwise_count
+            )
         self._reset_train_component_accumulator()
         return logs
 
@@ -313,6 +380,11 @@ class RewardModelTrainer(Trainer):
                 num_examples=inputs.get("num_examples"),
                 num_ranking_lists=inputs.get("num_ranking_lists"),
                 num_ranked_examples=inputs.get("num_ranked_examples"),
+                activity_logits=outputs.activity_logits,
+                activity_labels=inputs["activity_labels"],
+                ranking_score=outputs.ranking_score,
+                pchembl_values=inputs.get("pchembl_values"),
+                ranking_group_ids=inputs.get("ranking_group_ids"),
             )
 
         return (outputs.loss, outputs) if return_outputs else outputs.loss

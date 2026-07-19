@@ -331,7 +331,15 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
         eval_metrics["eval_val2_spearman"]
     )
-    assert any("ranking_loss" in entry for entry in trainer.state.log_history)
+    training_logs = [
+        entry for entry in trainer.state.log_history if "ranking_loss" in entry
+    ]
+    assert training_logs
+    assert {
+        "classification_accuracy",
+        "ranking_pairwise_accuracy",
+        "ranking_loss_per_ranked_example",
+    }.issubset(training_logs[-1])
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
 
@@ -387,6 +395,44 @@ def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch
 
     assert trainer.log({"eval_loss": 0.25}, start_time=123.0) == "logged"
     assert captured == {"eval_loss": 0.25}
+
+
+def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer._reset_train_component_accumulator()
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(3.0),
+        classification_loss=torch.tensor(0.6),
+        total_loss=torch.tensor(3.6),
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([1.0, -1.0, 1.0]),
+        activity_labels=torch.tensor([1.0, 0.0, 0.0]),
+        ranking_score=torch.tensor([3.0, 2.0, 1.0]),
+        pchembl_values=torch.tensor([8.0, 7.0, 6.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(2.0),
+        classification_loss=torch.tensor(0.4),
+        total_loss=torch.tensor(2.4),
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([-1.0, 1.0, -1.0]),
+        activity_labels=torch.tensor([1.0, 1.0, 0.0]),
+        ranking_score=torch.tensor([0.0, 1.0, 2.0]),
+        pchembl_values=torch.tensor([8.0, 7.0, 7.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+
+    logs = trainer._consume_train_component_logs()
+
+    assert logs["classification_accuracy"] == pytest.approx(4.0 / 6.0)
+    assert logs["ranking_pairwise_accuracy"] == pytest.approx(3.0 / 5.0)
+    assert logs["ranking_loss_per_ranked_example"] == pytest.approx(5.0 / 6.0)
+    assert logs["ranking_loss"] == pytest.approx(2.5)
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
