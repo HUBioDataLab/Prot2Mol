@@ -1,3 +1,9 @@
+"""Generate ESM3 embeddings in a dedicated EvolutionaryScale ESM environment.
+
+The upstream ``esm`` package currently requires torchtext 0.18 and
+transformers <4.48.2, which conflict with Prot2Mol's patched training stack.
+"""
+
 import attr
 import torch
 import argparse
@@ -116,4 +122,3 @@ if __name__ == "__main__":
     
     prot_path = f"../data/prot_embed/esm3/{dataset_name}/embeddings.npz"
     np.savez(prot_path, Target_CHEMBL_ID=unique_target["Target_CHEMBL_ID"], encoder_hidden_states=token_rep)  # Save the embeddings
-
