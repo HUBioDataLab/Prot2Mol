@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cu129
+
 aiohappyeyeballs==2.5.0
 aiohttp==3.14.1
 aiosignal==1.4.0
@@ -73,8 +75,10 @@ stack-data==0.6.3
 sympy==1.13.3
 threadpoolctl==3.5.0
 tokenizers==0.22.2
-torch==2.13.0
-torchvision==0.28.0
+torch==2.13.0+cu129; sys_platform == "linux"
+torch==2.13.0; sys_platform != "linux"
+torchvision==0.28.0+cu129; sys_platform == "linux"
+torchvision==0.28.0; sys_platform != "linux"
 tqdm==4.66.5
 traitlets==5.14.3
 transformers==5.5.0
