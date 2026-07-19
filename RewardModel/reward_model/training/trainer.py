@@ -422,7 +422,10 @@ class RewardModelTrainer(Trainer):
         logs = dict(logs)
         if "loss" in logs:
             logs.update(self._consume_train_component_logs())
-        return super().log(logs, start_time=start_time)
+        parent_log = super().log
+        if "start_time" in inspect.signature(parent_log).parameters:
+            return parent_log(logs, start_time=start_time)
+        return parent_log(logs)
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
         if not self.args.should_save:
@@ -474,10 +477,10 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         for key, value in args_kwargs.items()
         if key in init_params
     }
-    if "evaluation_strategy" in init_params:
-        args_kwargs["evaluation_strategy"] = schedule_strategy
-    elif "eval_strategy" in init_params:
+    if "eval_strategy" in init_params:
         args_kwargs["eval_strategy"] = schedule_strategy
+    elif "evaluation_strategy" in init_params:
+        args_kwargs["evaluation_strategy"] = schedule_strategy
     try:
         training_args = TrainingArguments(**args_kwargs)
         training_args.reward_length_bucketing = config.length_bucketing

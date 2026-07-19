@@ -4,6 +4,7 @@ import os
 import pytest
 import torch
 from datasets import Dataset
+from transformers import Trainer
 
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, load_reward_model
@@ -372,6 +373,20 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     )
 
     assert "wandb" not in list(args.report_to)
+
+
+def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+
+    assert trainer.log({"eval_loss": 0.25}, start_time=123.0) == "logged"
+    assert captured == {"eval_loss": 0.25}
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
