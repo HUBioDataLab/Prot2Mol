@@ -221,6 +221,22 @@ def test_assay_list_dataset_has_exact_coverage_and_dynamic_nonoverlapping_lists(
     assert replica.epoch_ranking_indices() == dataset.epoch_ranking_indices()
 
 
+def test_assay_metadata_scan_selects_only_the_two_required_columns():
+    examples = _tokenized_rows(group_sizes=(4,))
+    selected_columns = []
+    original_select_columns = examples.select_columns
+
+    def _tracked_select_columns(columns):
+        selected_columns.append(list(columns))
+        return original_select_columns(columns)
+
+    examples.select_columns = _tracked_select_columns
+    dataset = RewardAssayListDataset(examples)
+
+    assert selected_columns == [["group_id", "pchembl_value"]]
+    assert dataset.stats.num_examples == 4
+
+
 def test_assay_list_collator_marks_only_ranked_rows_and_keeps_all_labels():
     dataset = RewardAssayListDataset(
         _tokenized_rows(group_sizes=(20, 1)),

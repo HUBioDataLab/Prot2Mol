@@ -504,10 +504,16 @@ class RewardAssayListDataset(TorchDataset):
     def _build_group_metadata(self) -> tuple[Dict[str, List[int]], array]:
         grouped: Dict[str, List[int]] = defaultdict(list)
         pchembl_values = array("d")
+        metadata_columns = ["group_id", "pchembl_value"]
+        metadata_dataset = (
+            self.example_dataset.select_columns(metadata_columns)
+            if hasattr(self.example_dataset, "select_columns")
+            else self.example_dataset
+        )
         scan_batch_size = 65536
-        for start in range(0, len(self.example_dataset), scan_batch_size):
-            stop = min(start + scan_batch_size, len(self.example_dataset))
-            rows = self.example_dataset[start:stop]
+        for start in range(0, len(metadata_dataset), scan_batch_size):
+            stop = min(start + scan_batch_size, len(metadata_dataset))
+            rows = metadata_dataset[start:stop]
             for offset, (group_id, pchembl_value) in enumerate(
                 zip(rows["group_id"], rows["pchembl_value"])
             ):
