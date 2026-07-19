@@ -337,6 +337,9 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert training_logs
     assert {
         "classification_accuracy",
+        "classification_mcc",
+        "classification_f1",
+        "classification_auroc",
         "ranking_pairwise_accuracy",
         "ranking_loss_per_ranked_example",
     }.issubset(training_logs[-1])
@@ -430,6 +433,9 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     logs = trainer._consume_train_component_logs()
 
     assert logs["classification_accuracy"] == pytest.approx(4.0 / 6.0)
+    assert logs["classification_mcc"] == pytest.approx(1.0 / 3.0)
+    assert logs["classification_f1"] == pytest.approx(2.0 / 3.0)
+    assert logs["classification_auroc"] == pytest.approx(2.0 / 3.0)
     assert logs["ranking_pairwise_accuracy"] == pytest.approx(3.0 / 5.0)
     assert logs["ranking_loss_per_ranked_example"] == pytest.approx(5.0 / 6.0)
     assert logs["ranking_loss"] == pytest.approx(2.5)

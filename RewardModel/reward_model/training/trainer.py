@@ -16,6 +16,7 @@ from .data import RewardAssayListDataset, RewardEvaluationDataset, RewardPairDat
 from .evaluation import (
     _append_assay_spearman_log,
     _with_metric_prefix,
+    compute_classification_metrics,
     compute_joint_evaluation_metrics,
 )
 
@@ -206,6 +207,8 @@ class RewardModelTrainer(Trainer):
             "ranking_pairwise_count": 0.0,
         }
         self._train_component_count = 0
+        self._train_classification_probabilities: list[float] = []
+        self._train_classification_labels: list[float] = []
 
     def _get_train_sampler(self, train_dataset=None):
         active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
@@ -288,6 +291,10 @@ class RewardModelTrainer(Trainer):
             self._train_component_sums["classification_count"] += float(
                 labels.numel()
             )
+            self._train_classification_probabilities.extend(
+                torch.sigmoid(logits.float()).cpu().tolist()
+            )
+            self._train_classification_labels.extend(labels.float().cpu().tolist())
 
             if pchembl_values is not None and ranking_group_ids is not None:
                 scores = ranking_score.detach().reshape(-1)
@@ -339,6 +346,17 @@ class RewardModelTrainer(Trainer):
             logs["classification_accuracy"] = (
                 self._train_component_sums["classification_correct"]
                 / classification_count
+            )
+            classification_metrics = compute_classification_metrics(
+                self._train_classification_probabilities,
+                self._train_classification_labels,
+            )
+            logs.update(
+                {
+                    "classification_mcc": classification_metrics["eval_mcc"],
+                    "classification_f1": classification_metrics["eval_f1"],
+                    "classification_auroc": classification_metrics["eval_roc_auc"],
+                }
             )
         ranking_pairwise_count = self._train_component_sums["ranking_pairwise_count"]
         if ranking_pairwise_count > 0.0:
