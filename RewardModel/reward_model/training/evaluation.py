@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from scipy.stats import spearmanr
 from sklearn.metrics import (
     accuracy_score,
@@ -18,6 +19,7 @@ from sklearn.metrics import (
 )
 
 from .data import RewardPairCollator, RewardPairDataset
+from ..model.losses import ligunity_listwise_loss
 
 ASSAY_SPEARMAN_LOG_FILENAME = "eval_assay_spearman.jsonl"
 
@@ -31,14 +33,92 @@ def compute_classification_metrics(
     probabilities_array = np.asarray(probabilities, dtype=np.float64)
     labels_array = np.asarray(labels, dtype=np.int64)
     predicted_labels = (probabilities_array >= threshold).astype(np.int64)
-    return {
+    metrics = {
         "eval_mcc": float(matthews_corrcoef(labels_array, predicted_labels)),
-        "eval_f1": float(f1_score(labels_array, predicted_labels)),
-        "eval_roc_auc": float(roc_auc_score(labels_array, probabilities_array)),
-        "eval_precision": float(precision_score(labels_array, predicted_labels)),
-        "eval_recall": float(recall_score(labels_array, predicted_labels)),
+        "eval_f1": float(f1_score(labels_array, predicted_labels, zero_division=0)),
+        "eval_precision": float(
+            precision_score(labels_array, predicted_labels, zero_division=0)
+        ),
+        "eval_recall": float(recall_score(labels_array, predicted_labels, zero_division=0)),
         "eval_accuracy": float(accuracy_score(labels_array, predicted_labels)),
     }
+    metrics["eval_roc_auc"] = (
+        float(roc_auc_score(labels_array, probabilities_array))
+        if len(np.unique(labels_array)) >= 2
+        else float("nan")
+    )
+    return metrics
+
+
+def compute_joint_evaluation_metrics(
+    *,
+    activity_logits: torch.Tensor,
+    ranking_scores: torch.Tensor,
+    activity_labels: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ranking_group_ids: torch.Tensor,
+    group_id_names: Sequence[str],
+    classification_loss_weight: float,
+    ranking_loss_weight: float,
+    bce_pos_weight: float,
+    ranking_temperature: float,
+    ranking_min_pchembl_span: float,
+) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
+    """Compute deterministic full-dataset losses and metrics from one scoring pass."""
+    logits = activity_logits.reshape(-1).detach().cpu().float()
+    scores = ranking_scores.reshape(-1).detach().cpu().float()
+    labels = activity_labels.reshape(-1).detach().cpu().float()
+    pchembl = pchembl_values.reshape(-1).detach().cpu().float()
+    group_indices = ranking_group_ids.reshape(-1).detach().cpu().long()
+    if not (
+        logits.numel()
+        == scores.numel()
+        == labels.numel()
+        == pchembl.numel()
+        == group_indices.numel()
+    ):
+        raise ValueError("evaluation tensors must contain the same number of observations")
+
+    pos_weight = torch.tensor(float(bce_pos_weight), dtype=logits.dtype)
+    classification_loss = F.binary_cross_entropy_with_logits(
+        logits,
+        labels,
+        pos_weight=pos_weight,
+    )
+    ranking_loss = ligunity_listwise_loss(
+        scores,
+        pchembl,
+        group_indices,
+        temperature=ranking_temperature,
+        min_pchembl_span=ranking_min_pchembl_span,
+    )
+    total_loss = (
+        float(classification_loss_weight) * classification_loss
+        + float(ranking_loss_weight) * ranking_loss
+    )
+
+    probabilities = torch.sigmoid(logits).numpy()
+    metrics = compute_classification_metrics(probabilities, labels.numpy())
+    string_group_ids = [group_id_names[int(index)] for index in group_indices.tolist()]
+    spearman_metrics, assay_records = _compute_groupwise_spearman_with_records(
+        group_ids=string_group_ids,
+        ranking_scores=scores.tolist(),
+        pchembl_values=pchembl.tolist(),
+        min_group_size=2,
+        min_pchembl_span=ranking_min_pchembl_span,
+    )
+    metrics.update(spearman_metrics)
+    metrics.update(
+        {
+            "eval_loss": float(total_loss.item()),
+            "eval_total_loss": float(total_loss.item()),
+            "eval_classification_loss": float(classification_loss.item()),
+            "eval_ranking_loss": float(ranking_loss.item()),
+            "eval_num_examples": float(logits.numel()),
+            "eval_num_ranking_groups": float(len(assay_records)),
+        }
+    )
+    return metrics, assay_records
 
 
 def compute_pairwise_accuracy(
@@ -77,6 +157,7 @@ def _compute_groupwise_spearman_with_records(
     ranking_scores: Sequence[float],
     pchembl_values: Sequence[float],
     min_group_size: int = 3,
+    min_pchembl_span: float = 0.0,
 ) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     grouped_scores: Dict[str, list[float]] = defaultdict(list)
     grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
@@ -91,6 +172,8 @@ def _compute_groupwise_spearman_with_records(
         if len(scores) < min_group_size:
             continue
         if len(set(pchembls)) == 1:
+            continue
+        if max(pchembls) - min(pchembls) < min_pchembl_span:
             continue
         result = spearmanr(scores, pchembls)
         target_chembl_id, assay_id = _split_group_id(group_id)

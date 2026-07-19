@@ -1,3 +1,5 @@
+import pytest
+
 from reward_model.model import RewardModelConfig
 
 
@@ -37,6 +39,19 @@ def test_reward_model_config_loads_legacy_payload_with_deduplication_defaults():
     assert config.deduplicate_protein_inputs is True
     assert config.deduplicate_molecule_inputs is True
     assert config.fusion_attention_backend == "manual"
+
+
+def test_reward_model_config_maps_legacy_pair_weight_to_listwise_ranking():
+    config = RewardModelConfig.from_dict(
+        {
+            "protein_model_name_or_path": "protein/legacy",
+            "molecule_model_name_or_path": "molecule/legacy",
+            "pair_loss_weight": 0.25,
+        }
+    )
+
+    assert config.ranking_loss_weight == pytest.approx(0.25)
+    assert "pair_loss_weight" not in config.to_dict()
 
 
 def test_reward_model_config_rejects_unknown_fusion_attention_backend():

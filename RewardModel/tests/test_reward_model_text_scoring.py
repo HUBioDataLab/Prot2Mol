@@ -35,19 +35,26 @@ def test_score_pairs_tokenizes_raw_inputs_and_returns_structured_output():
     model = _build_model()
 
     outputs = model.score_pairs(
-        protein_sequences=["MKT", "GGAA"],
+        protein_sequences=["MKT", "MKT"],
         molecule_sequences=["[C][O]", "[N]"],
         activity_labels=torch.tensor([1.0, 0.0]),
+        pchembl_values=torch.tensor([7.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0]),
         return_token_embeddings=True,
     )
 
     assert isinstance(outputs, RewardModelOutput)
     assert outputs.ranking_score.shape == (2,)
     assert outputs.activity_logits.shape == (2,)
+    assert outputs.ranking_loss is not None and torch.isfinite(outputs.ranking_loss)
+    assert outputs.classification_loss is not None and torch.isfinite(
+        outputs.classification_loss
+    )
+    assert outputs.loss is not None and torch.isfinite(outputs.loss)
     assert outputs.fused_protein_tokens is not None
     assert outputs.fused_molecule_tokens is not None
 
-    assert model.protein_tokenizer.calls[0]["texts"] == ["MKT", "GGAA"]
+    assert model.protein_tokenizer.calls[0]["texts"] == ["MKT", "MKT"]
     assert model.protein_tokenizer.calls[0]["max_length"] == 5
     assert model.molecule_tokenizer.calls[0]["texts"] == ["[C][O]", "[N]"]
     assert model.molecule_tokenizer.calls[0]["max_length"] == 7

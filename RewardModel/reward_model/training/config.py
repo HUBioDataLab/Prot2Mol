@@ -25,6 +25,10 @@ class RewardTrainingDataConfig:
     tokenized_dataset_dir: str
     val2_tokenized_dataset_dir: Optional[str] = None
     tokenization_batch_size: int = 64
+    ranking_max_ligands: int = 16
+    ranking_opportunity_divisor: int = 32
+    ranking_min_pchembl_span: float = 0.5
+    max_classification_only_per_item: int = 16
 
     def __post_init__(self) -> None:
         self.validate()
@@ -40,6 +44,16 @@ class RewardTrainingDataConfig:
             raise ValueError("tokenized_dataset_dir must be provided")
         if self.tokenization_batch_size <= 0:
             raise ValueError("tokenization_batch_size must be > 0")
+        if self.ranking_max_ligands <= 1:
+            raise ValueError("ranking_max_ligands must be > 1")
+        if self.ranking_opportunity_divisor < self.ranking_max_ligands:
+            raise ValueError(
+                "ranking_opportunity_divisor must be >= ranking_max_ligands"
+            )
+        if self.ranking_min_pchembl_span < 0.0:
+            raise ValueError("ranking_min_pchembl_span must be >= 0")
+        if self.max_classification_only_per_item <= 0:
+            raise ValueError("max_classification_only_per_item must be > 0")
 
 
 @dataclass(eq=True)
@@ -96,8 +110,8 @@ class RewardTrainerConfig:
             raise ValueError("max_grad_norm must be >= 0")
         if self.logging_steps <= 0:
             raise ValueError("logging_steps must be > 0")
-        if self.dataloader_num_workers < 0:
-            raise ValueError("dataloader_num_workers must be >= 0")
+        if self.dataloader_num_workers < 0 or self.dataloader_num_workers > 10:
+            raise ValueError("dataloader_num_workers must be in [0, 10]")
         if not isinstance(self.optim, str) or not self.optim:
             raise ValueError("optim must be a non-empty string")
         if not isinstance(self.dynamic_padding, bool):

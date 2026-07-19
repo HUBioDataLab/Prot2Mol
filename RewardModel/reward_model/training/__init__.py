@@ -5,11 +5,15 @@ from .config import (
     load_reward_training_config,
 )
 from .data import (
+    AssayListSamplingStats,
     PairBuildStats,
     PAIR_DATASET_COLUMNS,
     PAIR_DATASET_FEATURES,
     RewardPairCollator,
     RewardPairDataset,
+    RewardAssayListCollator,
+    RewardAssayListDataset,
+    RewardEvaluationDataset,
     SavedPairDatasetArtifacts,
     TokenizedSplitArtifacts,
     build_group_id,
@@ -24,6 +28,7 @@ from .data import (
 from .evaluation import (
     compute_classification_metrics,
     compute_groupwise_spearman,
+    compute_joint_evaluation_metrics,
     compute_pairwise_accuracy,
     compute_reward_model_eval_metrics,
 )
@@ -32,15 +37,25 @@ from .entry import (
     prepare_training_examples_from_config,
     train_reward_model_from_config,
 )
-from .trainer import LengthBucketSampler, RewardModelTrainer, create_training_arguments
+from .trainer import (
+    AssayListEpochSampler,
+    LengthBucketSampler,
+    RewardModelTrainer,
+    create_training_arguments,
+)
 
 __all__ = [
+    "AssayListSamplingStats",
     "PairBuildStats",
     "PAIR_DATASET_COLUMNS",
     "PAIR_DATASET_FEATURES",
     "RewardPairCollator",
     "RewardPairDataset",
+    "RewardAssayListCollator",
+    "RewardAssayListDataset",
+    "RewardEvaluationDataset",
     "LengthBucketSampler",
+    "AssayListEpochSampler",
     "RewardModelTrainer",
     "RewardTrainerConfig",
     "RewardTrainingConfigBundle",
@@ -51,6 +66,7 @@ __all__ = [
     "build_pair_records",
     "compute_classification_metrics",
     "compute_groupwise_spearman",
+    "compute_joint_evaluation_metrics",
     "compute_pairwise_accuracy",
     "compute_reward_model_eval_metrics",
     "create_training_arguments",

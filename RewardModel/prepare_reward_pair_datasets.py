@@ -15,7 +15,10 @@ def parse_args() -> argparse.Namespace:
         "reward_train.yaml",
     )
     parser = argparse.ArgumentParser(
-        description="Prepare saved RewardModel train/val/test pair datasets from tokenized split examples.",
+        description=(
+            "Validate and summarize dynamic RewardModel assay-list datasets. "
+            "No pair table is materialized."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

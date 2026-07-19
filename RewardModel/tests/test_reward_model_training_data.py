@@ -333,6 +333,35 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     assert "split" not in train_dataset.column_names
 
 
+def test_prepare_tokenized_split_datasets_rejects_labels_inconsistent_with_threshold(
+    tmp_path,
+    monkeypatch,
+):
+    split_rows = _split_parquet_rows()
+    split_rows["train"][0]["binary_label"] = 1
+    for split_name, rows in split_rows.items():
+        _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
+    monkeypatch.setattr(
+        "reward_model.training.data.load_tokenizer",
+        lambda *_args, **_kwargs: DummyTokenizer(),
+    )
+
+    with pytest.raises(ValueError, match="binary_label does not match"):
+        prepare_tokenized_split_datasets(
+            RewardTrainingDataConfig(
+                train_parquet_path=str(tmp_path / "train.parquet"),
+                val_parquet_path=str(tmp_path / "val.parquet"),
+                test_parquet_path=str(tmp_path / "test.parquet"),
+                tokenized_dataset_dir=str(tmp_path / "tokenized_examples"),
+            ),
+            RewardModelConfig(
+                protein_model_name_or_path="dummy/protein",
+                molecule_model_name_or_path="dummy/molecule",
+                activity_threshold=6.0,
+            ),
+        )
+
+
 def test_prepare_tokenized_split_datasets_drops_rows_exceeding_token_limits(tmp_path, monkeypatch):
     split_rows = {
         "train": [

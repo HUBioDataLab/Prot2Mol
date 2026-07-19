@@ -25,8 +25,10 @@ class RewardModelConfig:
     dropout: float = 0.1
     pooling_type: str = "mean"
     activity_threshold: float = 6.0
-    pair_loss_weight: float = 1.0
-    classification_loss_weight: float = 0.5
+    ranking_loss_weight: float = 1.0
+    classification_loss_weight: float = 1.0
+    ranking_temperature: float = 1.0
+    ranking_min_pchembl_span: float = 0.5
     bce_pos_weight: float = 1.0
     deduplicate_protein_inputs: bool = True
     deduplicate_molecule_inputs: bool = True
@@ -66,6 +68,14 @@ class RewardModelConfig:
             raise ValueError("dropout must be in [0.0, 1.0)")
         if self.bce_pos_weight <= 0.0:
             raise ValueError("bce_pos_weight must be > 0")
+        if self.ranking_loss_weight < 0.0:
+            raise ValueError("ranking_loss_weight must be >= 0")
+        if self.classification_loss_weight < 0.0:
+            raise ValueError("classification_loss_weight must be >= 0")
+        if self.ranking_temperature <= 0.0:
+            raise ValueError("ranking_temperature must be > 0")
+        if self.ranking_min_pchembl_span < 0.0:
+            raise ValueError("ranking_min_pchembl_span must be >= 0")
         if not isinstance(self.deduplicate_protein_inputs, bool):
             raise ValueError("deduplicate_protein_inputs must be a boolean")
         if not isinstance(self.deduplicate_molecule_inputs, bool):
@@ -76,7 +86,11 @@ class RewardModelConfig:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "RewardModelConfig":
-        return cls(**dict(payload))
+        normalized = dict(payload)
+        legacy_pair_weight = normalized.pop("pair_loss_weight", None)
+        if legacy_pair_weight is not None and "ranking_loss_weight" not in normalized:
+            normalized["ranking_loss_weight"] = legacy_pair_weight
+        return cls(**normalized)
 
     def save_json(self, path: str) -> str:
         with open(path, "w", encoding="utf-8") as handle:
