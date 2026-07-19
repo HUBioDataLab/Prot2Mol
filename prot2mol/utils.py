@@ -179,8 +179,16 @@ def to_mol(smiles_list):
     return [Chem.MolFromSmiles(smiles) for smiles in smiles_list]
 
 def sascorer_calculation(mols):
-    return [sascorer.calculateScore(mol) if mol is not None else None for mol in mols]
-
+    scores = []
+    for mol in mols:
+        if mol is None:
+            scores.append(None)
+        else:
+            try:
+                scores.append(sascorer.calculateScore(mol))
+            except ZeroDivisionError:
+                scores.append(None)
+    return scores
 def qed_calculation(mols):
     return [QED.qed(mol) if mol is not None else None for mol in mols]
 
