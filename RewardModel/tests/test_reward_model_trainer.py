@@ -2,11 +2,16 @@ import json
 import os
 
 import pytest
+import torch
 from datasets import Dataset
+from transformers import Trainer
 
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, load_reward_model
 from reward_model.training import (
+    RewardAssayListCollator,
+    RewardAssayListDataset,
+    RewardEvaluationDataset,
     RewardPairCollator,
     RewardPairDataset,
     RewardModelTrainer,
@@ -23,6 +28,7 @@ from reward_model.training import (
     save_pair_dataset_from_example_dataset,
 )
 from reward_model.training.entry import train_reward_model_from_config
+from reward_model.training.trainer import LengthBucketSampler
 
 
 def _dummy_bundles():
@@ -231,10 +237,13 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
 
     protein_bundle, molecule_bundle = _dummy_bundles()
     examples = _metric_ready_examples()
-    pair_records, _ = build_pair_records(examples)
-    pair_dataset = Dataset.from_list(pair_records)
-    train_dataset = RewardPairDataset(examples, pair_dataset)
-    eval_dataset = RewardPairDataset(examples, pair_dataset)
+    train_dataset = RewardAssayListDataset(
+        examples,
+        seed=42,
+        max_classification_only_per_item=4,
+        item_count_multiple=2,
+    )
+    eval_dataset = RewardEvaluationDataset(examples)
 
     model = RewardModel(
         config=RewardModelConfig(
@@ -262,31 +271,30 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         val2_eval_dataset=eval_dataset,
-        data_collator=RewardPairCollator(),
+        data_collator=RewardAssayListCollator(),
     )
 
     train_result = trainer.train()
+
     eval_metrics = trainer.evaluate()
     save_dir = tmp_path / "saved_model"
     trainer.save_model(str(save_dir))
 
     assert train_result.training_loss >= 0.0
-    assert "eval_pair_loss" in eval_metrics
+    assert "eval_ranking_loss" in eval_metrics
     assert "eval_classification_loss" in eval_metrics
-    assert "eval_num_pairs" in eval_metrics
+    assert eval_metrics["eval_num_examples"] == len(examples)
     assert "eval_mcc" in eval_metrics
     assert "eval_f1" in eval_metrics
     assert "eval_roc_auc" in eval_metrics
     assert "eval_precision" in eval_metrics
     assert "eval_recall" in eval_metrics
     assert "eval_accuracy" in eval_metrics
-    assert "eval_pairwise_accuracy" in eval_metrics
     assert "eval_spearman" in eval_metrics
     assert "eval_spearman_num_groups" in eval_metrics
     assert "eval_val2_loss" in eval_metrics
-    assert "eval_val2_pair_loss" in eval_metrics
+    assert "eval_val2_ranking_loss" in eval_metrics
     assert "eval_val2_classification_loss" in eval_metrics
-    assert "eval_val2_pairwise_accuracy" in eval_metrics
     assert "eval_val2_mcc" in eval_metrics
     assert "eval_val2_f1" in eval_metrics
     assert "eval_val2_roc_auc" in eval_metrics
@@ -323,7 +331,18 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
         eval_metrics["eval_val2_spearman"]
     )
-    assert any("pair_loss" in entry for entry in trainer.state.log_history)
+    training_logs = [
+        entry for entry in trainer.state.log_history if "ranking_loss" in entry
+    ]
+    assert training_logs
+    assert {
+        "classification_accuracy",
+        "classification_mcc",
+        "classification_f1",
+        "classification_auroc",
+        "ranking_pairwise_accuracy",
+        "ranking_loss_per_ranked_example",
+    }.issubset(training_logs[-1])
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
 
@@ -365,6 +384,123 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     )
 
     assert "wandb" not in list(args.report_to)
+
+
+def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+
+    assert trainer.log({"eval_loss": 0.25}, start_time=123.0) == "logged"
+    assert captured == {"eval_loss": 0.25}
+
+
+def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer._reset_train_component_accumulator()
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(3.0),
+        classification_loss=torch.tensor(0.6),
+        total_loss=torch.tensor(3.6),
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([1.0, -1.0, 1.0]),
+        activity_labels=torch.tensor([1.0, 0.0, 0.0]),
+        ranking_score=torch.tensor([3.0, 2.0, 1.0]),
+        pchembl_values=torch.tensor([8.0, 7.0, 6.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(2.0),
+        classification_loss=torch.tensor(0.4),
+        total_loss=torch.tensor(2.4),
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([-1.0, 1.0, -1.0]),
+        activity_labels=torch.tensor([1.0, 1.0, 0.0]),
+        ranking_score=torch.tensor([0.0, 1.0, 2.0]),
+        pchembl_values=torch.tensor([8.0, 7.0, 7.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+
+    logs = trainer._consume_train_component_logs()
+
+    assert logs["classification_accuracy"] == pytest.approx(4.0 / 6.0)
+    assert logs["classification_mcc"] == pytest.approx(1.0 / 3.0)
+    assert logs["classification_f1"] == pytest.approx(2.0 / 3.0)
+    assert logs["classification_auroc"] == pytest.approx(2.0 / 3.0)
+    assert logs["ranking_pairwise_accuracy"] == pytest.approx(3.0 / 5.0)
+    assert logs["ranking_loss_per_ranked_example"] == pytest.approx(5.0 / 6.0)
+    assert logs["ranking_loss"] == pytest.approx(2.5)
+
+
+def test_create_training_arguments_supports_fused_adamw(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            optim="adamw_torch_fused",
+            fp16=False,
+        )
+    )
+
+    optim_value = args.optim.value if hasattr(args.optim, "value") else str(args.optim)
+    assert optim_value == "adamw_torch_fused"
+
+
+def test_trainer_config_enforces_shared_server_worker_limit(tmp_path):
+    with pytest.raises(ValueError, match=r"\[0, 10\]"):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            dataloader_num_workers=11,
+        )
+
+
+def test_create_training_arguments_enables_length_bucketing_by_default(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            length_bucket_size_multiplier=7,
+            fp16=False,
+        )
+    )
+
+    assert args.reward_length_bucketing is True
+    assert args.length_bucket_size_multiplier == 7
+
+
+def test_length_bucket_sampler_groups_similar_lengths_and_changes_by_epoch():
+    lengths = [1, 2, 3, 4, 100, 101, 102, 103]
+    fully_grouped_sampler = LengthBucketSampler(
+        lengths,
+        batch_size=2,
+        bucket_size_multiplier=4,
+        seed=11,
+    )
+
+    first_epoch = list(fully_grouped_sampler)
+    batches = [first_epoch[start : start + 2] for start in range(0, len(first_epoch), 2)]
+    assert sorted(first_epoch) == list(range(len(lengths)))
+    assert all(
+        max(lengths[index] for index in batch) - min(lengths[index] for index in batch) <= 1
+        for batch in batches
+    )
+
+    epoch_sampler = LengthBucketSampler(
+        lengths,
+        batch_size=2,
+        bucket_size_multiplier=2,
+        seed=11,
+    )
+    epoch_zero = list(epoch_sampler)
+    epoch_sampler.set_epoch(1)
+    assert list(epoch_sampler) != epoch_zero
 
 
 def test_create_training_arguments_rejects_distributed_env_by_default(tmp_path, monkeypatch):
@@ -425,7 +561,7 @@ def test_reward_trainer_config_normalizes_report_to_string(tmp_path):
     assert config.report_to == ["wandb"]
 
 
-def test_prepare_pair_datasets_from_config_saves_train_val_and_test_pair_datasets(tmp_path):
+def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
 
@@ -476,24 +612,17 @@ def test_prepare_pair_datasets_from_config_saves_train_val_and_test_pair_dataset
 
     summary = prepare_pair_datasets_from_config(str(config_path))
 
-    assert os.path.exists(pair_paths["train"])
-    assert os.path.exists(pair_paths["val"])
-    assert os.path.exists(pair_paths["test"])
-    assert summary["train_pairs"] == 1
-    assert summary["val_pairs"] == 1
-    assert summary["test_pairs"] == 0
-
-    train_pairs = load_saved_pair_dataset(pair_paths["train"])
-    val_pairs = load_saved_pair_dataset(pair_paths["val"])
-    test_pairs = load_saved_pair_dataset(pair_paths["test"])
-    assert len(train_pairs) == 1
-    assert len(val_pairs) == 1
-    assert len(test_pairs) == 0
+    assert not os.path.exists(pair_paths["train"])
+    assert not os.path.exists(pair_paths["val"])
+    assert not os.path.exists(pair_paths["test"])
+    assert summary["materialized_pair_tables"] is False
+    assert summary["train_ranking_lists"] == 1
+    assert summary["val_ranking_lists"] == 1
+    assert summary["test_ranking_lists"] == 0
 
 
 def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path, monkeypatch):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
-    pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
 
     train_examples = Dataset.from_list(
         [
@@ -576,8 +705,6 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     train_examples.save_to_disk(split_paths["train"])
     val_examples.save_to_disk(split_paths["val"])
     test_examples.save_to_disk(split_paths["test"])
-    save_pair_dataset_from_example_dataset(train_examples, pair_paths["train"], split_name="train")
-    save_pair_dataset_from_example_dataset(val_examples, pair_paths["val"], split_name="val")
 
     config_path = tmp_path / "reward_train.yaml"
     config_path.write_text(
@@ -646,19 +773,19 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert captured["train_called"] is True
     assert captured["evaluate_called"] is True
     assert captured["train_dataset_len"] == 1
-    assert captured["eval_dataset_len"] == 1
+    assert captured["eval_dataset_len"] == 2
     assert captured["val2_eval_dataset"] is None
-    assert isinstance(captured["data_collator"], RewardPairCollator)
+    assert isinstance(captured["data_collator"], RewardAssayListCollator)
     assert summary["train_examples"] == 2
     assert summary["val_examples"] == 2
     assert summary["test_examples"] == 1
-    assert summary["train_pairs"] == 1
-    assert summary["val_pairs"] == 1
+    assert summary["train_ranking_lists"] == 1
+    assert summary["train_ranked_examples"] == 2
+    assert summary["train_classification_examples"] == 2
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
-    pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
 
     train_examples = _pair_ready_examples().select([0, 1])
     val_examples = _pair_ready_examples().select([2, 3])
@@ -698,13 +825,6 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
     val_examples.save_to_disk(split_paths["val"])
     test_examples.save_to_disk(split_paths["test"])
     val2_examples.save_to_disk(tmp_path / "tokenized" / "val2_examples")
-    save_pair_dataset_from_example_dataset(train_examples, pair_paths["train"], split_name="train")
-    save_pair_dataset_from_example_dataset(val_examples, pair_paths["val"], split_name="val")
-    save_pair_dataset_from_example_dataset(
-        val2_examples,
-        str(tmp_path / "tokenized" / "val2_pairs"),
-        split_name="val2",
-    )
 
     config_path = tmp_path / "reward_train.yaml"
     config_path.write_text(
@@ -764,42 +884,6 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
 
     summary = train_reward_model_from_config(str(config_path))
 
-    assert captured["val2_eval_dataset_len"] == 1
+    assert captured["val2_eval_dataset_len"] == 2
     assert summary["val2_examples"] == 2
-    assert summary["val2_pairs"] == 1
     assert summary["eval_metrics"]["eval_val2_loss"] == pytest.approx(0.4)
-
-
-def test_train_reward_model_from_config_requires_saved_pair_datasets(tmp_path):
-    split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
-
-    pair_ready_examples = _pair_ready_examples()
-    train_examples = pair_ready_examples.select([0, 1])
-    val_examples = pair_ready_examples.select([2, 3])
-    test_examples = pair_ready_examples.select([0])
-    train_examples.save_to_disk(split_paths["train"])
-    val_examples.save_to_disk(split_paths["val"])
-    test_examples.save_to_disk(split_paths["test"])
-
-    config_path = tmp_path / "reward_train.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "model:",
-                "  protein_model_name_or_path: protein/dummy",
-                "  molecule_model_name_or_path: molecule/dummy",
-                "data:",
-                f"  train_parquet_path: {tmp_path / 'unused_train.parquet'}",
-                f"  val_parquet_path: {tmp_path / 'unused_val.parquet'}",
-                f"  test_parquet_path: {tmp_path / 'unused_test.parquet'}",
-                f"  tokenized_dataset_dir: {tmp_path / 'tokenized'}",
-                "  tokenization_batch_size: 2",
-                "training:",
-                f"  output_dir: {tmp_path / 'trainer_output'}",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(FileNotFoundError, match="prepare_reward_pair_datasets.py"):
-        train_reward_model_from_config(str(config_path))

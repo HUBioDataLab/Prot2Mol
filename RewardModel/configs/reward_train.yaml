@@ -5,34 +5,47 @@ model:
   molecule_max_length: 256
   fusion_hidden_dim: 512
   fusion_num_heads: 8
+  fusion_attention_backend: sdpa
   dropout: 0.1
   pooling_type: mean
   activity_threshold: 6.0
-  pair_loss_weight: 1.0
-  classification_loss_weight: 0.5
+  ranking_loss_weight: 1.0
+  classification_loss_weight: 1.0
+  ranking_temperature: 1.0
+  ranking_min_pchembl_span: 0.5
   bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
 
 data:
-  train_parquet_path: ../../../dummy/train.parquet
-  val_parquet_path: ../../../dummy/val.parquet
-  test_parquet_path: ../../../dummy/test.parquet
-  tokenized_dataset_dir: ../reward_model/data/tokenized/reward_train_examples
+  train_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl37_mmseqs50
   tokenization_batch_size: 64
+  ranking_max_ligands: 16
+  ranking_opportunity_divisor: 32
+  ranking_min_pchembl_span: 0.5
+  max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/reward_train
+  output_dir: ../outputs/chembl37_mmseqs50
   num_train_epochs: 3
-  per_device_train_batch_size: 8
-  per_device_eval_batch_size: 8
-  gradient_accumulation_steps: 10
-  eval_steps: 879326
-  learning_rate: 1.0e-5
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8
+  eval_steps: 1000
+  learning_rate: 1e-4
   weight_decay: 0.01
   max_grad_norm: 1.0
   logging_steps: 10
   dataloader_num_workers: 0
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
   seed: 42
   fp16: true
+  optim: adamw_torch_fused
   save_safetensors: false
   save_total_limit: 2
   training_mode: single_gpu

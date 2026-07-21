@@ -79,7 +79,11 @@ def load_tokenizer(
     name_or_path: str,
     tokenizer_kwargs: Optional[Dict[str, Any]] = None,
 ):
-    return AutoTokenizer.from_pretrained(name_or_path, **(tokenizer_kwargs or {}))
+    resolved_kwargs = {
+        "clean_up_tokenization_spaces": False,
+        **(tokenizer_kwargs or {}),
+    }
+    return AutoTokenizer.from_pretrained(name_or_path, **resolved_kwargs)
 
 
 def load_encoder_bundle(
@@ -89,7 +93,11 @@ def load_encoder_bundle(
     model_kwargs: Optional[Dict[str, Any]] = None,
 ) -> LoadedEncoder:
     tokenizer = load_tokenizer(tokenizer_name_or_path or name_or_path, tokenizer_kwargs=tokenizer_kwargs)
-    model = AutoModel.from_pretrained(name_or_path, **(model_kwargs or {}))
+    resolved_model_kwargs = {
+        "add_pooling_layer": False,
+        **(model_kwargs or {}),
+    }
+    model = AutoModel.from_pretrained(name_or_path, **resolved_model_kwargs)
     hidden_size = infer_hidden_size(model)
     return LoadedEncoder(
         name_or_path=name_or_path,

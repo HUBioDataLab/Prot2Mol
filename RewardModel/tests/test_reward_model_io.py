@@ -54,8 +54,14 @@ def test_load_encoder_bundle_uses_full_name_and_infers_hidden_size(monkeypatch):
     )
 
     assert bundle.hidden_size == 12
-    assert captured["tokenizer"] == ("/abs/path/to/protein-tokenizer", {"use_fast": False})
-    assert captured["model"] == ("/abs/path/to/protein-model", {"trust_remote_code": False})
+    assert captured["tokenizer"] == (
+        "/abs/path/to/protein-tokenizer",
+        {"clean_up_tokenization_spaces": False, "use_fast": False},
+    )
+    assert captured["model"] == (
+        "/abs/path/to/protein-model",
+        {"add_pooling_layer": False, "trust_remote_code": False},
+    )
 
 
 def test_reward_model_save_and_load_round_trip(tmp_path):

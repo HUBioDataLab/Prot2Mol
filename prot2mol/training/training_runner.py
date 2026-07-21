@@ -164,6 +164,11 @@ class TrainingRunner:
             args_kwargs["ddp_backend"] = "nccl"
             args_kwargs["ddp_find_unused_parameters"] = True
         init_params = inspect.signature(TrainingArguments.__init__).parameters
+        args_kwargs = {
+            key: value
+            for key, value in args_kwargs.items()
+            if key in init_params
+        }
         if "evaluation_strategy" in init_params:
             args_kwargs["evaluation_strategy"] = "epoch"
         else:

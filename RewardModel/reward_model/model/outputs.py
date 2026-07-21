@@ -12,7 +12,7 @@ class RewardModelOutput:
     activity_logits: torch.Tensor
     activity_probability: torch.Tensor
     joint_embedding: torch.Tensor
-    pair_loss: Optional[torch.Tensor] = None
+    ranking_loss: Optional[torch.Tensor] = None
     classification_loss: Optional[torch.Tensor] = None
     loss: Optional[torch.Tensor] = None
     protein_token_embeddings: Optional[torch.Tensor] = None
@@ -21,6 +21,11 @@ class RewardModelOutput:
     fused_molecule_tokens: Optional[torch.Tensor] = None
     protein_attention_mask: Optional[torch.Tensor] = None
     molecule_attention_mask: Optional[torch.Tensor] = None
+
+    @property
+    def pair_loss(self) -> Optional[torch.Tensor]:
+        """Backward-compatible alias for checkpoints and callers predating listwise ranking."""
+        return self.ranking_loss
 
     def __getitem__(self, key: str):
         return getattr(self, key)

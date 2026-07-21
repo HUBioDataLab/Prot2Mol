@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import shutil
+from array import array
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Mapping, Sequence, Tuple
@@ -40,8 +41,10 @@ TOKENIZED_DATASET_COLUMNS = (
     "binary_label",
     "protein_input_ids",
     "protein_attention_mask",
+    "protein_length",
     "molecule_input_ids",
     "molecule_attention_mask",
+    "molecule_length",
 )
 
 PAIR_DATASET_COLUMNS = (
@@ -90,6 +93,17 @@ class SavedPairDatasetArtifacts:
     num_groups: int
     num_groups_with_pairs: int
     num_pairs: int
+
+
+@dataclass(frozen=True)
+class AssayListSamplingStats:
+    num_examples: int
+    num_assays: int
+    num_eligible_assays: int
+    num_ranking_lists: int
+    num_ranked_examples: int
+    num_classification_only_examples: int
+    num_dataset_items: int
 
 
 def build_group_id(target_chembl_id: str, assay_id: str) -> str:
@@ -161,11 +175,24 @@ def _load_split_parquet_rows(path: str) -> List[Dict[str, Any]]:
     return minimal_frame.to_dict(orient="records")
 
 
-def _prepare_split_rows(split_rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+def _prepare_split_rows(
+    split_rows: Sequence[Mapping[str, Any]],
+    *,
+    activity_threshold: float = 6.0,
+) -> List[Dict[str, Any]]:
     prepared_rows: List[Dict[str, Any]] = []
     for index, row in enumerate(split_rows):
         target_chembl_id = str(row["target_chembl_id"])
         assay_id = str(row["assay_id"])
+        pchembl_value = float(row["pchembl_value"])
+        binary_label = int(row["binary_label"])
+        expected_label = int(pchembl_value >= activity_threshold)
+        if binary_label != expected_label:
+            raise ValueError(
+                "binary_label does not match the configured pChEMBL activity threshold: "
+                f"row={index}, pchembl_value={pchembl_value}, "
+                f"binary_label={binary_label}, expected={expected_label}"
+            )
         prepared_rows.append(
             {
                 "example_id": int(index),
@@ -175,8 +202,8 @@ def _prepare_split_rows(split_rows: Sequence[Mapping[str, Any]]) -> List[Dict[st
                 "assay_id": assay_id,
                 "compound_id": str(row["compound_id"]),
                 "compound_selfies": str(row["compound_selfies"]),
-                "pchembl_value": float(row["pchembl_value"]),
-                "binary_label": int(row["binary_label"]),
+                "pchembl_value": pchembl_value,
+                "binary_label": binary_label,
             }
         )
     return prepared_rows
@@ -264,7 +291,7 @@ def _tokenize_example_rows(
         molecule_tokenizer=molecule_tokenizer,
     )
 
-    def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[List[int]]]:
+    def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[Any]]:
         protein_batch = batch_encode_texts(
             tokenizer=protein_tokenizer,
             texts=batch["protein_sequence"],
@@ -278,8 +305,10 @@ def _tokenize_example_rows(
         return {
             "protein_input_ids": protein_batch["input_ids"].tolist(),
             "protein_attention_mask": protein_batch["attention_mask"].tolist(),
+            "protein_length": protein_batch["attention_mask"].sum(dim=1).tolist(),
             "molecule_input_ids": molecule_batch["input_ids"].tolist(),
             "molecule_attention_mask": molecule_batch["attention_mask"].tolist(),
+            "molecule_length": molecule_batch["attention_mask"].sum(dim=1).tolist(),
         }
 
     tokenized = dataset.map(
@@ -315,7 +344,10 @@ def prepare_tokenized_split_datasets(
         "test": data_config.test_parquet_path,
     }
     for split_name, parquet_path in source_paths.items():
-        prepared_rows = _prepare_split_rows(_load_split_parquet_rows(parquet_path))
+        prepared_rows = _prepare_split_rows(
+            _load_split_parquet_rows(parquet_path),
+            activity_threshold=model_config.activity_threshold,
+        )
         tokenized = _tokenize_example_rows(
             prepared_rows,
             split_name=split_name,
@@ -343,6 +375,356 @@ def prepare_tokenized_split_datasets(
 
 def load_tokenized_example_dataset(dataset_path: str) -> Dataset:
     return load_from_disk(os.path.abspath(dataset_path))
+
+
+class RewardAssayListDataset(TorchDataset):
+    """Epoch-aware joint classification and assay-list ranking dataset.
+
+    Every source observation appears exactly once as a classification example
+    per epoch. Eligible assays contribute ``ceil(n / opportunity_divisor)``
+    non-overlapping lists of at most ``ranking_max_ligands`` observations. The
+    selected ranking observations change deterministically with ``seed + epoch``.
+    """
+
+    def __init__(
+        self,
+        example_dataset: Dataset,
+        *,
+        seed: int = 42,
+        ranking_max_ligands: int = 16,
+        ranking_opportunity_divisor: int = 32,
+        ranking_min_pchembl_span: float = 0.5,
+        max_classification_only_per_item: int = 16,
+        item_count_multiple: int = 1,
+    ):
+        if ranking_max_ligands <= 1:
+            raise ValueError("ranking_max_ligands must be > 1")
+        if ranking_opportunity_divisor < ranking_max_ligands:
+            raise ValueError(
+                "ranking_opportunity_divisor must be >= ranking_max_ligands"
+            )
+        if ranking_min_pchembl_span < 0.0:
+            raise ValueError("ranking_min_pchembl_span must be >= 0")
+        if max_classification_only_per_item <= 0:
+            raise ValueError("max_classification_only_per_item must be > 0")
+        if item_count_multiple <= 0:
+            raise ValueError("item_count_multiple must be > 0")
+
+        required_columns = {
+            "group_id",
+            "pchembl_value",
+            "binary_label",
+            "protein_input_ids",
+            "protein_attention_mask",
+            "molecule_input_ids",
+            "molecule_attention_mask",
+        }
+        missing_columns = sorted(required_columns.difference(example_dataset.column_names))
+        if missing_columns:
+            raise ValueError(
+                f"example_dataset is missing required columns: {missing_columns}"
+            )
+
+        self.example_dataset = example_dataset
+        self.seed = int(seed)
+        self.ranking_max_ligands = int(ranking_max_ligands)
+        self.ranking_opportunity_divisor = int(ranking_opportunity_divisor)
+        self.ranking_min_pchembl_span = float(ranking_min_pchembl_span)
+        self.max_classification_only_per_item = int(max_classification_only_per_item)
+        self.item_count_multiple = int(item_count_multiple)
+        self._group_members, self._pchembl_values = self._build_group_metadata()
+        self._eligible_group_ids = {
+            group_id
+            for group_id, indices in self._group_members.items()
+            if len(indices) >= 2
+            and (
+                max(self._pchembl_values[index] for index in indices)
+                - min(self._pchembl_values[index] for index in indices)
+            )
+            >= self.ranking_min_pchembl_span
+        }
+
+        num_ranking_lists = sum(
+            math.ceil(len(self._group_members[group_id]) / self.ranking_opportunity_divisor)
+            for group_id in self._eligible_group_ids
+        )
+        num_ranked_examples = sum(
+            min(
+                len(self._group_members[group_id]),
+                math.ceil(
+                    len(self._group_members[group_id]) / self.ranking_opportunity_divisor
+                )
+                * self.ranking_max_ligands,
+            )
+            for group_id in self._eligible_group_ids
+        )
+        num_classification_only = len(example_dataset) - num_ranked_examples
+        desired_items = max(
+            1,
+            num_ranking_lists,
+            math.ceil(
+                num_classification_only / self.max_classification_only_per_item
+            ),
+        )
+        max_nonempty_items = num_ranking_lists + num_classification_only
+        if self.item_count_multiple > 1 and max_nonempty_items < self.item_count_multiple:
+            raise ValueError(
+                "Training dataset is too small for duplicate-free distributed sharding: "
+                f"at most {max_nonempty_items} non-empty items are available, but "
+                f"world_size * per_device_train_batch_size is {self.item_count_multiple}"
+            )
+        if desired_items >= self.item_count_multiple:
+            num_items = (
+                desired_items // self.item_count_multiple
+            ) * self.item_count_multiple
+        elif self.item_count_multiple > 1:
+            num_items = self.item_count_multiple
+        else:
+            num_items = desired_items
+        num_items = max(1, min(num_items, max_nonempty_items))
+        if self.item_count_multiple > 1 and num_items % self.item_count_multiple != 0:
+            raise RuntimeError("distributed item count must be exactly shardable")
+
+        self.stats = AssayListSamplingStats(
+            num_examples=len(example_dataset),
+            num_assays=len(self._group_members),
+            num_eligible_assays=len(self._eligible_group_ids),
+            num_ranking_lists=num_ranking_lists,
+            num_ranked_examples=num_ranked_examples,
+            num_classification_only_examples=num_classification_only,
+            num_dataset_items=num_items,
+        )
+        self._epoch: int | None = None
+        self._bundles: list[
+            tuple[list[tuple[str, tuple[int, ...]]], tuple[int, ...]]
+        ] = []
+        self._example_lengths: array | None = None
+        self.set_epoch(0)
+
+    def _build_group_metadata(self) -> tuple[Dict[str, List[int]], array]:
+        grouped: Dict[str, List[int]] = defaultdict(list)
+        pchembl_values = array("d")
+        metadata_columns = ["group_id", "pchembl_value"]
+        metadata_dataset = (
+            self.example_dataset.select_columns(metadata_columns)
+            if hasattr(self.example_dataset, "select_columns")
+            else self.example_dataset
+        )
+        scan_batch_size = 65536
+        for start in range(0, len(metadata_dataset), scan_batch_size):
+            stop = min(start + scan_batch_size, len(metadata_dataset))
+            rows = metadata_dataset[start:stop]
+            for offset, (group_id, pchembl_value) in enumerate(
+                zip(rows["group_id"], rows["pchembl_value"])
+            ):
+                value = float(pchembl_value)
+                if not math.isfinite(value):
+                    raise ValueError("pchembl_value must contain only finite values")
+                index = start + offset
+                grouped[str(group_id)].append(index)
+                pchembl_values.append(value)
+        return dict(grouped), pchembl_values
+
+    @staticmethod
+    def _permuted(values: Sequence[int], generator: torch.Generator) -> list[int]:
+        if len(values) <= 1:
+            return [int(value) for value in values]
+        order = torch.randperm(len(values), generator=generator).tolist()
+        return [int(values[index]) for index in order]
+
+    def set_epoch(self, epoch: int) -> None:
+        epoch = int(epoch)
+        if self._epoch == epoch:
+            return
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + epoch)
+
+        ranking_lists: list[tuple[str, tuple[int, ...]]] = []
+        classification_only: list[int] = []
+        for group_id, members in self._group_members.items():
+            if group_id not in self._eligible_group_ids:
+                classification_only.extend(members)
+                continue
+            shuffled = self._permuted(members, generator)
+            list_count = math.ceil(len(members) / self.ranking_opportunity_divisor)
+            ranked_count = min(
+                len(members),
+                list_count * self.ranking_max_ligands,
+            )
+            selected = shuffled[:ranked_count]
+            classification_only.extend(shuffled[ranked_count:])
+            for start in range(0, ranked_count, self.ranking_max_ligands):
+                ranking_lists.append(
+                    (
+                        group_id,
+                        tuple(selected[start : start + self.ranking_max_ligands]),
+                    )
+                )
+
+        ranking_lists = [
+            ranking_lists[index]
+            for index in torch.randperm(
+                len(ranking_lists), generator=generator
+            ).tolist()
+        ] if ranking_lists else []
+        classification_only = self._permuted(classification_only, generator)
+
+        num_items = self.stats.num_dataset_items
+        assigned_ranking: list[list[tuple[str, tuple[int, ...]]]] = [
+            [] for _ in range(num_items)
+        ]
+        for list_index, ranking_list in enumerate(ranking_lists):
+            assigned_ranking[list_index % num_items].append(ranking_list)
+
+        classification_counts = [
+            len(classification_only) // num_items for _ in range(num_items)
+        ]
+        for item_index in range(len(classification_only) % num_items):
+            classification_counts[item_index] += 1
+        classification_item_order = sorted(
+            range(num_items),
+            key=lambda index: (bool(assigned_ranking[index]), index),
+        )
+        assigned_classification: list[tuple[int, ...]] = [tuple() for _ in range(num_items)]
+        cursor = 0
+        for count_index, item_index in enumerate(classification_item_order):
+            count = classification_counts[count_index]
+            assigned_classification[item_index] = tuple(
+                classification_only[cursor : cursor + count]
+            )
+            cursor += count
+
+        self._bundles = [
+            (assigned_ranking[index], assigned_classification[index])
+            for index in range(num_items)
+        ]
+        if any(not ranking and not classification for ranking, classification in self._bundles):
+            raise RuntimeError("assay-list sampler produced an empty dataset item")
+        if sum(len(indices) for _, indices in ranking_lists) != self.stats.num_ranked_examples:
+            raise RuntimeError("ranked example count changed while constructing the epoch")
+        if cursor != self.stats.num_classification_only_examples:
+            raise RuntimeError("classification-only example count changed while constructing the epoch")
+        self._epoch = epoch
+
+    @property
+    def epoch(self) -> int:
+        return int(self._epoch or 0)
+
+    def __len__(self) -> int:
+        return self.stats.num_dataset_items
+
+    def _rows_for_indices(self, indices: Sequence[int]) -> list[Dict[str, Any]]:
+        if not indices:
+            return []
+        columns = self.example_dataset[list(indices)]
+        return [
+            {column: columns[column][row_index] for column in columns}
+            for row_index in range(len(indices))
+        ]
+
+    def __getitem__(self, index: int | tuple[int, int]) -> Dict[str, Any]:
+        if isinstance(index, tuple):
+            epoch, index = index
+            self.set_epoch(int(epoch))
+        ranking_lists, classification_indices = self._bundles[int(index)]
+        all_indices: list[int] = []
+        ranking_group_sizes: list[int] = []
+        ranking_assay_ids: list[str] = []
+        for group_id, ranking_indices in ranking_lists:
+            all_indices.extend(ranking_indices)
+            ranking_group_sizes.append(len(ranking_indices))
+            ranking_assay_ids.append(group_id)
+        all_indices.extend(classification_indices)
+        return {
+            "rows": self._rows_for_indices(all_indices),
+            "example_indices": all_indices,
+            "ranking_group_sizes": ranking_group_sizes,
+            "ranking_assay_ids": ranking_assay_ids,
+        }
+
+    def epoch_example_indices(self) -> list[int]:
+        indices: list[int] = []
+        for ranking_lists, classification_indices in self._bundles:
+            for _, ranking_indices in ranking_lists:
+                indices.extend(ranking_indices)
+            indices.extend(classification_indices)
+        return indices
+
+    def epoch_ranking_indices(self) -> list[int]:
+        indices: list[int] = []
+        for ranking_lists, _ in self._bundles:
+            for _, ranking_indices in ranking_lists:
+                indices.extend(ranking_indices)
+        return indices
+
+    def get_item_sequence_lengths(self) -> Sequence[int]:
+        if self._example_lengths is None:
+            lengths = array("I")
+            columns = set(self.example_dataset.column_names)
+            if {"protein_length", "molecule_length"}.issubset(columns):
+                lengths.extend(
+                    int(protein) + int(molecule)
+                    for protein, molecule in zip(
+                        self.example_dataset["protein_length"],
+                        self.example_dataset["molecule_length"],
+                    )
+                )
+            else:
+                for protein_mask, molecule_mask in zip(
+                    self.example_dataset["protein_attention_mask"],
+                    self.example_dataset["molecule_attention_mask"],
+                ):
+                    lengths.append(
+                        sum(int(value) for value in protein_mask)
+                        + sum(int(value) for value in molecule_mask)
+                    )
+            self._example_lengths = lengths
+
+        item_lengths = array("I")
+        for ranking_lists, classification_indices in self._bundles:
+            indices = [
+                index
+                for _, ranking_indices in ranking_lists
+                for index in ranking_indices
+            ]
+            indices.extend(classification_indices)
+            item_lengths.append(max(self._example_lengths[index] for index in indices))
+        return item_lengths
+
+
+class RewardEvaluationDataset(TorchDataset):
+    """One-pass row-level evaluation view with stable integer assay ids."""
+
+    def __init__(
+        self,
+        example_dataset: Dataset,
+        *,
+        ranking_min_pchembl_span: float = 0.5,
+    ):
+        self.example_dataset = example_dataset
+        self.ranking_min_pchembl_span = float(ranking_min_pchembl_span)
+        group_ids = [str(group_id) for group_id in example_dataset["group_id"]]
+        self.group_id_to_index = {
+            group_id: index for index, group_id in enumerate(sorted(set(group_ids)))
+        }
+        self.group_ids = [None] * len(self.group_id_to_index)
+        for group_id, index in self.group_id_to_index.items():
+            self.group_ids[index] = group_id
+        self._row_group_indices = array(
+            "I", (self.group_id_to_index[group_id] for group_id in group_ids)
+        )
+
+    def __len__(self) -> int:
+        return len(self.example_dataset)
+
+    def __getitem__(self, index: int) -> Dict[str, Any]:
+        return {
+            "rows": [dict(self.example_dataset[int(index)])],
+            "example_indices": [int(index)],
+            "ranking_group_sizes": [],
+            "ranking_assay_ids": [],
+            "evaluation_group_indices": [int(self._row_group_indices[int(index)])],
+        }
 
 
 def load_saved_pair_dataset(dataset_path: str) -> Dataset:
@@ -449,7 +831,6 @@ def save_pair_dataset_from_example_dataset(
                 features=PAIR_DATASET_FEATURES,
                 cache_dir=cache_dir,
                 keep_in_memory=False,
-                fingerprint=f"reward-pairs-{split_name}-{len(example_dataset)}-{stats.num_pairs}",
             )
 
         pair_dataset.save_to_disk(resolved_output_path)
@@ -482,6 +863,8 @@ class RewardPairDataset(TorchDataset):
             int(example_id): index
             for index, example_id in enumerate(example_dataset["example_id"])
         }
+        self._example_sequence_lengths: Tuple[array, array] | None = None
+        self._pair_sequence_lengths: array | None = None
 
     def __len__(self) -> int:
         return len(self.pair_dataset)
@@ -497,8 +880,153 @@ class RewardPairDataset(TorchDataset):
             "pair": dict(pair_record),
         }
 
+    def _load_example_sequence_lengths(self) -> Tuple[array, array]:
+        if self._example_sequence_lengths is not None:
+            return self._example_sequence_lengths
+
+        columns = set(self.example_dataset.column_names)
+        if {"protein_length", "molecule_length"}.issubset(columns):
+            protein_lengths = array(
+                "I",
+                (int(value) for value in self.example_dataset["protein_length"]),
+            )
+            molecule_lengths = array(
+                "I",
+                (int(value) for value in self.example_dataset["molecule_length"]),
+            )
+        else:
+            protein_lengths = array("I")
+            molecule_lengths = array("I")
+            scan_batch_size = 4096
+            for start in range(0, len(self.example_dataset), scan_batch_size):
+                stop = min(start + scan_batch_size, len(self.example_dataset))
+                rows = self.example_dataset[start:stop]
+                protein_lengths.extend(
+                    max(1, sum(int(value) for value in mask))
+                    for mask in rows["protein_attention_mask"]
+                )
+                molecule_lengths.extend(
+                    max(1, sum(int(value) for value in mask))
+                    for mask in rows["molecule_attention_mask"]
+                )
+
+        self._example_sequence_lengths = (protein_lengths, molecule_lengths)
+        return self._example_sequence_lengths
+
+    def get_pair_sequence_lengths(self) -> Sequence[int]:
+        """Return a scalar length proxy for grouping similarly sized pair batches."""
+        if self._pair_sequence_lengths is not None:
+            return self._pair_sequence_lengths
+
+        protein_lengths, molecule_lengths = self._load_example_sequence_lengths()
+        pair_lengths = array("I")
+        scan_batch_size = 4096
+        for start in range(0, len(self.pair_dataset), scan_batch_size):
+            stop = min(start + scan_batch_size, len(self.pair_dataset))
+            rows = self.pair_dataset[start:stop]
+            for positive_id, negative_id in zip(
+                rows["positive_example_id"],
+                rows["negative_example_id"],
+            ):
+                positive_index = self.example_id_to_index[int(positive_id)]
+                negative_index = self.example_id_to_index[int(negative_id)]
+                pair_lengths.append(
+                    max(protein_lengths[positive_index], protein_lengths[negative_index])
+                    + max(molecule_lengths[positive_index], molecule_lengths[negative_index])
+                )
+
+        self._pair_sequence_lengths = pair_lengths
+        return self._pair_sequence_lengths
+
 
 class RewardPairCollator:
+    def __init__(
+        self,
+        *,
+        dynamic_padding: bool = True,
+        protein_pad_token_id: int | None = 0,
+        molecule_pad_token_id: int | None = 0,
+    ):
+        self.dynamic_padding = bool(dynamic_padding)
+        self.protein_pad_token_id = int(protein_pad_token_id or 0)
+        self.molecule_pad_token_id = int(molecule_pad_token_id or 0)
+
+    def _collate_tokens(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        input_key: str,
+        mask_key: str,
+        pad_token_id: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        max_width = max(len(row[input_key]) for row in rows)
+        if max_width <= 0:
+            raise ValueError(f"{input_key} rows must contain at least one token")
+        if any(len(row[input_key]) != len(row[mask_key]) for row in rows):
+            raise ValueError(f"{input_key} and {mask_key} rows must have matching lengths")
+
+        row_widths = {len(row[input_key]) for row in rows}
+        if len(row_widths) == 1:
+            input_ids = torch.tensor(
+                [row[input_key] for row in rows],
+                dtype=torch.long,
+            )
+            attention_mask = torch.tensor(
+                [row[mask_key] for row in rows],
+                dtype=torch.long,
+            )
+        else:
+            input_ids = torch.full(
+                (len(rows), max_width),
+                fill_value=pad_token_id,
+                dtype=torch.long,
+            )
+            attention_mask = torch.zeros((len(rows), max_width), dtype=torch.long)
+            for row_index, row in enumerate(rows):
+                row_input_ids = row[input_key]
+                row_attention_mask = row[mask_key]
+                row_width = len(row_input_ids)
+                input_ids[row_index, :row_width] = torch.as_tensor(row_input_ids, dtype=torch.long)
+                attention_mask[row_index, :row_width] = torch.as_tensor(
+                    row_attention_mask,
+                    dtype=torch.long,
+                )
+
+        if not self.dynamic_padding:
+            return input_ids, attention_mask
+
+        active_columns = attention_mask.bool().any(dim=0).nonzero(as_tuple=False).flatten()
+        if active_columns.numel() == 0:
+            return input_ids[:, :1], attention_mask[:, :1]
+        last_active = int(active_columns[-1].item()) + 1
+        return (
+            input_ids[:, :last_active],
+            attention_mask[:, :last_active],
+        )
+
+    def collate_example_tokens(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, torch.Tensor]:
+        protein_input_ids, protein_attention_mask = self._collate_tokens(
+            rows,
+            input_key="protein_input_ids",
+            mask_key="protein_attention_mask",
+            pad_token_id=self.protein_pad_token_id,
+        )
+        molecule_input_ids, molecule_attention_mask = self._collate_tokens(
+            rows,
+            input_key="molecule_input_ids",
+            mask_key="molecule_attention_mask",
+            pad_token_id=self.molecule_pad_token_id,
+        )
+        return {
+            "protein_input_ids": protein_input_ids,
+            "protein_attention_mask": protein_attention_mask,
+            "molecule_input_ids": molecule_input_ids,
+            "molecule_attention_mask": molecule_attention_mask,
+        }
+
     def __call__(self, features: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         if not features:
             raise ValueError("RewardPairCollator received an empty batch")
@@ -507,24 +1035,10 @@ class RewardPairCollator:
         negative_rows = [dict(feature["negative"]) for feature in features]
         all_rows = positive_rows + negative_rows
         num_pairs = len(features)
+        token_batch = self.collate_example_tokens(all_rows)
 
         return {
-            "protein_input_ids": torch.tensor(
-                [row["protein_input_ids"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "protein_attention_mask": torch.tensor(
-                [row["protein_attention_mask"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "molecule_input_ids": torch.tensor(
-                [row["molecule_input_ids"] for row in all_rows],
-                dtype=torch.long,
-            ),
-            "molecule_attention_mask": torch.tensor(
-                [row["molecule_attention_mask"] for row in all_rows],
-                dtype=torch.long,
-            ),
+            **token_batch,
             "activity_labels": torch.tensor(
                 [float(row["binary_label"]) for row in all_rows],
                 dtype=torch.float32,
@@ -537,4 +1051,77 @@ class RewardPairCollator:
                 dtype=torch.float32,
             ),
             "num_pairs": torch.tensor(num_pairs, dtype=torch.long),
+        }
+
+
+class RewardAssayListCollator(RewardPairCollator):
+    """Flatten assay-list items while retaining list boundaries for ranking."""
+
+    def __call__(self, features: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        if not features:
+            raise ValueError("RewardAssayListCollator received an empty batch")
+        if "rows" not in features[0]:
+            return super().__call__(features)
+
+        all_rows: list[Dict[str, Any]] = []
+        ranking_group_ids: list[int] = []
+        ranking_assay_ids: list[str] = []
+        evaluation_group_indices: list[int] = []
+        next_group_id = 0
+        for feature in features:
+            rows = [dict(row) for row in feature["rows"]]
+            group_sizes = [int(size) for size in feature.get("ranking_group_sizes", [])]
+            assay_ids = [str(value) for value in feature.get("ranking_assay_ids", [])]
+            if len(group_sizes) != len(assay_ids):
+                raise ValueError(
+                    "ranking_group_sizes and ranking_assay_ids must have the same length"
+                )
+            ranked_count = sum(group_sizes)
+            if ranked_count > len(rows):
+                raise ValueError("ranking group sizes exceed the number of feature rows")
+
+            local_ranking_ids: list[int] = []
+            for group_size, assay_id in zip(group_sizes, assay_ids):
+                if group_size < 2:
+                    raise ValueError("ranking lists must contain at least two observations")
+                local_ranking_ids.extend([next_group_id] * group_size)
+                ranking_assay_ids.append(assay_id)
+                next_group_id += 1
+            local_ranking_ids.extend([-1] * (len(rows) - ranked_count))
+            ranking_group_ids.extend(local_ranking_ids)
+
+            feature_eval_groups = feature.get("evaluation_group_indices")
+            if feature_eval_groups is None:
+                evaluation_group_indices.extend([-1] * len(rows))
+            else:
+                if len(feature_eval_groups) != len(rows):
+                    raise ValueError(
+                        "evaluation_group_indices must align with feature rows"
+                    )
+                evaluation_group_indices.extend(int(value) for value in feature_eval_groups)
+            all_rows.extend(rows)
+
+        if not all_rows:
+            raise ValueError("RewardAssayListCollator received no example rows")
+        token_batch = self.collate_example_tokens(all_rows)
+        ranked_examples = sum(group_id >= 0 for group_id in ranking_group_ids)
+        return {
+            **token_batch,
+            "activity_labels": torch.tensor(
+                [float(row["binary_label"]) for row in all_rows],
+                dtype=torch.float32,
+            ),
+            "pchembl_values": torch.tensor(
+                [float(row["pchembl_value"]) for row in all_rows],
+                dtype=torch.float32,
+            ),
+            "ranking_group_ids": torch.tensor(ranking_group_ids, dtype=torch.long),
+            "evaluation_group_indices": torch.tensor(
+                evaluation_group_indices,
+                dtype=torch.long,
+            ),
+            "ranking_assay_ids": ranking_assay_ids,
+            "num_examples": torch.tensor(len(all_rows), dtype=torch.long),
+            "num_ranking_lists": torch.tensor(next_group_id, dtype=torch.long),
+            "num_ranked_examples": torch.tensor(ranked_examples, dtype=torch.long),
         }

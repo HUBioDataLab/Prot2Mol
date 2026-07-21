@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from .config import RewardModelConfig
 from .encoders import LoadedEncoder, batch_encode_texts, encode_tokens, load_encoder_bundle
 from .fusion import RewardMLPHead, TokenFusion, masked_pool, normalize_mask
+from .losses import ligunity_listwise_loss
 from .outputs import RewardModelOutput
 
 
@@ -52,6 +53,7 @@ class RewardModel(nn.Module):
         self.fusion = TokenFusion(
             hidden_dim=self._config.fusion_hidden_dim,
             num_heads=self._config.fusion_num_heads,
+            attention_backend=self._config.fusion_attention_backend,
         )
         head_input_dim = self._config.fusion_hidden_dim * 2
         self.ranking_head = RewardMLPHead(
@@ -82,6 +84,53 @@ class RewardModel(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         return encode_tokens(self.molecule_encoder, input_ids=input_ids, attention_mask=attention_mask)
+
+    @staticmethod
+    def _deduplicated_encode(
+        encode_fn,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        *,
+        enabled: bool,
+    ) -> torch.Tensor:
+        """Encode identical rows once while preserving the original batch and gradients."""
+        if not enabled or input_ids.size(0) <= 1:
+            return encode_fn(input_ids=input_ids, attention_mask=attention_mask)
+
+        if attention_mask is None:
+            unique_keys, inverse_indices = torch.unique(
+                input_ids,
+                dim=0,
+                return_inverse=True,
+            )
+            unique_input_ids = unique_keys
+            unique_attention_mask = None
+        else:
+            if attention_mask.shape != input_ids.shape:
+                raise ValueError("attention_mask must have the same shape as input_ids")
+            row_keys = torch.cat(
+                [input_ids, attention_mask.to(dtype=input_ids.dtype)],
+                dim=1,
+            )
+            unique_keys, inverse_indices = torch.unique(
+                row_keys,
+                dim=0,
+                return_inverse=True,
+            )
+            sequence_length = input_ids.size(1)
+            unique_input_ids = unique_keys[:, :sequence_length]
+            unique_attention_mask = unique_keys[:, sequence_length:].to(
+                dtype=attention_mask.dtype
+            )
+
+        if unique_input_ids.size(0) == input_ids.size(0):
+            return encode_fn(input_ids=input_ids, attention_mask=attention_mask)
+
+        unique_tokens = encode_fn(
+            input_ids=unique_input_ids,
+            attention_mask=unique_attention_mask,
+        )
+        return unique_tokens.index_select(0, inverse_indices)
 
     def _model_device(self) -> torch.device:
         return next(self.parameters()).device
@@ -119,18 +168,54 @@ class RewardModel(nn.Module):
         molecule_tokens = self.molecule_norm(self.molecule_projection(molecule_tokens))
         return protein_tokens, molecule_tokens
 
-    def _compute_pair_loss(
+    def _compute_ranking_loss(
+        self,
+        ranking_score: torch.Tensor,
+        pchembl_values: torch.Tensor,
+        ranking_group_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        return ligunity_listwise_loss(
+            ranking_score,
+            pchembl_values,
+            ranking_group_ids,
+            temperature=self._config.ranking_temperature,
+            # The dataset applies this threshold to the complete assay before
+            # constructing non-overlapping sublists. Reapplying it to each
+            # random sublist would silently discard valid assay opportunities.
+            min_pchembl_span=0.0,
+        )
+
+    def _compute_legacy_pair_ranking_loss(
         self,
         ranking_score: torch.Tensor,
         positive_indices: torch.Tensor,
         negative_indices: torch.Tensor,
     ) -> torch.Tensor:
+        """Map legacy pairs to independent two-item LigUnity lists."""
         if positive_indices.shape != negative_indices.shape:
             raise ValueError("positive_indices and negative_indices must have the same shape")
         if positive_indices.numel() == 0:
             raise ValueError("positive_indices and negative_indices must contain at least one pair")
-        diffs = ranking_score[positive_indices.long()] - ranking_score[negative_indices.long()]
-        return -F.logsigmoid(diffs).mean()
+        positive_scores = ranking_score.index_select(0, positive_indices.long())
+        negative_scores = ranking_score.index_select(0, negative_indices.long())
+        pair_scores = torch.stack([positive_scores, negative_scores], dim=1).reshape(-1)
+        pair_targets = torch.tensor(
+            [1.0, 0.0],
+            device=pair_scores.device,
+            dtype=pair_scores.dtype,
+        ).repeat(positive_scores.numel())
+        pair_group_ids = torch.arange(
+            positive_scores.numel(),
+            device=pair_scores.device,
+            dtype=torch.long,
+        ).repeat_interleave(2)
+        return ligunity_listwise_loss(
+            pair_scores,
+            pair_targets,
+            pair_group_ids,
+            temperature=self._config.ranking_temperature,
+            min_pchembl_span=0.0,
+        )
 
     def _compute_classification_loss(
         self,
@@ -155,18 +240,24 @@ class RewardModel(nn.Module):
         protein_attention_mask: Optional[torch.Tensor] = None,
         molecule_attention_mask: Optional[torch.Tensor] = None,
         activity_labels: Optional[torch.Tensor] = None,
+        pchembl_values: Optional[torch.Tensor] = None,
+        ranking_group_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
         negative_indices: Optional[torch.Tensor] = None,
         return_token_embeddings: bool = False,
         return_dict: bool = True,
     ) -> RewardModelOutput | tuple[torch.Tensor, ...]:
-        protein_tokens = self.encode_protein(
-            input_ids=protein_input_ids,
-            attention_mask=protein_attention_mask,
+        protein_tokens = self._deduplicated_encode(
+            self.encode_protein,
+            protein_input_ids,
+            protein_attention_mask,
+            enabled=self._config.deduplicate_protein_inputs,
         )
-        molecule_tokens = self.encode_molecule(
-            input_ids=molecule_input_ids,
-            attention_mask=molecule_attention_mask,
+        molecule_tokens = self._deduplicated_encode(
+            self.encode_molecule,
+            molecule_input_ids,
+            molecule_attention_mask,
+            enabled=self._config.deduplicate_molecule_inputs,
         )
 
         protein_mask = normalize_mask(protein_attention_mask, protein_tokens)
@@ -188,7 +279,7 @@ class RewardModel(nn.Module):
         activity_logits = self.classification_head(joint_embedding)
         activity_probability = torch.sigmoid(activity_logits)
 
-        pair_loss = None
+        ranking_loss = None
         classification_loss = None
         total_loss = None
 
@@ -196,19 +287,37 @@ class RewardModel(nn.Module):
             classification_loss = self._compute_classification_loss(activity_logits, activity_labels)
             total_loss = classification_loss * self._config.classification_loss_weight
 
-        if positive_indices is not None or negative_indices is not None:
+        if pchembl_values is not None or ranking_group_ids is not None:
+            if pchembl_values is None or ranking_group_ids is None:
+                raise ValueError("pchembl_values and ranking_group_ids must be provided together")
+            if positive_indices is not None or negative_indices is not None:
+                raise ValueError(
+                    "Use either listwise ranking inputs or legacy pair indices, not both"
+                )
+            ranking_loss = self._compute_ranking_loss(
+                ranking_score,
+                pchembl_values,
+                ranking_group_ids,
+            )
+        elif positive_indices is not None or negative_indices is not None:
             if positive_indices is None or negative_indices is None:
                 raise ValueError("positive_indices and negative_indices must be provided together")
-            pair_loss = self._compute_pair_loss(ranking_score, positive_indices, negative_indices)
-            weighted_pair = pair_loss * self._config.pair_loss_weight
-            total_loss = weighted_pair if total_loss is None else total_loss + weighted_pair
+            ranking_loss = self._compute_legacy_pair_ranking_loss(
+                ranking_score,
+                positive_indices,
+                negative_indices,
+            )
+
+        if ranking_loss is not None:
+            weighted_ranking = ranking_loss * self._config.ranking_loss_weight
+            total_loss = weighted_ranking if total_loss is None else total_loss + weighted_ranking
 
         outputs = RewardModelOutput(
             ranking_score=ranking_score,
             activity_logits=activity_logits,
             activity_probability=activity_probability,
             joint_embedding=joint_embedding,
-            pair_loss=pair_loss,
+            ranking_loss=ranking_loss,
             classification_loss=classification_loss,
             loss=total_loss,
             protein_token_embeddings=protein_tokens if return_token_embeddings else None,
@@ -231,6 +340,8 @@ class RewardModel(nn.Module):
         protein_sequences: Sequence[str],
         molecule_sequences: Sequence[str],
         activity_labels: Optional[torch.Tensor] = None,
+        pchembl_values: Optional[torch.Tensor] = None,
+        ranking_group_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
         negative_indices: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
@@ -246,6 +357,10 @@ class RewardModel(nn.Module):
 
         if activity_labels is not None:
             activity_labels = activity_labels.to(target_device)
+        if pchembl_values is not None:
+            pchembl_values = pchembl_values.to(target_device)
+        if ranking_group_ids is not None:
+            ranking_group_ids = ranking_group_ids.to(target_device)
         if positive_indices is not None:
             positive_indices = positive_indices.to(target_device)
         if negative_indices is not None:
@@ -257,6 +372,8 @@ class RewardModel(nn.Module):
             molecule_input_ids=molecule_batch["input_ids"],
             molecule_attention_mask=molecule_batch.get("attention_mask"),
             activity_labels=activity_labels,
+            pchembl_values=pchembl_values,
+            ranking_group_ids=ranking_group_ids,
             positive_indices=positive_indices,
             negative_indices=negative_indices,
             return_token_embeddings=return_token_embeddings,

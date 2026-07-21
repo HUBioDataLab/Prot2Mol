@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Any, Dict, Optional
+from array import array
+from typing import Any, Dict, Iterator, Optional, Sequence
 
 import torch
+from torch.utils.data import Sampler
 from transformers import Trainer, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 
 from ..model import save_reward_model
 from .config import RewardTrainerConfig
-from .data import RewardPairDataset
-from .evaluation import compute_reward_model_eval_metrics
+from .data import RewardAssayListDataset, RewardEvaluationDataset, RewardPairDataset
+from .evaluation import (
+    _append_assay_spearman_log,
+    _with_metric_prefix,
+    compute_classification_metrics,
+    compute_joint_evaluation_metrics,
+)
 
 
 REQUIRED_DISTRIBUTED_ENV_VARS = (
@@ -22,6 +29,100 @@ REQUIRED_DISTRIBUTED_ENV_VARS = (
     "MASTER_ADDR",
     "MASTER_PORT",
 )
+
+
+class LengthBucketSampler(Sampler[int]):
+    """Shuffle globally, then sort bounded pools into length-homogeneous batches."""
+
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        *,
+        batch_size: int,
+        bucket_size_multiplier: int,
+        seed: int,
+    ):
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+        if bucket_size_multiplier <= 0:
+            raise ValueError("bucket_size_multiplier must be > 0")
+        self.lengths = (
+            lengths
+            if isinstance(lengths, array)
+            else array("I", (int(length) for length in lengths))
+        )
+        self.batch_size = int(batch_size)
+        self.bucket_size = self.batch_size * int(bucket_size_multiplier)
+        self.seed = int(seed)
+        self.epoch = 0
+
+    def __len__(self) -> int:
+        return len(self.lengths)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self) -> Iterator[int]:
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        shuffled_indices = torch.randperm(
+            len(self.lengths),
+            generator=generator,
+            dtype=torch.int32,
+        )
+
+        for start in range(0, len(shuffled_indices), self.bucket_size):
+            bucket = shuffled_indices[start : start + self.bucket_size].tolist()
+            bucket.sort(key=self.lengths.__getitem__, reverse=True)
+            yield from bucket
+
+
+class AssayListEpochSampler(Sampler[tuple[int, int]]):
+    """Regenerate dynamic assay lists and order them deterministically each epoch."""
+
+    def __init__(
+        self,
+        dataset: RewardAssayListDataset,
+        *,
+        seed: int,
+        length_bucketing: bool,
+        batch_size: int,
+        bucket_size_multiplier: int,
+    ):
+        self.dataset = dataset
+        self.seed = int(seed)
+        self.length_bucketing = bool(length_bucketing)
+        self.batch_size = int(batch_size)
+        self.bucket_size = self.batch_size * int(bucket_size_multiplier)
+        self.epoch = 0
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+        # Update before DataLoader workers are started so non-persistent workers
+        # inherit the prepared bundles instead of rebuilding them independently.
+        self.dataset.set_epoch(self.epoch)
+
+    def __iter__(self) -> Iterator[tuple[int, int]]:
+        self.dataset.set_epoch(self.epoch)
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        order = torch.randperm(
+            len(self.dataset),
+            generator=generator,
+            dtype=torch.int32,
+        ).tolist()
+        if not self.length_bucketing:
+            yield from ((self.epoch, index) for index in order)
+            return
+
+        lengths = self.dataset.get_item_sequence_lengths()
+        for start in range(0, len(order), self.bucket_size):
+            bucket = order[start : start + self.bucket_size]
+            bucket.sort(key=lengths.__getitem__, reverse=True)
+            yield from ((self.epoch, index) for index in bucket)
 
 
 def _safe_int(value: Optional[str], default: int) -> int:
@@ -90,25 +191,60 @@ class RewardModelTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.val2_eval_dataset = val2_eval_dataset
         self._reset_train_component_accumulator()
-        self._reset_eval_component_accumulator()
 
     def _reset_train_component_accumulator(self) -> None:
         self._train_component_sums = {
-            "pair_loss": 0.0,
+            "ranking_loss": 0.0,
             "classification_loss": 0.0,
             "total_loss": 0.0,
-            "num_pairs": 0.0,
+            "num_examples": 0.0,
+            "num_ranking_lists": 0.0,
+            "num_ranked_examples": 0.0,
+            "ranking_loss_sum": 0.0,
+            "classification_correct": 0.0,
+            "classification_count": 0.0,
+            "ranking_pairwise_correct": 0.0,
+            "ranking_pairwise_count": 0.0,
         }
         self._train_component_count = 0
+        self._train_classification_probabilities: list[float] = []
+        self._train_classification_labels: list[float] = []
 
-    def _reset_eval_component_accumulator(self) -> None:
-        self._eval_component_sums = {
-            "pair_loss": 0.0,
-            "classification_loss": 0.0,
-            "total_loss": 0.0,
-            "num_pairs": 0.0,
-        }
-        self._eval_component_count = 0
+    def _get_train_sampler(self, train_dataset=None):
+        active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
+        if isinstance(active_train_dataset, RewardAssayListDataset):
+            data_seed = self.args.data_seed if self.args.data_seed is not None else self.args.seed
+            return AssayListEpochSampler(
+                active_train_dataset,
+                seed=int(data_seed),
+                length_bucketing=bool(
+                    getattr(self.args, "reward_length_bucketing", False)
+                ),
+                batch_size=int(
+                    getattr(self, "_train_batch_size", self.args.train_batch_size)
+                ),
+                bucket_size_multiplier=int(
+                    getattr(self.args, "length_bucket_size_multiplier", 50)
+                ),
+            )
+        if (
+            getattr(self.args, "reward_length_bucketing", False)
+            and isinstance(active_train_dataset, RewardPairDataset)
+        ):
+            data_seed = self.args.data_seed if self.args.data_seed is not None else self.args.seed
+            return LengthBucketSampler(
+                active_train_dataset.get_pair_sequence_lengths(),
+                batch_size=int(getattr(self, "_train_batch_size", self.args.train_batch_size)),
+                bucket_size_multiplier=int(
+                    getattr(self.args, "length_bucket_size_multiplier", 50)
+                ),
+                seed=int(data_seed),
+            )
+
+        parent_sampler = super()._get_train_sampler
+        if "train_dataset" in inspect.signature(parent_sampler).parameters:
+            return parent_sampler(train_dataset)
+        return parent_sampler()
 
     @staticmethod
     def _to_scalar(value: Any) -> float:
@@ -120,67 +256,133 @@ class RewardModelTrainer(Trainer):
 
     def _record_train_components(
         self,
-        pair_loss: Optional[torch.Tensor],
+        ranking_loss: Optional[torch.Tensor],
         classification_loss: Optional[torch.Tensor],
         total_loss: torch.Tensor,
-        num_pairs: Any,
+        num_examples: Any,
+        num_ranking_lists: Any,
+        num_ranked_examples: Any,
+        activity_logits: torch.Tensor,
+        activity_labels: torch.Tensor,
+        ranking_score: torch.Tensor,
+        pchembl_values: Optional[torch.Tensor],
+        ranking_group_ids: Optional[torch.Tensor],
     ) -> None:
-        self._train_component_sums["pair_loss"] += self._to_scalar(pair_loss)
+        ranking_loss_value = self._to_scalar(ranking_loss)
+        num_ranking_lists_value = self._to_scalar(num_ranking_lists)
+        self._train_component_sums["ranking_loss"] += ranking_loss_value
         self._train_component_sums["classification_loss"] += self._to_scalar(classification_loss)
         self._train_component_sums["total_loss"] += self._to_scalar(total_loss)
-        self._train_component_sums["num_pairs"] += self._to_scalar(num_pairs)
-        self._train_component_count += 1
+        self._train_component_sums["num_examples"] += self._to_scalar(num_examples)
+        self._train_component_sums["num_ranking_lists"] += num_ranking_lists_value
+        self._train_component_sums["num_ranked_examples"] += self._to_scalar(
+            num_ranked_examples
+        )
+        self._train_component_sums["ranking_loss_sum"] += (
+            ranking_loss_value * num_ranking_lists_value
+        )
 
-    def _record_eval_components(
-        self,
-        pair_loss: Optional[torch.Tensor],
-        classification_loss: Optional[torch.Tensor],
-        total_loss: torch.Tensor,
-        num_pairs: Any,
-    ) -> None:
-        self._eval_component_sums["pair_loss"] += self._to_scalar(pair_loss)
-        self._eval_component_sums["classification_loss"] += self._to_scalar(classification_loss)
-        self._eval_component_sums["total_loss"] += self._to_scalar(total_loss)
-        self._eval_component_sums["num_pairs"] += self._to_scalar(num_pairs)
-        self._eval_component_count += 1
+        with torch.no_grad():
+            logits = activity_logits.detach().reshape(-1)
+            labels = activity_labels.detach().to(device=logits.device).reshape(-1)
+            self._train_component_sums["classification_correct"] += float(
+                ((logits >= 0.0) == (labels >= 0.5)).sum().item()
+            )
+            self._train_component_sums["classification_count"] += float(
+                labels.numel()
+            )
+            self._train_classification_probabilities.extend(
+                torch.sigmoid(logits.float()).cpu().tolist()
+            )
+            self._train_classification_labels.extend(labels.float().cpu().tolist())
+
+            if pchembl_values is not None and ranking_group_ids is not None:
+                scores = ranking_score.detach().reshape(-1)
+                targets = pchembl_values.detach().to(device=scores.device).reshape(-1)
+                group_ids = ranking_group_ids.detach().to(device=scores.device).reshape(-1)
+                same_group = (
+                    (group_ids[:, None] == group_ids[None, :])
+                    & (group_ids[:, None] >= 0)
+                )
+                comparable = (
+                    torch.triu(same_group, diagonal=1)
+                    & (targets[:, None] != targets[None, :])
+                )
+                comparison = (
+                    (scores[:, None] - scores[None, :])
+                    * (targets[:, None] - targets[None, :])
+                )
+                self._train_component_sums["ranking_pairwise_correct"] += float(
+                    (
+                        (comparison[comparable] > 0).float().sum()
+                        + 0.5 * (comparison[comparable] == 0).float().sum()
+                    ).item()
+                )
+                self._train_component_sums["ranking_pairwise_count"] += float(
+                    comparable.sum().item()
+                )
+        self._train_component_count += 1
 
     def _consume_train_component_logs(self) -> Dict[str, float]:
         if self._train_component_count == 0:
             return {}
         denom = float(self._train_component_count)
         logs = {
-            "pair_loss": self._train_component_sums["pair_loss"] / denom,
+            "ranking_loss": self._train_component_sums["ranking_loss"] / denom,
             "classification_loss": self._train_component_sums["classification_loss"] / denom,
             "total_loss": self._train_component_sums["total_loss"] / denom,
-            "num_pairs": self._train_component_sums["num_pairs"] / denom,
+            "num_examples": self._train_component_sums["num_examples"] / denom,
+            "num_ranking_lists": self._train_component_sums["num_ranking_lists"] / denom,
+            "num_ranked_examples": self._train_component_sums["num_ranked_examples"] / denom,
         }
+        ranked_example_count = self._train_component_sums["num_ranked_examples"]
+        if ranked_example_count > 0.0:
+            logs["ranking_loss_per_ranked_example"] = (
+                self._train_component_sums["ranking_loss_sum"]
+                / ranked_example_count
+            )
+        classification_count = self._train_component_sums["classification_count"]
+        if classification_count > 0.0:
+            logs["classification_accuracy"] = (
+                self._train_component_sums["classification_correct"]
+                / classification_count
+            )
+            classification_metrics = compute_classification_metrics(
+                self._train_classification_probabilities,
+                self._train_classification_labels,
+            )
+            logs.update(
+                {
+                    "classification_mcc": classification_metrics["eval_mcc"],
+                    "classification_f1": classification_metrics["eval_f1"],
+                    "classification_auroc": classification_metrics["eval_roc_auc"],
+                }
+            )
+        ranking_pairwise_count = self._train_component_sums["ranking_pairwise_count"]
+        if ranking_pairwise_count > 0.0:
+            logs["ranking_pairwise_accuracy"] = (
+                self._train_component_sums["ranking_pairwise_correct"]
+                / ranking_pairwise_count
+            )
         self._reset_train_component_accumulator()
         return logs
 
-    def _consume_eval_component_logs(self, metric_key_prefix: str) -> Dict[str, float]:
-        if self._eval_component_count == 0:
-            return {}
-        denom = float(self._eval_component_count)
-        logs = {
-            f"{metric_key_prefix}_pair_loss": self._eval_component_sums["pair_loss"] / denom,
-            f"{metric_key_prefix}_classification_loss": self._eval_component_sums["classification_loss"] / denom,
-            f"{metric_key_prefix}_total_loss": self._eval_component_sums["total_loss"] / denom,
-            f"{metric_key_prefix}_num_pairs": self._eval_component_sums["num_pairs"] / denom,
-        }
-        self._reset_eval_component_accumulator()
-        return logs
-
     def _build_model_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        return {
+        model_inputs = {
             "protein_input_ids": inputs["protein_input_ids"],
             "protein_attention_mask": inputs["protein_attention_mask"],
             "molecule_input_ids": inputs["molecule_input_ids"],
             "molecule_attention_mask": inputs["molecule_attention_mask"],
             "activity_labels": inputs["activity_labels"],
-            "positive_indices": inputs["positive_indices"],
-            "negative_indices": inputs["negative_indices"],
             "return_dict": True,
         }
+        if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
+            model_inputs["pchembl_values"] = inputs["pchembl_values"]
+            model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
+        elif "positive_indices" in inputs and "negative_indices" in inputs:
+            model_inputs["positive_indices"] = inputs["positive_indices"]
+            model_inputs["negative_indices"] = inputs["negative_indices"]
+        return model_inputs
 
     def compute_loss(self, model, inputs, return_outputs: bool = False, num_items_in_batch=None):
         model_inputs = self._build_model_inputs(inputs)
@@ -190,36 +392,20 @@ class RewardModelTrainer(Trainer):
 
         if getattr(model, "training", False):
             self._record_train_components(
-                pair_loss=outputs.pair_loss,
+                ranking_loss=outputs.ranking_loss,
                 classification_loss=outputs.classification_loss,
                 total_loss=outputs.loss,
-                num_pairs=inputs.get("num_pairs"),
+                num_examples=inputs.get("num_examples"),
+                num_ranking_lists=inputs.get("num_ranking_lists"),
+                num_ranked_examples=inputs.get("num_ranked_examples"),
+                activity_logits=outputs.activity_logits,
+                activity_labels=inputs["activity_labels"],
+                ranking_score=outputs.ranking_score,
+                pchembl_values=inputs.get("pchembl_values"),
+                ranking_group_ids=inputs.get("ranking_group_ids"),
             )
 
         return (outputs.loss, outputs) if return_outputs else outputs.loss
-
-    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        with torch.no_grad():
-            model_inputs = self._build_model_inputs(inputs)
-            outputs = model(**model_inputs)
-
-        if outputs.loss is None:
-            raise RuntimeError("RewardModel did not return a scalar loss during evaluation")
-
-        loss = outputs.loss.detach()
-        self._record_eval_components(
-            pair_loss=outputs.pair_loss,
-            classification_loss=outputs.classification_loss,
-            total_loss=outputs.loss,
-            num_pairs=inputs.get("num_pairs"),
-        )
-
-        if prediction_loss_only or self.compute_metrics is None:
-            return (loss, None, None)
-
-        logits = outputs.activity_logits.detach()
-        labels = inputs["activity_labels"].detach()
-        return (loss, logits, labels)
 
     def _evaluate_reward_dataset(
         self,
@@ -227,27 +413,83 @@ class RewardModelTrainer(Trainer):
         ignore_keys=None,
         metric_key_prefix: str = "eval",
     ) -> Dict[str, float]:
-        self._reset_eval_component_accumulator()
-        metrics = super().evaluate(
-            eval_dataset=eval_dataset,
-            ignore_keys=ignore_keys,
-            metric_key_prefix=metric_key_prefix,
-        )
         active_eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
-        if not isinstance(active_eval_dataset, RewardPairDataset):
-            raise TypeError("RewardModelTrainer expects eval_dataset to be a RewardPairDataset")
-        component_metrics = self._consume_eval_component_logs(metric_key_prefix)
-        reward_metrics = compute_reward_model_eval_metrics(
+        if not isinstance(active_eval_dataset, RewardEvaluationDataset):
+            raise TypeError(
+                "RewardModelTrainer expects eval_dataset to be a RewardEvaluationDataset"
+            )
+        dataloader = self.get_eval_dataloader(active_eval_dataset)
+        model = self.model_wrapped if self.model_wrapped is not None else self.model
+        was_training = model.training
+        model.eval()
+
+        gathered_logits: list[torch.Tensor] = []
+        gathered_scores: list[torch.Tensor] = []
+        gathered_labels: list[torch.Tensor] = []
+        gathered_pchembl: list[torch.Tensor] = []
+        gathered_groups: list[torch.Tensor] = []
+        for batch in dataloader:
+            batch = self._prepare_inputs(batch)
+            with torch.no_grad(), self.compute_loss_context_manager():
+                outputs = model(**self._build_model_inputs(batch))
+            gathered = self.accelerator.gather_for_metrics(
+                (
+                    outputs.activity_logits.detach(),
+                    outputs.ranking_score.detach(),
+                    batch["activity_labels"].detach(),
+                    batch["pchembl_values"].detach(),
+                    batch["evaluation_group_indices"].detach(),
+                )
+            )
+            logits, scores, labels, pchembl, group_indices = gathered
+            gathered_logits.append(logits.cpu())
+            gathered_scores.append(scores.cpu())
+            gathered_labels.append(labels.cpu())
+            gathered_pchembl.append(pchembl.cpu())
+            gathered_groups.append(group_indices.cpu())
+
+        if was_training:
+            model.train()
+        if not gathered_logits:
+            raise ValueError("Evaluation dataset produced no observations")
+        activity_logits = torch.cat(gathered_logits)
+        ranking_scores = torch.cat(gathered_scores)
+        activity_labels = torch.cat(gathered_labels)
+        pchembl_values = torch.cat(gathered_pchembl)
+        ranking_group_ids = torch.cat(gathered_groups)
+        if (ranking_group_ids < 0).any():
+            raise RuntimeError("Evaluation observations must have stable assay group ids")
+
+        model_config = self.model.config
+        metrics, assay_records = compute_joint_evaluation_metrics(
+            activity_logits=activity_logits,
+            ranking_scores=ranking_scores,
+            activity_labels=activity_labels,
+            pchembl_values=pchembl_values,
+            ranking_group_ids=ranking_group_ids,
+            group_id_names=active_eval_dataset.group_ids,
+            classification_loss_weight=model_config.classification_loss_weight,
+            ranking_loss_weight=model_config.ranking_loss_weight,
+            bce_pos_weight=model_config.bce_pos_weight,
+            ranking_temperature=model_config.ranking_temperature,
+            ranking_min_pchembl_span=active_eval_dataset.ranking_min_pchembl_span
+            if hasattr(active_eval_dataset, "ranking_min_pchembl_span")
+            else model_config.ranking_min_pchembl_span,
+        )
+        metrics = _with_metric_prefix(metrics, metric_key_prefix)
+        _append_assay_spearman_log(
             self,
-            self.model,
-            active_eval_dataset,
+            metrics,
+            assay_records,
             metric_key_prefix=metric_key_prefix,
         )
-        metrics.update(component_metrics)
-        metrics.update(reward_metrics)
-        extra_metrics = {**component_metrics, **reward_metrics}
-        if extra_metrics:
-            self.log(extra_metrics)
+        self.log(metrics)
+        self.control = self.callback_handler.on_evaluate(
+            self.args,
+            self.state,
+            self.control,
+            metrics,
+        )
         return metrics
 
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
@@ -270,7 +512,10 @@ class RewardModelTrainer(Trainer):
         logs = dict(logs)
         if "loss" in logs:
             logs.update(self._consume_train_component_logs())
-        return super().log(logs, start_time=start_time)
+        parent_log = super().log
+        if "start_time" in inspect.signature(parent_log).parameters:
+            return parent_log(logs, start_time=start_time)
+        return parent_log(logs)
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
         if not self.args.should_save:
@@ -299,6 +544,8 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         dataloader_num_workers=config.dataloader_num_workers,
         seed=config.seed,
         fp16=config.fp16,
+        optim=config.optim,
+        save_safetensors=config.save_safetensors,
         save_total_limit=config.save_total_limit,
         remove_unused_columns=False,
         disable_tqdm=True,
@@ -320,12 +567,15 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         for key, value in args_kwargs.items()
         if key in init_params
     }
-    if "evaluation_strategy" in init_params:
-        args_kwargs["evaluation_strategy"] = schedule_strategy
-    elif "eval_strategy" in init_params:
+    if "eval_strategy" in init_params:
         args_kwargs["eval_strategy"] = schedule_strategy
+    elif "evaluation_strategy" in init_params:
+        args_kwargs["evaluation_strategy"] = schedule_strategy
     try:
-        return TrainingArguments(**args_kwargs)
+        training_args = TrainingArguments(**args_kwargs)
+        training_args.reward_length_bucketing = config.length_bucketing
+        training_args.length_bucket_size_multiplier = config.length_bucket_size_multiplier
+        return training_args
     except ImportError as exc:
         raise ImportError(
             "RewardModel training via Hugging Face Trainer requires the 'accelerate' package. "
