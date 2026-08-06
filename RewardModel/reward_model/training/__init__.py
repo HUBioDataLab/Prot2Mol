@@ -26,6 +26,7 @@ from .data import (
     save_pair_dataset_from_example_dataset,
 )
 from .evaluation import (
+    build_complete_coverage_ranking_partitions,
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_joint_evaluation_metrics,
@@ -64,6 +65,7 @@ __all__ = [
     "TokenizedSplitArtifacts",
     "build_group_id",
     "build_pair_records",
+    "build_complete_coverage_ranking_partitions",
     "compute_classification_metrics",
     "compute_groupwise_spearman",
     "compute_joint_evaluation_metrics",

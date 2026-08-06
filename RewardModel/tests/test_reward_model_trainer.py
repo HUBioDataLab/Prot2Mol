@@ -565,9 +565,9 @@ def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pair
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
 
-    pair_ready_examples = _pair_ready_examples()
-    train_examples = pair_ready_examples.select([0, 1])
-    val_examples = pair_ready_examples.select([2, 3])
+    listwise_ready_examples = _metric_ready_examples()
+    train_examples = listwise_ready_examples.select([0, 1, 2])
+    val_examples = listwise_ready_examples.select([3, 4, 5])
     test_examples = Dataset.from_list(
         [
             {
@@ -652,6 +652,19 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
                 "molecule_input_ids": [3, 3, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
             },
+            {
+                "example_id": 2,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M2",
+                "pchembl_value": 5.5,
+                "binary_label": 0,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [4, 4, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
         ]
     )
     val_examples = Dataset.from_list(
@@ -680,6 +693,19 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
                 "protein_input_ids": [4, 4, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [6, 6, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+            {
+                "example_id": 2,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M4",
+                "pchembl_value": 6.0,
+                "binary_label": 1,
+                "protein_input_ids": [4, 4, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [7, 7, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
             },
         ]
@@ -773,15 +799,18 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert captured["train_called"] is True
     assert captured["evaluate_called"] is True
     assert captured["train_dataset_len"] == 1
-    assert captured["eval_dataset_len"] == 2
+    assert captured["eval_dataset_len"] == 3
+    assert captured["eval_dataset"].ranking_max_ligands == 16
+    assert captured["eval_dataset"].ranking_num_partitions == 3
+    assert captured["eval_dataset"].ranking_partition_seed == 42
     assert captured["val2_eval_dataset"] is None
     assert isinstance(captured["data_collator"], RewardAssayListCollator)
-    assert summary["train_examples"] == 2
-    assert summary["val_examples"] == 2
+    assert summary["train_examples"] == 3
+    assert summary["val_examples"] == 3
     assert summary["test_examples"] == 1
     assert summary["train_ranking_lists"] == 1
-    assert summary["train_ranked_examples"] == 2
-    assert summary["train_classification_examples"] == 2
+    assert summary["train_ranked_examples"] == 3
+    assert summary["train_classification_examples"] == 3
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):

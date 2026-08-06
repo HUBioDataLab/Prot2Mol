@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections import defaultdict
 from typing import Any, Dict, Mapping, Sequence
@@ -19,9 +20,92 @@ from sklearn.metrics import (
 )
 
 from .data import RewardPairCollator, RewardPairDataset
-from ..model.losses import ligunity_listwise_loss
+from ..model.losses import MIN_LISTWISE_LIGANDS, ligunity_listwise_loss
 
 ASSAY_SPEARMAN_LOG_FILENAME = "eval_assay_spearman.jsonl"
+
+
+def build_complete_coverage_ranking_partitions(
+    *,
+    pchembl_values: torch.Tensor,
+    ranking_group_ids: torch.Tensor,
+    max_list_size: int = 16,
+    num_partitions: int = 3,
+    seed: int = 42,
+    min_pchembl_span: float = 0.5,
+) -> list[torch.Tensor]:
+    """Build fixed balanced ranking lists that cover every eligible row once.
+
+    Each returned tensor describes one complete validation partition. Negative
+    ids mark assays that are ineligible for listwise ranking. Eligible assays
+    are shuffled deterministically and split into balanced lists whose sizes
+    differ by at most one, avoiding unusable one- or two-item remainders.
+    """
+    targets = pchembl_values.reshape(-1).detach().cpu().float()
+    assay_ids = ranking_group_ids.reshape(-1).detach().cpu().long()
+    if targets.shape != assay_ids.shape:
+        raise ValueError("pchembl_values and ranking_group_ids must have the same shape")
+    if not torch.isfinite(targets).all():
+        raise ValueError("pchembl_values must contain only finite values")
+    if (assay_ids < 0).any():
+        raise ValueError("ranking_group_ids must be non-negative for evaluation")
+    if max_list_size < 5:
+        raise ValueError("max_list_size must be >= 5 for complete balanced coverage")
+    if num_partitions <= 0:
+        raise ValueError("num_partitions must be > 0")
+    if min_pchembl_span < 0.0 or not math.isfinite(float(min_pchembl_span)):
+        raise ValueError("min_pchembl_span must be finite and >= 0")
+
+    partitions = [torch.full_like(assay_ids, -1) for _ in range(num_partitions)]
+    next_list_ids = [0 for _ in range(num_partitions)]
+    max_seed = (1 << 63) - 1
+
+    for assay_id_tensor in torch.unique(assay_ids, sorted=True):
+        assay_id = int(assay_id_tensor.item())
+        assay_indices = torch.nonzero(
+            assay_ids == assay_id,
+            as_tuple=False,
+        ).flatten()
+        assay_targets = targets.index_select(0, assay_indices)
+        assay_size = int(assay_indices.numel())
+        if assay_size < MIN_LISTWISE_LIGANDS:
+            continue
+        if float((assay_targets.max() - assay_targets.min()).item()) < float(
+            min_pchembl_span
+        ):
+            continue
+
+        list_count = math.ceil(assay_size / max_list_size)
+        base_size, larger_list_count = divmod(assay_size, list_count)
+        list_sizes = [base_size + 1] * larger_list_count + [base_size] * (
+            list_count - larger_list_count
+        )
+        if min(list_sizes) < MIN_LISTWISE_LIGANDS:
+            raise ValueError(
+                "max_list_size cannot cover this assay without a ranking list "
+                f"smaller than {MIN_LISTWISE_LIGANDS}"
+            )
+
+        for partition_index, partition_ids in enumerate(partitions):
+            generator = torch.Generator()
+            partition_seed = (
+                int(seed)
+                + 1_000_003 * (partition_index + 1)
+                + 97_409 * (assay_id + 1)
+            ) % max_seed
+            generator.manual_seed(partition_seed)
+            order = torch.randperm(assay_size, generator=generator)
+            shuffled_indices = assay_indices.index_select(0, order)
+            cursor = 0
+            for list_size in list_sizes:
+                list_indices = shuffled_indices[cursor : cursor + list_size]
+                partition_ids[list_indices] = next_list_ids[partition_index]
+                next_list_ids[partition_index] += 1
+                cursor += list_size
+            if cursor != assay_size:
+                raise RuntimeError("validation partition did not cover the complete assay")
+
+    return partitions
 
 
 def compute_classification_metrics(
@@ -62,7 +146,11 @@ def compute_joint_evaluation_metrics(
     ranking_loss_weight: float,
     bce_pos_weight: float,
     ranking_temperature: float,
+    ranking_affinity_margin: float,
     ranking_min_pchembl_span: float,
+    ranking_max_ligands: int = 16,
+    ranking_num_partitions: int = 3,
+    ranking_partition_seed: int = 42,
 ) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     """Compute deterministic full-dataset losses and metrics from one scoring pass."""
     logits = activity_logits.reshape(-1).detach().cpu().float()
@@ -85,13 +173,28 @@ def compute_joint_evaluation_metrics(
         labels,
         pos_weight=pos_weight,
     )
-    ranking_loss = ligunity_listwise_loss(
-        scores,
-        pchembl,
-        group_indices,
-        temperature=ranking_temperature,
+    ranking_partitions = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl,
+        ranking_group_ids=group_indices,
+        max_list_size=ranking_max_ligands,
+        num_partitions=ranking_num_partitions,
+        seed=ranking_partition_seed,
         min_pchembl_span=ranking_min_pchembl_span,
     )
+    partition_losses = [
+        ligunity_listwise_loss(
+            scores,
+            pchembl,
+            partition_group_ids,
+            temperature=ranking_temperature,
+            # Eligibility is determined from the complete assay before it is
+            # partitioned, matching the training dataset's sampling contract.
+            min_pchembl_span=0.0,
+            affinity_margin=ranking_affinity_margin,
+        )
+        for partition_group_ids in ranking_partitions
+    ]
+    ranking_loss = torch.stack(partition_losses).mean()
     total_loss = (
         float(classification_loss_weight) * classification_loss
         + float(ranking_loss_weight) * ranking_loss
@@ -104,7 +207,7 @@ def compute_joint_evaluation_metrics(
         group_ids=string_group_ids,
         ranking_scores=scores.tolist(),
         pchembl_values=pchembl.tolist(),
-        min_group_size=2,
+        min_group_size=MIN_LISTWISE_LIGANDS,
         min_pchembl_span=ranking_min_pchembl_span,
     )
     metrics.update(spearman_metrics)
@@ -116,6 +219,15 @@ def compute_joint_evaluation_metrics(
             "eval_ranking_loss": float(ranking_loss.item()),
             "eval_num_examples": float(logits.numel()),
             "eval_num_ranking_groups": float(len(assay_records)),
+            "eval_num_ranking_lists": float(
+                int(ranking_partitions[0].max().item()) + 1
+                if (ranking_partitions[0] >= 0).any()
+                else 0
+            ),
+            "eval_num_ranked_examples": float(
+                (ranking_partitions[0] >= 0).sum().item()
+            ),
+            "eval_ranking_partitions": float(len(ranking_partitions)),
         }
     )
     return metrics, assay_records

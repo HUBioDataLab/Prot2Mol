@@ -1,6 +1,8 @@
+import math
+
 import pytest
 
-from reward_model.model import RewardModelConfig
+from reward_model.model import DEFAULT_RANKING_AFFINITY_MARGIN, RewardModelConfig
 
 
 def test_reward_model_config_round_trip(tmp_path):
@@ -39,6 +41,10 @@ def test_reward_model_config_loads_legacy_payload_with_deduplication_defaults():
     assert config.deduplicate_protein_inputs is True
     assert config.deduplicate_molecule_inputs is True
     assert config.fusion_attention_backend == "manual"
+    assert config.ranking_affinity_margin == pytest.approx(math.log10(3.0))
+    assert config.ranking_affinity_margin == pytest.approx(
+        DEFAULT_RANKING_AFFINITY_MARGIN
+    )
 
 
 def test_reward_model_config_maps_legacy_pair_weight_to_listwise_ranking():
@@ -61,3 +67,12 @@ def test_reward_model_config_rejects_unknown_fusion_attention_backend():
         assert "fusion_attention_backend" in str(exc)
     else:
         raise AssertionError("Expected an invalid fusion backend to be rejected")
+
+
+@pytest.mark.parametrize(
+    "affinity_margin",
+    [-0.1, float("nan"), float("inf")],
+)
+def test_reward_model_config_rejects_invalid_affinity_margin(affinity_margin):
+    with pytest.raises(ValueError, match="ranking_affinity_margin"):
+        RewardModelConfig(ranking_affinity_margin=affinity_margin)

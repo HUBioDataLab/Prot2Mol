@@ -428,6 +428,7 @@ class RewardModelTrainer(Trainer):
         gathered_labels: list[torch.Tensor] = []
         gathered_pchembl: list[torch.Tensor] = []
         gathered_groups: list[torch.Tensor] = []
+        gathered_example_indices: list[torch.Tensor] = []
         for batch in dataloader:
             batch = self._prepare_inputs(batch)
             with torch.no_grad(), self.compute_loss_context_manager():
@@ -439,14 +440,16 @@ class RewardModelTrainer(Trainer):
                     batch["activity_labels"].detach(),
                     batch["pchembl_values"].detach(),
                     batch["evaluation_group_indices"].detach(),
+                    batch["evaluation_example_indices"].detach(),
                 )
             )
-            logits, scores, labels, pchembl, group_indices = gathered
+            logits, scores, labels, pchembl, group_indices, example_indices = gathered
             gathered_logits.append(logits.cpu())
             gathered_scores.append(scores.cpu())
             gathered_labels.append(labels.cpu())
             gathered_pchembl.append(pchembl.cpu())
             gathered_groups.append(group_indices.cpu())
+            gathered_example_indices.append(example_indices.cpu())
 
         if was_training:
             model.train()
@@ -457,8 +460,23 @@ class RewardModelTrainer(Trainer):
         activity_labels = torch.cat(gathered_labels)
         pchembl_values = torch.cat(gathered_pchembl)
         ranking_group_ids = torch.cat(gathered_groups)
+        evaluation_example_indices = torch.cat(gathered_example_indices)
         if (ranking_group_ids < 0).any():
             raise RuntimeError("Evaluation observations must have stable assay group ids")
+        if (evaluation_example_indices < 0).any():
+            raise RuntimeError("Evaluation observations must have stable example indices")
+        if (
+            evaluation_example_indices.numel() != len(active_eval_dataset)
+            or torch.unique(evaluation_example_indices).numel()
+            != len(active_eval_dataset)
+        ):
+            raise RuntimeError("Evaluation must score every example exactly once")
+        stable_order = torch.argsort(evaluation_example_indices, stable=True)
+        activity_logits = activity_logits.index_select(0, stable_order)
+        ranking_scores = ranking_scores.index_select(0, stable_order)
+        activity_labels = activity_labels.index_select(0, stable_order)
+        pchembl_values = pchembl_values.index_select(0, stable_order)
+        ranking_group_ids = ranking_group_ids.index_select(0, stable_order)
 
         model_config = self.model.config
         metrics, assay_records = compute_joint_evaluation_metrics(
@@ -472,9 +490,25 @@ class RewardModelTrainer(Trainer):
             ranking_loss_weight=model_config.ranking_loss_weight,
             bce_pos_weight=model_config.bce_pos_weight,
             ranking_temperature=model_config.ranking_temperature,
+            ranking_affinity_margin=model_config.ranking_affinity_margin,
             ranking_min_pchembl_span=active_eval_dataset.ranking_min_pchembl_span
             if hasattr(active_eval_dataset, "ranking_min_pchembl_span")
             else model_config.ranking_min_pchembl_span,
+            ranking_max_ligands=getattr(
+                active_eval_dataset,
+                "ranking_max_ligands",
+                16,
+            ),
+            ranking_num_partitions=getattr(
+                active_eval_dataset,
+                "ranking_num_partitions",
+                3,
+            ),
+            ranking_partition_seed=getattr(
+                active_eval_dataset,
+                "ranking_partition_seed",
+                int(self.args.seed),
+            ),
         )
         metrics = _with_metric_prefix(metrics, metric_key_prefix)
         _append_assay_spearman_log(

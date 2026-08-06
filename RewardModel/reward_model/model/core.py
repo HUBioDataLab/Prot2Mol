@@ -199,6 +199,7 @@ class RewardModel(nn.Module):
             # constructing non-overlapping sublists. Reapplying it to each
             # random sublist would silently discard valid assay opportunities.
             min_pchembl_span=0.0,
+            affinity_margin=self._config.ranking_affinity_margin,
         )
 
     def _compute_legacy_pair_ranking_loss(
@@ -231,6 +232,10 @@ class RewardModel(nn.Module):
             pair_group_ids,
             temperature=self._config.ranking_temperature,
             min_pchembl_span=0.0,
+            min_list_size=2,
+            # Legacy pairs carry only positive/negative ordering labels, not
+            # measured affinity differences to which a pChEMBL margin applies.
+            affinity_margin=0.0,
         )
 
     def _compute_classification_loss(

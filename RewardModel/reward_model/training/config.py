@@ -27,6 +27,7 @@ class RewardTrainingDataConfig:
     tokenization_batch_size: int = 64
     ranking_max_ligands: int = 16
     ranking_opportunity_divisor: int = 32
+    evaluation_ranking_partitions: int = 3
     ranking_min_pchembl_span: float = 0.5
     max_classification_only_per_item: int = 16
 
@@ -44,12 +45,14 @@ class RewardTrainingDataConfig:
             raise ValueError("tokenized_dataset_dir must be provided")
         if self.tokenization_batch_size <= 0:
             raise ValueError("tokenization_batch_size must be > 0")
-        if self.ranking_max_ligands <= 1:
-            raise ValueError("ranking_max_ligands must be > 1")
+        if self.ranking_max_ligands < 5:
+            raise ValueError("ranking_max_ligands must be >= 5")
         if self.ranking_opportunity_divisor < self.ranking_max_ligands:
             raise ValueError(
                 "ranking_opportunity_divisor must be >= ranking_max_ligands"
             )
+        if self.evaluation_ranking_partitions <= 0:
+            raise ValueError("evaluation_ranking_partitions must be > 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
         if self.max_classification_only_per_item <= 0:

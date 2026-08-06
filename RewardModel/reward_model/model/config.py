@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional
+
+from .losses import DEFAULT_RANKING_AFFINITY_MARGIN
 
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
@@ -28,6 +31,7 @@ class RewardModelConfig:
     ranking_loss_weight: float = 1.0
     classification_loss_weight: float = 1.0
     ranking_temperature: float = 1.0
+    ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
     bce_pos_weight: float = 1.0
     deduplicate_protein_inputs: bool = True
@@ -76,6 +80,10 @@ class RewardModelConfig:
             raise ValueError("classification_loss_weight must be >= 0")
         if self.ranking_temperature <= 0.0:
             raise ValueError("ranking_temperature must be > 0")
+        if self.ranking_affinity_margin < 0.0 or not math.isfinite(
+            float(self.ranking_affinity_margin)
+        ):
+            raise ValueError("ranking_affinity_margin must be finite and >= 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
         if not isinstance(self.deduplicate_protein_inputs, bool):

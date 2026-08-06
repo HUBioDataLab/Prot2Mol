@@ -126,6 +126,9 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
     eval_dataset = RewardEvaluationDataset(
         val_examples,
         ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+        ranking_max_ligands=config.data.ranking_max_ligands,
+        ranking_num_partitions=config.data.evaluation_ranking_partitions,
+        ranking_partition_seed=config.training.seed,
     )
     val2_eval_dataset = None
     val2_examples = None
@@ -149,6 +152,9 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         val2_eval_dataset = RewardEvaluationDataset(
             val2_examples,
             ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+            ranking_max_ligands=config.data.ranking_max_ligands,
+            ranking_num_partitions=config.data.evaluation_ranking_partitions,
+            ranking_partition_seed=config.training.seed,
         )
     model = RewardModel(config.model)
     collator = RewardAssayListCollator(

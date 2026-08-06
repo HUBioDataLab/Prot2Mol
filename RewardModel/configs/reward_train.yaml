@@ -12,6 +12,7 @@ model:
   ranking_loss_weight: 1.0
   classification_loss_weight: 1.0
   ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
   ranking_min_pchembl_span: 0.5
   bce_pos_weight: 1.0
   deduplicate_protein_inputs: true
@@ -20,18 +21,19 @@ model:
   freeze_molecule_encoder: false
 
 data:
-  train_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/train.parquet
-  val_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/val.parquet
-  test_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/test.parquet
-  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl37_mmseqs50
+  train_parquet_path: ../../dataset/processed/chembl_37/protein_cluster_50/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl_37/protein_cluster_50/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl_37/protein_cluster_50/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl_37_mmseqs50
   tokenization_batch_size: 64
   ranking_max_ligands: 16
   ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
   ranking_min_pchembl_span: 0.5
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/chembl37_mmseqs50_ranking_loss_1.0
+  output_dir: ../outputs/chembl_37_mmseqs50_ranking_loss_1.0
   num_train_epochs: 10
   per_device_train_batch_size: 1
   per_device_eval_batch_size: 4
