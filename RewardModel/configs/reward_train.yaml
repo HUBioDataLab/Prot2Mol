@@ -17,8 +17,8 @@ model:
   bce_pos_weight: 1.0
   deduplicate_protein_inputs: true
   deduplicate_molecule_inputs: true
-  freeze_protein_encoder: false
-  freeze_molecule_encoder: false
+  freeze_protein_encoder: true
+  freeze_molecule_encoder: true
 
 data:
   train_parquet_path: ../../dataset/processed/chembl_37/protein_cluster_50_activity_balanced/train.parquet

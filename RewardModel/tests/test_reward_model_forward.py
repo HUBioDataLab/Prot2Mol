@@ -55,8 +55,15 @@ def test_reward_model_forward_handles_hidden_dim_mismatch_and_losses():
     assert "loss" in outputs
     assert model.config.protein_hidden_size == 6
     assert model.config.molecule_hidden_size == 8
-    assert len(model.ranking_head.hidden_layers) == 4
-    assert len(model.classification_head.hidden_layers) == 4
+    expected_head_dims = [2048, 1024, 512, 256, 128]
+    assert [
+        model.ranking_head.fc1.out_features,
+        *(layer.out_features for layer in model.ranking_head.hidden_layers),
+    ] == expected_head_dims
+    assert [
+        model.classification_head.fc1.out_features,
+        *(layer.out_features for layer in model.classification_head.hidden_layers),
+    ] == expected_head_dims
 
 
 def test_reward_model_encoders_can_be_frozen_independently():

@@ -62,7 +62,7 @@ class RewardModel(nn.Module):
             attention_backend=self._config.fusion_attention_backend,
         )
         head_input_dim = self._config.fusion_hidden_dim * 2
-        ranking_hidden_dims = (8192, 4096, 2048, 1024, 512)
+        ranking_hidden_dims = (2048, 1024, 512, 256, 128)
         classification_hidden_dims = (2048, 1024, 512, 256, 128)
         self.ranking_head = RewardMLPHead(
             input_dim=head_input_dim,
