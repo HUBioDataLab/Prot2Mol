@@ -4,6 +4,7 @@ import pandas as pd
 
 from data_processing.build_chembl_binding_dataset import (
     assign_cluster_splits_balanced,
+    build_activity_balanced_cluster_stats,
     build_activity_query,
     build_cluster_disjoint_splits,
     curate_activity_rows,
@@ -201,3 +202,91 @@ def test_cluster_split_is_deterministic_and_leakage_free(tmp_path):
     assert all(value == 0 for value in artifacts["leakage_checks"].values())
     assert validate_dataset(split_frame)["binary_label_mismatches"] == 0
     assert all((tmp_path / "out" / f"{split}.parquet").exists() for split in ("train", "val", "test"))
+
+
+def test_cluster_split_preserves_fixed_assignments():
+    config = SplitConfig(val_ratio=0.1, test_ratio=0.1, random_seed=42)
+    cluster_stats = pd.DataFrame(
+        {
+            "protein_cluster_50": [f"cluster_{index}" for index in range(30)],
+            "row_count": [10 + index for index in range(30)],
+            "pos_count": [5 + index // 2 for index in range(30)],
+        }
+    )
+    cluster_stats["neg_count"] = (
+        cluster_stats["row_count"] - cluster_stats["pos_count"]
+    )
+    fixed = {
+        "cluster_29": "train",
+        "cluster_28": "val",
+        "cluster_27": "test",
+    }
+
+    assignment = assign_cluster_splits_balanced(
+        cluster_stats,
+        config,
+        fixed_assignments=fixed,
+        swap_trials=2_000,
+    )
+
+    assigned = assignment.set_index("protein_cluster_50")
+    assert assigned.loc["cluster_29", "split"] == "train"
+    assert assigned.loc["cluster_28", "split"] == "val"
+    assert assigned.loc["cluster_27", "split"] == "test"
+    assert assigned.loc["cluster_29", "fixed_split"] == "train"
+    assert assigned.loc["cluster_28", "fixed_split"] == "val"
+    assert assigned.loc["cluster_27", "fixed_split"] == "test"
+
+
+def test_activity_balanced_stats_anchor_three_largest_potency_clusters():
+    rows = []
+    cluster_sizes = {
+        "potency_large": 12,
+        "potency_medium": 9,
+        "potency_small": 6,
+        "ki_a": 5,
+        "ki_b": 5,
+        "ki_c": 5,
+    }
+    for cluster_id, size in cluster_sizes.items():
+        activity_type = "Potency" if cluster_id.startswith("potency") else "Ki"
+        for index in range(size):
+            rows.append(
+                {
+                    "protein_cluster_50": cluster_id,
+                    "protein_sequence": f"SEQ_{cluster_id}",
+                    "protein_length": 100 if index else 2_000,
+                    "target_chembl_id": f"TARGET_{cluster_id}",
+                    "assay_group_id": f"ASSAY_{cluster_id}",
+                    "binary_label": int(index % 2 == 0),
+                    "pchembl_value": 5.0 + index / 10.0,
+                    "activity_type": activity_type,
+                }
+            )
+    frame = pd.DataFrame(rows)
+    config = SplitConfig(val_ratio=0.1, test_ratio=0.1, random_seed=42)
+
+    stats, metric_weights, fixed, metadata = build_activity_balanced_cluster_stats(
+        frame,
+        config,
+    )
+
+    assert fixed == {
+        "potency_large": "train",
+        "potency_medium": "val",
+        "potency_small": "test",
+    }
+    assert "activity_rows__Potency" in stats.columns
+    assert "activity_assays__Potency" in metric_weights
+    assert "activity_rows__Potency" not in metric_weights
+    assert metric_weights["activity_rows__Ki"] == 40.0
+    assert metric_weights["reward_protein_rows__Ki"] == 40.0
+    assert "reward_protein_rows__Potency" in stats.columns
+    assert "reward_protein_rows__Potency" not in metric_weights
+    assert metadata["anchor_activity_type"] == "Potency"
+    assert metadata["reward_protein_max_residues"] == 1022
+    assert [item["activity_rows"] for item in metadata["anchor_clusters"]] == [
+        12,
+        9,
+        6,
+    ]
