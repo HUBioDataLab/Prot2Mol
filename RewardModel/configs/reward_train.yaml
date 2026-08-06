@@ -16,6 +16,8 @@ model:
   bce_pos_weight: 1.0
   deduplicate_protein_inputs: true
   deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
 
 data:
   train_parquet_path: ../../dataset/processed/chembl37/protein_cluster_50/train.parquet
@@ -29,13 +31,13 @@ data:
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/chembl37_mmseqs50
-  num_train_epochs: 3
+  output_dir: ../outputs/chembl37_mmseqs50_ranking_loss_1.0
+  num_train_epochs: 10
   per_device_train_batch_size: 1
   per_device_eval_batch_size: 4
   gradient_accumulation_steps: 8
   eval_steps: 1000
-  learning_rate: 1e-4
+  learning_rate: 1.0e-4
   weight_decay: 0.01
   max_grad_norm: 1.0
   logging_steps: 10
@@ -49,4 +51,5 @@ training:
   save_safetensors: false
   save_total_limit: 2
   training_mode: single_gpu
-  report_to: []
+  report_to:
+    - wandb

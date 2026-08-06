@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -182,13 +182,27 @@ class TokenFusion(nn.Module):
 
 
 class RewardMLPHead(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, dropout: float):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: Sequence[int],
+        dropout: float,
+    ):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.ln1 = nn.LayerNorm(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.fc1 = nn.Linear(input_dim, hidden_dims[0])
+        self.ln1 = nn.LayerNorm(hidden_dims[0])
+        self.hidden_layers = nn.ModuleList(
+            nn.Linear(input_dim, output_dim)
+            for input_dim, output_dim in zip(hidden_dims, hidden_dims[1:])
+        )
+        self.hidden_norms = nn.ModuleList(
+            nn.LayerNorm(hidden_dim) for hidden_dim in hidden_dims[1:]
+        )
+        self.fc2 = nn.Linear(hidden_dims[-1], 1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.dropout(self.ln1(F.gelu(self.fc1(x))))
+        for layer, norm in zip(self.hidden_layers, self.hidden_norms):
+            x = self.dropout(norm(F.gelu(layer(x))))
         return self.fc2(x).squeeze(-1)

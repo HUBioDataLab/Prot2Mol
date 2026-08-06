@@ -4,7 +4,7 @@ from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, RewardModelOutput
 
 
-def _build_model():
+def _build_model(**config_overrides):
     protein_bundle = LoadedEncoder(
         name_or_path="protein/dummy",
         tokenizer=DummyTokenizer(),
@@ -24,6 +24,7 @@ def _build_model():
         fusion_num_heads=2,
         dropout=0.0,
         pooling_type="mean",
+        **config_overrides,
     )
     return RewardModel(config=config, protein_bundle=protein_bundle, molecule_bundle=molecule_bundle)
 
@@ -54,6 +55,42 @@ def test_reward_model_forward_handles_hidden_dim_mismatch_and_losses():
     assert "loss" in outputs
     assert model.config.protein_hidden_size == 6
     assert model.config.molecule_hidden_size == 8
+    assert len(model.ranking_head.hidden_layers) == 4
+    assert len(model.classification_head.hidden_layers) == 4
+
+
+def test_reward_model_encoders_can_be_frozen_independently():
+    protein_frozen = _build_model(
+        freeze_protein_encoder=True,
+        freeze_molecule_encoder=False,
+    )
+    protein_frozen.train()
+    assert not any(
+        parameter.requires_grad
+        for parameter in protein_frozen.protein_encoder.parameters()
+    )
+    assert all(
+        parameter.requires_grad
+        for parameter in protein_frozen.molecule_encoder.parameters()
+    )
+    assert protein_frozen.protein_encoder.training is False
+    assert protein_frozen.molecule_encoder.training is True
+
+    molecule_frozen = _build_model(
+        freeze_protein_encoder=False,
+        freeze_molecule_encoder=True,
+    )
+    molecule_frozen.train()
+    assert all(
+        parameter.requires_grad
+        for parameter in molecule_frozen.protein_encoder.parameters()
+    )
+    assert not any(
+        parameter.requires_grad
+        for parameter in molecule_frozen.molecule_encoder.parameters()
+    )
+    assert molecule_frozen.protein_encoder.training is True
+    assert molecule_frozen.molecule_encoder.training is False
 
 
 def test_reward_model_requires_pair_indices_together():

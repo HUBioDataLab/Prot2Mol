@@ -16,6 +16,8 @@ model:
   bce_pos_weight: 1.0
   deduplicate_protein_inputs: true
   deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
 
 data:
   train_parquet_path: ../../../dummy/train.parquet

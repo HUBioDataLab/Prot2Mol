@@ -32,6 +32,8 @@ class RewardModelConfig:
     bce_pos_weight: float = 1.0
     deduplicate_protein_inputs: bool = True
     deduplicate_molecule_inputs: bool = True
+    freeze_protein_encoder: bool = False
+    freeze_molecule_encoder: bool = False
 
     def __post_init__(self) -> None:
         self.validate()
@@ -80,6 +82,10 @@ class RewardModelConfig:
             raise ValueError("deduplicate_protein_inputs must be a boolean")
         if not isinstance(self.deduplicate_molecule_inputs, bool):
             raise ValueError("deduplicate_molecule_inputs must be a boolean")
+        if not isinstance(self.freeze_protein_encoder, bool):
+            raise ValueError("freeze_protein_encoder must be a boolean")
+        if not isinstance(self.freeze_molecule_encoder, bool):
+            raise ValueError("freeze_molecule_encoder must be a boolean")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

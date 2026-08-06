@@ -40,6 +40,12 @@ class RewardModel(nn.Module):
         self.molecule_tokenizer = molecule_bundle.tokenizer
         self.protein_encoder = protein_bundle.model
         self.molecule_encoder = molecule_bundle.model
+        self.protein_encoder.requires_grad_(not self._config.freeze_protein_encoder)
+        self.molecule_encoder.requires_grad_(not self._config.freeze_molecule_encoder)
+        if self._config.freeze_protein_encoder:
+            self.protein_encoder.eval()
+        if self._config.freeze_molecule_encoder:
+            self.molecule_encoder.eval()
 
         self._config.protein_hidden_size = self._config.protein_hidden_size or protein_bundle.hidden_size
         self._config.molecule_hidden_size = self._config.molecule_hidden_size or molecule_bundle.hidden_size
@@ -56,20 +62,30 @@ class RewardModel(nn.Module):
             attention_backend=self._config.fusion_attention_backend,
         )
         head_input_dim = self._config.fusion_hidden_dim * 2
+        ranking_hidden_dims = (8192, 4096, 2048, 1024, 512)
+        classification_hidden_dims = (2048, 1024, 512, 256, 128)
         self.ranking_head = RewardMLPHead(
             input_dim=head_input_dim,
-            hidden_dim=self._config.fusion_hidden_dim,
+            hidden_dims=ranking_hidden_dims,
             dropout=self._config.dropout,
         )
         self.classification_head = RewardMLPHead(
             input_dim=head_input_dim,
-            hidden_dim=self._config.fusion_hidden_dim,
+            hidden_dims=classification_hidden_dims,
             dropout=self._config.dropout,
         )
 
     @property
     def config(self) -> RewardModelConfig:
         return self._config
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._config.freeze_protein_encoder:
+            self.protein_encoder.eval()
+        if self._config.freeze_molecule_encoder:
+            self.molecule_encoder.eval()
+        return self
 
     def encode_protein(
         self,
