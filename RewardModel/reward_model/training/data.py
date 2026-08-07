@@ -13,6 +13,7 @@ from datasets import Dataset, Features, Value, load_from_disk
 from torch.utils.data import Dataset as TorchDataset
 
 from ..model import RewardModelConfig
+from ..model.losses import MIN_LISTWISE_LIGANDS
 from ..model.encoders import batch_encode_texts, load_tokenizer
 from .config import RewardTrainingDataConfig
 
@@ -381,9 +382,10 @@ class RewardAssayListDataset(TorchDataset):
     """Epoch-aware joint classification and assay-list ranking dataset.
 
     Every source observation appears exactly once as a classification example
-    per epoch. Eligible assays contribute ``ceil(n / opportunity_divisor)``
-    non-overlapping lists of at most ``ranking_max_ligands`` observations. The
-    selected ranking observations change deterministically with ``seed + epoch``.
+    per epoch. Assays with at least three ligands and sufficient affinity span
+    contribute ``ceil(n / opportunity_divisor)`` non-overlapping lists of at
+    most ``ranking_max_ligands`` observations. The selected ranking observations
+    change deterministically with ``seed + epoch``.
     """
 
     def __init__(
@@ -436,7 +438,7 @@ class RewardAssayListDataset(TorchDataset):
         self._eligible_group_ids = {
             group_id
             for group_id, indices in self._group_members.items()
-            if len(indices) >= 2
+            if len(indices) >= MIN_LISTWISE_LIGANDS
             and (
                 max(self._pchembl_values[index] for index in indices)
                 - min(self._pchembl_values[index] for index in indices)
@@ -693,16 +695,30 @@ class RewardAssayListDataset(TorchDataset):
 
 
 class RewardEvaluationDataset(TorchDataset):
-    """One-pass row-level evaluation view with stable integer assay ids."""
+    """One-pass evaluation view with stable complete-coverage list settings."""
 
     def __init__(
         self,
         example_dataset: Dataset,
         *,
         ranking_min_pchembl_span: float = 0.5,
+        ranking_max_ligands: int = 16,
+        ranking_num_partitions: int = 3,
+        ranking_partition_seed: int = 42,
     ):
+        if ranking_min_pchembl_span < 0.0 or not math.isfinite(
+            float(ranking_min_pchembl_span)
+        ):
+            raise ValueError("ranking_min_pchembl_span must be finite and >= 0")
+        if ranking_max_ligands < 5:
+            raise ValueError("ranking_max_ligands must be >= 5")
+        if ranking_num_partitions <= 0:
+            raise ValueError("ranking_num_partitions must be > 0")
         self.example_dataset = example_dataset
         self.ranking_min_pchembl_span = float(ranking_min_pchembl_span)
+        self.ranking_max_ligands = int(ranking_max_ligands)
+        self.ranking_num_partitions = int(ranking_num_partitions)
+        self.ranking_partition_seed = int(ranking_partition_seed)
         group_ids = [str(group_id) for group_id in example_dataset["group_id"]]
         self.group_id_to_index = {
             group_id: index for index, group_id in enumerate(sorted(set(group_ids)))
@@ -1067,6 +1083,7 @@ class RewardAssayListCollator(RewardPairCollator):
         ranking_group_ids: list[int] = []
         ranking_assay_ids: list[str] = []
         evaluation_group_indices: list[int] = []
+        evaluation_example_indices: list[int] = []
         next_group_id = 0
         for feature in features:
             rows = [dict(row) for row in feature["rows"]]
@@ -1082,8 +1099,10 @@ class RewardAssayListCollator(RewardPairCollator):
 
             local_ranking_ids: list[int] = []
             for group_size, assay_id in zip(group_sizes, assay_ids):
-                if group_size < 2:
-                    raise ValueError("ranking lists must contain at least two observations")
+                if group_size < MIN_LISTWISE_LIGANDS:
+                    raise ValueError(
+                        "ranking lists must contain at least three observations"
+                    )
                 local_ranking_ids.extend([next_group_id] * group_size)
                 ranking_assay_ids.append(assay_id)
                 next_group_id += 1
@@ -1099,6 +1118,15 @@ class RewardAssayListCollator(RewardPairCollator):
                         "evaluation_group_indices must align with feature rows"
                     )
                 evaluation_group_indices.extend(int(value) for value in feature_eval_groups)
+            feature_example_indices = feature.get("example_indices")
+            if feature_example_indices is None:
+                evaluation_example_indices.extend([-1] * len(rows))
+            else:
+                if len(feature_example_indices) != len(rows):
+                    raise ValueError("example_indices must align with feature rows")
+                evaluation_example_indices.extend(
+                    int(value) for value in feature_example_indices
+                )
             all_rows.extend(rows)
 
         if not all_rows:
@@ -1118,6 +1146,10 @@ class RewardAssayListCollator(RewardPairCollator):
             "ranking_group_ids": torch.tensor(ranking_group_ids, dtype=torch.long),
             "evaluation_group_indices": torch.tensor(
                 evaluation_group_indices,
+                dtype=torch.long,
+            ),
+            "evaluation_example_indices": torch.tensor(
+                evaluation_example_indices,
                 dtype=torch.long,
             ),
             "ranking_assay_ids": ranking_assay_ids,

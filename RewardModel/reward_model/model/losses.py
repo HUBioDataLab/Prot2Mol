@@ -5,6 +5,10 @@ import math
 import torch
 
 
+MIN_LISTWISE_LIGANDS = 3
+DEFAULT_RANKING_AFFINITY_MARGIN = math.log10(3.0)
+
+
 def _validate_listwise_inputs(
     ranking_scores: torch.Tensor,
     pchembl_values: torch.Tensor,
@@ -52,6 +56,8 @@ def ligunity_listwise_loss(
     *,
     temperature: float = 1.0,
     min_pchembl_span: float = 0.5,
+    min_list_size: int = MIN_LISTWISE_LIGANDS,
+    affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN,
 ) -> torch.Tensor:
     """Compute LigUnity's weighted Plackett-Luce ranking objective.
 
@@ -60,12 +66,21 @@ def ligunity_listwise_loss(
     "Hierarchical affinity landscape navigation through learning a shared
     pocket-ligand space". Equal-affinity ligands share the mean positional
     weight of their occupied ranks, making the objective permutation invariant
-    within ties rather than imposing an arbitrary order.
+    within ties rather than imposing an arbitrary order. By default, groups
+    with fewer than three ligands are classification-only, matching LigUnity's
+    listwise training boundary. At each selection step, ligands within the
+    affinity margin are omitted from the denominator. The default margin is
+    log10(3) pChEMBL units, so only ligands measured as more than threefold
+    weaker compete with the selected ligand.
     """
     if temperature <= 0.0 or not math.isfinite(float(temperature)):
         raise ValueError("temperature must be finite and > 0")
     if min_pchembl_span < 0.0 or not math.isfinite(float(min_pchembl_span)):
         raise ValueError("min_pchembl_span must be finite and >= 0")
+    if min_list_size < 2:
+        raise ValueError("min_list_size must be >= 2")
+    if affinity_margin < 0.0 or not math.isfinite(float(affinity_margin)):
+        raise ValueError("affinity_margin must be finite and >= 0")
 
     scores, targets, group_ids = _validate_listwise_inputs(
         ranking_scores,
@@ -103,7 +118,7 @@ def ligunity_listwise_loss(
         group_scores = scaled_scores.index_select(0, group_indices)
         group_targets = targets.index_select(0, group_indices)
         list_size = int(group_scores.numel())
-        if list_size < 2:
+        if list_size < min_list_size:
             continue
         if float((group_targets.max() - group_targets.min()).detach().item()) < min_pchembl_span:
             continue
@@ -111,10 +126,6 @@ def ligunity_listwise_loss(
         affinity_order = torch.argsort(group_targets, descending=True, stable=True)
         ordered_targets = group_targets.index_select(0, affinity_order)
         ordered_scores = group_scores.index_select(0, affinity_order)
-        suffix_log_denominators = torch.logcumsumexp(
-            ordered_scores.flip(0),
-            dim=0,
-        ).flip(0)
         _, tie_counts = torch.unique_consecutive(
             ordered_targets,
             return_counts=True,
@@ -124,7 +135,12 @@ def ligunity_listwise_loss(
         tie_start = 0
         for tie_count_tensor in tie_counts:
             tie_count = int(tie_count_tensor.item())
-            log_denominator = suffix_log_denominators[tie_start]
+            tie_end = tie_start + tie_count
+            tie_target = ordered_targets[tie_start]
+            tie_scores = ordered_scores[tie_start:tie_end]
+            weaker_scores = ordered_scores[
+                ordered_targets < tie_target - float(affinity_margin)
+            ]
             position_weight = _tie_averaged_position_weight(
                 first_position=first_position,
                 tie_count=tie_count,
@@ -132,12 +148,14 @@ def ligunity_listwise_loss(
                 device=group_scores.device,
                 dtype=group_scores.dtype,
             )
-            group_loss = group_loss + position_weight * (
-                tie_count * log_denominator
-                - ordered_scores[tie_start : tie_start + tie_count].sum()
-            )
+            if weaker_scores.numel() > 0:
+                weaker_logsumexp = torch.logsumexp(weaker_scores, dim=0)
+                selection_losses = (
+                    torch.logaddexp(tie_scores, weaker_logsumexp) - tie_scores
+                )
+                group_loss = group_loss + position_weight * selection_losses.sum()
             first_position += tie_count
-            tie_start += tie_count
+            tie_start = tie_end
         list_losses.append(group_loss)
 
     if not list_losses:

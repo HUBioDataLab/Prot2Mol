@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional, Sequence
 
 import torch
@@ -60,20 +61,36 @@ class RewardModel(nn.Module):
             hidden_dim=self._config.fusion_hidden_dim,
             num_heads=self._config.fusion_num_heads,
             attention_backend=self._config.fusion_attention_backend,
+            residual=self._config.fusion_residual,
         )
-        head_input_dim = self._config.fusion_hidden_dim * 2
-        ranking_hidden_dims = (8192, 4096, 2048, 1024, 512)
-        classification_hidden_dims = (2048, 1024, 512, 256, 128)
-        self.ranking_head = RewardMLPHead(
-            input_dim=head_input_dim,
-            hidden_dims=ranking_hidden_dims,
-            dropout=self._config.dropout,
-        )
-        self.classification_head = RewardMLPHead(
-            input_dim=head_input_dim,
-            hidden_dims=classification_hidden_dims,
-            dropout=self._config.dropout,
-        )
+        if self._config.pair_scoring_mode == "mlp":
+            head_input_dim = self._config.fusion_hidden_dim * 2
+            ranking_hidden_dims = (2048, 1024, 512, 256, 128)
+            classification_hidden_dims = (2048, 1024, 512, 256, 128)
+            self.ranking_head = RewardMLPHead(
+                input_dim=head_input_dim,
+                hidden_dims=ranking_hidden_dims,
+                dropout=self._config.dropout,
+            )
+            self.classification_head = RewardMLPHead(
+                input_dim=head_input_dim,
+                hidden_dims=classification_hidden_dims,
+                dropout=self._config.dropout,
+            )
+            self.logit_scale = None
+            self.classification_logit_bias = None
+        else:
+            # LigUnity initializes its log-space cosine scale at log(13). We
+            # preserve that reference point, but allow both of our objectives
+            # to optimize the shared positive scale instead of detaching it.
+            self.ranking_head = None
+            self.classification_head = None
+            self.logit_scale = nn.Parameter(
+                torch.tensor(math.log(self._config.cosine_scale_init))
+            )
+            self.classification_logit_bias = nn.Parameter(
+                torch.tensor(self._config.cosine_classification_bias_init)
+            )
 
     @property
     def config(self) -> RewardModelConfig:
@@ -199,6 +216,7 @@ class RewardModel(nn.Module):
             # constructing non-overlapping sublists. Reapplying it to each
             # random sublist would silently discard valid assay opportunities.
             min_pchembl_span=0.0,
+            affinity_margin=self._config.ranking_affinity_margin,
         )
 
     def _compute_legacy_pair_ranking_loss(
@@ -231,6 +249,10 @@ class RewardModel(nn.Module):
             pair_group_ids,
             temperature=self._config.ranking_temperature,
             min_pchembl_span=0.0,
+            min_list_size=2,
+            # Legacy pairs carry only positive/negative ordering labels, not
+            # measured affinity differences to which a pChEMBL margin applies.
+            affinity_margin=0.0,
         )
 
     def _compute_classification_loss(
@@ -247,6 +269,54 @@ class RewardModel(nn.Module):
             activity_logits,
             activity_labels.to(dtype=activity_logits.dtype),
             pos_weight=pos_weight,
+        )
+
+    def _score_pooled_pair(
+        self,
+        pooled_protein: torch.Tensor,
+        pooled_molecule: torch.Tensor,
+        joint_embedding: torch.Tensor,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        Optional[torch.Tensor],
+        Optional[torch.Tensor],
+        Optional[torch.Tensor],
+        Optional[torch.Tensor],
+    ]:
+        if self._config.pair_scoring_mode == "mlp":
+            if self.ranking_head is None or self.classification_head is None:
+                raise RuntimeError("MLP scoring heads are not initialized")
+            return (
+                self.ranking_head(joint_embedding),
+                self.classification_head(joint_embedding),
+                None,
+                None,
+                None,
+                None,
+            )
+
+        if self.logit_scale is None or self.classification_logit_bias is None:
+            raise RuntimeError("Scaled-cosine parameters are not initialized")
+        normalized_protein = F.normalize(
+            pooled_protein, p=2, dim=-1, eps=1e-6
+        )
+        normalized_molecule = F.normalize(
+            pooled_molecule, p=2, dim=-1, eps=1e-6
+        )
+        cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
+        score_scale = self.logit_scale.clamp(
+            max=math.log(self._config.cosine_scale_max)
+        ).exp()
+        ranking_score = score_scale * cosine_similarity
+        activity_logits = ranking_score + self.classification_logit_bias
+        return (
+            ranking_score,
+            activity_logits,
+            cosine_similarity,
+            score_scale,
+            normalized_protein,
+            normalized_molecule,
         )
 
     def forward(
@@ -291,8 +361,18 @@ class RewardModel(nn.Module):
         pooled_molecule = masked_pool(fused_molecule, molecule_mask, self._config.pooling_type)
         joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
 
-        ranking_score = self.ranking_head(joint_embedding)
-        activity_logits = self.classification_head(joint_embedding)
+        (
+            ranking_score,
+            activity_logits,
+            cosine_similarity,
+            score_scale,
+            normalized_protein_embedding,
+            normalized_molecule_embedding,
+        ) = self._score_pooled_pair(
+            pooled_protein,
+            pooled_molecule,
+            joint_embedding,
+        )
         activity_probability = torch.sigmoid(activity_logits)
 
         ranking_loss = None
@@ -342,6 +422,11 @@ class RewardModel(nn.Module):
             fused_molecule_tokens=fused_molecule if return_token_embeddings else None,
             protein_attention_mask=protein_mask if return_token_embeddings else None,
             molecule_attention_mask=molecule_mask if return_token_embeddings else None,
+            cosine_similarity=cosine_similarity,
+            score_scale=score_scale,
+            classification_logit_bias=self.classification_logit_bias,
+            normalized_protein_embedding=normalized_protein_embedding,
+            normalized_molecule_embedding=normalized_molecule_embedding,
         )
         return outputs if return_dict else outputs.to_tuple()
 

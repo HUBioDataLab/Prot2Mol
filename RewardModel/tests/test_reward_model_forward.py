@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from conftest import DummyEncoder, DummyTokenizer
@@ -55,8 +56,160 @@ def test_reward_model_forward_handles_hidden_dim_mismatch_and_losses():
     assert "loss" in outputs
     assert model.config.protein_hidden_size == 6
     assert model.config.molecule_hidden_size == 8
-    assert len(model.ranking_head.hidden_layers) == 4
-    assert len(model.classification_head.hidden_layers) == 4
+    expected_head_dims = [2048, 1024, 512, 256, 128]
+    assert [
+        model.ranking_head.fc1.out_features,
+        *(layer.out_features for layer in model.ranking_head.hidden_layers),
+    ] == expected_head_dims
+    assert [
+        model.classification_head.fc1.out_features,
+        *(layer.out_features for layer in model.classification_head.hidden_layers),
+    ] == expected_head_dims
+
+
+def test_reward_model_passes_fusion_residual_config_to_fusion():
+    baseline = _build_model(fusion_residual=False)
+    residual = _build_model(fusion_residual=True)
+
+    assert baseline.fusion.residual is False
+    assert baseline.fusion.protein_residual_norm is None
+    assert baseline.fusion.molecule_residual_norm is None
+    assert residual.fusion.residual is True
+    assert residual.fusion.protein_residual_norm is not None
+    assert residual.fusion.molecule_residual_norm is not None
+
+
+def test_scaled_cosine_mode_shares_one_geometry_and_scale_between_objectives():
+    model = _build_model(
+        pair_scoring_mode="scaled_cosine",
+        cosine_scale_init=13.0,
+        cosine_classification_bias_init=-0.75,
+        fusion_residual=True,
+    )
+    model.eval()
+
+    outputs = model(
+        protein_input_ids=torch.tensor(
+            [[1, 2, 0], [3, 4, 5], [1, 6, 7]], dtype=torch.long
+        ),
+        protein_attention_mask=torch.tensor(
+            [[1, 1, 0], [1, 1, 1], [1, 1, 1]], dtype=torch.long
+        ),
+        molecule_input_ids=torch.tensor(
+            [[7, 8, 9], [1, 2, 3], [4, 5, 6]], dtype=torch.long
+        ),
+        molecule_attention_mask=torch.ones((3, 3), dtype=torch.long),
+        activity_labels=torch.tensor([1.0, 0.0, 1.0]),
+        pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+
+    assert model.ranking_head is None
+    assert model.classification_head is None
+    assert outputs.cosine_similarity.shape == (3,)
+    assert torch.all(outputs.cosine_similarity >= -1.0)
+    assert torch.all(outputs.cosine_similarity <= 1.0)
+    assert torch.allclose(
+        outputs.normalized_protein_embedding.norm(dim=-1), torch.ones(3)
+    )
+    assert torch.allclose(
+        outputs.normalized_molecule_embedding.norm(dim=-1), torch.ones(3)
+    )
+    assert outputs.score_scale.item() == pytest.approx(13.0)
+    assert torch.allclose(
+        outputs.ranking_score,
+        outputs.score_scale * outputs.cosine_similarity,
+    )
+    assert torch.allclose(
+        outputs.activity_logits,
+        outputs.ranking_score - 0.75,
+    )
+
+
+@pytest.mark.parametrize("objective", ["ranking", "classification"])
+def test_each_scaled_cosine_objective_updates_shared_pair_geometry(objective):
+    model = _build_model(
+        pair_scoring_mode="scaled_cosine",
+        cosine_scale_init=13.0,
+        fusion_residual=True,
+    )
+    common_inputs = {
+        "protein_input_ids": torch.tensor(
+            [[1, 2, 3], [1, 2, 3], [1, 2, 3]], dtype=torch.long
+        ),
+        "protein_attention_mask": torch.ones((3, 3), dtype=torch.long),
+        "molecule_input_ids": torch.tensor(
+            [[7, 8, 9], [1, 2, 3], [4, 5, 6]], dtype=torch.long
+        ),
+        "molecule_attention_mask": torch.ones((3, 3), dtype=torch.long),
+    }
+    if objective == "ranking":
+        common_inputs.update(
+            pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+            ranking_group_ids=torch.tensor([0, 0, 0]),
+        )
+    else:
+        common_inputs["activity_labels"] = torch.tensor([1.0, 0.0, 1.0])
+
+    outputs = model(**common_inputs)
+    outputs.loss.backward()
+
+    assert model.logit_scale.grad is not None
+    assert model.logit_scale.grad.abs().item() > 0.0
+    assert model.protein_projection.weight.grad is not None
+    assert model.protein_projection.weight.grad.abs().sum() > 0.0
+    assert model.molecule_projection.weight.grad is not None
+    assert model.molecule_projection.weight.grad.abs().sum() > 0.0
+    if objective == "classification":
+        assert model.classification_logit_bias.grad is not None
+        assert model.classification_logit_bias.grad.abs().item() > 0.0
+    else:
+        assert model.classification_logit_bias.grad is None
+
+
+def test_scaled_cosine_scale_is_positive_and_capped():
+    model = _build_model(
+        pair_scoring_mode="scaled_cosine",
+        cosine_scale_init=13.0,
+        cosine_scale_max=20.0,
+    )
+    with torch.no_grad():
+        model.logit_scale.fill_(100.0)
+    outputs = model(
+        protein_input_ids=torch.tensor([[1, 2]], dtype=torch.long),
+        protein_attention_mask=torch.ones((1, 2), dtype=torch.long),
+        molecule_input_ids=torch.tensor([[3, 4]], dtype=torch.long),
+        molecule_attention_mask=torch.ones((1, 2), dtype=torch.long),
+    )
+    assert outputs.score_scale.item() == pytest.approx(20.0)
+    assert torch.isfinite(outputs.ranking_score).all()
+
+    with torch.no_grad():
+        model.logit_scale.fill_(-100.0)
+    outputs = model(
+        protein_input_ids=torch.tensor([[1, 2]], dtype=torch.long),
+        protein_attention_mask=torch.ones((1, 2), dtype=torch.long),
+        molecule_input_ids=torch.tensor([[3, 4]], dtype=torch.long),
+        molecule_attention_mask=torch.ones((1, 2), dtype=torch.long),
+    )
+    assert outputs.score_scale.item() > 0.0
+
+
+def test_scaled_cosine_zero_vectors_remain_finite():
+    model = _build_model(pair_scoring_mode="scaled_cosine")
+    zeros = torch.zeros((2, model.config.fusion_hidden_dim))
+    joint = torch.cat([zeros, zeros], dim=-1)
+
+    ranking_score, activity_logits, cosine, scale, protein, molecule = (
+        model._score_pooled_pair(zeros, zeros, joint)
+    )
+
+    assert torch.equal(cosine, torch.zeros(2))
+    assert torch.isfinite(ranking_score).all()
+    assert torch.isfinite(activity_logits).all()
+    assert torch.isfinite(scale)
+    assert torch.isfinite(protein).all()
+    assert torch.isfinite(molecule).all()
 
 
 def test_reward_model_encoders_can_be_frozen_independently():

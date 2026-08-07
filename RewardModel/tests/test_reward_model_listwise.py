@@ -10,6 +10,7 @@ from torch.utils.data import BatchSampler, DataLoader
 
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import (
+    DEFAULT_RANKING_AFFINITY_MARGIN,
     LoadedEncoder,
     RewardModel,
     RewardModelConfig,
@@ -22,6 +23,8 @@ from reward_model.training import (
     RewardEvaluationDataset,
     RewardModelTrainer,
     RewardTrainerConfig,
+    build_complete_coverage_ranking_partitions,
+    compute_joint_evaluation_metrics,
     create_training_arguments,
 )
 
@@ -83,17 +86,24 @@ def _dummy_model():
     )
 
 
-def _reference_unique_ligunity_loss(scores, targets, temperature=1.0):
+def _reference_unique_ligunity_loss(
+    scores,
+    targets,
+    temperature=1.0,
+    affinity_margin=DEFAULT_RANKING_AFFINITY_MARGIN,
+):
     order = torch.argsort(targets, descending=True)
     ordered_scores = scores[order] / temperature
+    ordered_targets = targets[order]
     n = ordered_scores.numel()
     terms = []
     for index in range(n):
         weight = 1.0 / (math.sqrt(n) * math.log(index + 2.0))
-        terms.append(
-            weight
-            * (torch.logsumexp(ordered_scores[index:], dim=0) - ordered_scores[index])
-        )
+        weaker_scores = ordered_scores[
+            ordered_targets < ordered_targets[index] - affinity_margin
+        ]
+        candidates = torch.cat([ordered_scores[index : index + 1], weaker_scores])
+        terms.append(weight * (torch.logsumexp(candidates, dim=0) - ordered_scores[index]))
     return torch.stack(terms).sum()
 
 
@@ -112,6 +122,141 @@ def test_ligunity_loss_matches_equation_reference_for_unique_affinities():
     expected = _reference_unique_ligunity_loss(scores, targets, temperature=0.7)
 
     assert actual == pytest.approx(expected.item(), rel=1e-12, abs=1e-12)
+
+
+def test_ligunity_loss_matches_reference_with_mixed_affinity_gaps():
+    scores = torch.tensor([0.4, -0.7, 1.1, 0.2], dtype=torch.float64)
+    targets = torch.tensor([8.0, 7.8, 7.0, 6.9], dtype=torch.float64)
+    groups = torch.zeros(4, dtype=torch.long)
+
+    actual = ligunity_listwise_loss(
+        scores,
+        targets,
+        groups,
+        temperature=0.8,
+        min_pchembl_span=0.0,
+    )
+    expected = _reference_unique_ligunity_loss(
+        scores,
+        targets,
+        temperature=0.8,
+    )
+
+    assert actual == pytest.approx(expected.item(), rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("seed", "list_size", "temperature", "affinity_margin"),
+    [
+        (3, 3, 1.0, 0.0),
+        (7, 5, 0.3, DEFAULT_RANKING_AFFINITY_MARGIN),
+        (11, 9, 1.7, 0.25),
+        (19, 16, 0.8, 0.75),
+    ],
+)
+def test_ligunity_loss_randomized_values_and_gradients_match_reference(
+    seed,
+    list_size,
+    temperature,
+    affinity_margin,
+):
+    generator = torch.Generator().manual_seed(seed)
+    scores = torch.randn(
+        list_size,
+        generator=generator,
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    targets = 5.0 + 3.0 * torch.rand(
+        list_size,
+        generator=generator,
+        dtype=torch.float64,
+    )
+    groups = torch.zeros(list_size, dtype=torch.long)
+
+    actual = ligunity_listwise_loss(
+        scores,
+        targets,
+        groups,
+        temperature=temperature,
+        min_pchembl_span=0.0,
+        affinity_margin=affinity_margin,
+    )
+    expected = _reference_unique_ligunity_loss(
+        scores,
+        targets,
+        temperature=temperature,
+        affinity_margin=affinity_margin,
+    )
+    actual_gradient = torch.autograd.grad(actual, scores, retain_graph=True)[0]
+    expected_gradient = torch.autograd.grad(expected, scores)[0]
+
+    assert torch.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    assert torch.allclose(
+        actual_gradient,
+        expected_gradient,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_ligunity_margin_excludes_threefold_or_smaller_affinity_gaps():
+    margin = DEFAULT_RANKING_AFFINITY_MARGIN
+    scores = torch.tensor([0.3, -0.2, 1.4], dtype=torch.float64, requires_grad=True)
+    at_margin_targets = torch.tensor(
+        [8.0, 8.0 - margin, 8.0 - margin],
+        dtype=torch.float64,
+    )
+    groups = torch.zeros(3, dtype=torch.long)
+
+    at_margin_loss = ligunity_listwise_loss(
+        scores,
+        at_margin_targets,
+        groups,
+        min_pchembl_span=0.0,
+    )
+    at_margin_loss.backward()
+
+    assert at_margin_loss.item() == pytest.approx(0.0, abs=1e-15)
+    assert scores.grad is not None
+    assert scores.grad.abs().sum().item() == pytest.approx(0.0, abs=1e-15)
+
+    scores.grad = None
+    beyond_margin_targets = at_margin_targets.clone()
+    beyond_margin_targets[1:] -= 1.0e-6
+    beyond_margin_loss = ligunity_listwise_loss(
+        scores,
+        beyond_margin_targets,
+        groups,
+        min_pchembl_span=0.0,
+    )
+    beyond_margin_loss.backward()
+
+    assert beyond_margin_loss.item() > 0.0
+    assert scores.grad is not None
+    assert scores.grad.abs().sum().item() > 0.0
+
+
+def test_ligunity_margin_removes_all_near_affinity_ranking_signal():
+    scores = torch.tensor(
+        [-100.0, 0.0, 100.0],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    targets = torch.tensor([8.0, 7.8, 7.7], dtype=torch.float64)
+    groups = torch.zeros(3, dtype=torch.long)
+
+    loss = ligunity_listwise_loss(
+        scores,
+        targets,
+        groups,
+        min_pchembl_span=0.0,
+    )
+    loss.backward()
+
+    assert loss.item() == pytest.approx(0.0, abs=1e-15)
+    assert scores.grad is not None
+    assert scores.grad.abs().sum().item() == pytest.approx(0.0, abs=1e-15)
 
 
 def test_ligunity_loss_is_tie_permutation_invariant():
@@ -177,6 +322,179 @@ def test_ligunity_loss_rejects_nonfinite_inputs(scores, targets, message):
             torch.tensor(targets),
             torch.zeros(2, dtype=torch.long),
         )
+
+
+@pytest.mark.parametrize("affinity_margin", [-0.1, float("nan"), float("inf")])
+def test_ligunity_loss_rejects_invalid_affinity_margin(affinity_margin):
+    with pytest.raises(ValueError, match="affinity_margin"):
+        ligunity_listwise_loss(
+            torch.tensor([0.0, 1.0, 2.0]),
+            torch.tensor([8.0, 7.0, 6.0]),
+            torch.zeros(3, dtype=torch.long),
+            affinity_margin=affinity_margin,
+        )
+
+
+def test_validation_partitions_are_balanced_complete_and_deterministic():
+    pchembl_values = torch.cat(
+        [
+            torch.linspace(4.0, 8.0, 17),
+            torch.linspace(4.0, 8.0, 33),
+            torch.tensor([4.0, 8.0]),
+            torch.tensor([6.0, 6.1, 6.2, 6.3]),
+        ]
+    )
+    assay_ids = torch.cat(
+        [
+            torch.full((17,), 0, dtype=torch.long),
+            torch.full((33,), 1, dtype=torch.long),
+            torch.full((2,), 2, dtype=torch.long),
+            torch.full((4,), 3, dtype=torch.long),
+        ]
+    )
+
+    partitions = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        max_list_size=16,
+        num_partitions=3,
+        seed=73,
+        min_pchembl_span=0.5,
+    )
+    replica = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        max_list_size=16,
+        num_partitions=3,
+        seed=73,
+        min_pchembl_span=0.5,
+    )
+
+    assert len(partitions) == 3
+    assert all(torch.equal(left, right) for left, right in zip(partitions, replica))
+    assert not torch.equal(partitions[0], partitions[1])
+    for partition_ids in partitions:
+        assert (partition_ids[:50] >= 0).all()
+        assert (partition_ids[50:] < 0).all()
+        ranked_ids = partition_ids[partition_ids >= 0]
+        list_sizes = torch.bincount(ranked_ids).tolist()
+        assert sorted(list_sizes) == [8, 9, 11, 11, 11]
+        assert sum(list_sizes) == 50
+        assert max(list_sizes) <= 16
+        assert min(list_sizes) >= 3
+        for list_id in torch.unique(ranked_ids):
+            original_assays = torch.unique(assay_ids[partition_ids == list_id])
+            assert original_assays.numel() == 1
+
+
+def test_validation_partition_seed_changes_only_the_fixed_grouping():
+    pchembl_values = torch.linspace(4.0, 8.0, 40)
+    assay_ids = torch.zeros(40, dtype=torch.long)
+    first = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        seed=11,
+    )
+    second = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        seed=29,
+    )
+
+    assert not torch.equal(first[0], second[0])
+    assert (first[0] >= 0).all()
+    assert (second[0] >= 0).all()
+    assert sorted(torch.bincount(first[0]).tolist()) == [13, 13, 14]
+    assert sorted(torch.bincount(second[0]).tolist()) == [13, 13, 14]
+
+
+@pytest.mark.parametrize(
+    "assay_size",
+    [3, 4, 5, 15, 16, 17, 31, 32, 33, 47, 48, 49, 100, 257],
+)
+def test_validation_partitions_cover_assays_across_boundary_sizes(assay_size):
+    partitions = build_complete_coverage_ranking_partitions(
+        pchembl_values=torch.linspace(4.0, 8.0, assay_size),
+        ranking_group_ids=torch.zeros(assay_size, dtype=torch.long),
+        max_list_size=16,
+        num_partitions=2,
+        seed=101,
+    )
+
+    for partition_ids in partitions:
+        assert (partition_ids >= 0).all()
+        list_sizes = torch.bincount(partition_ids).tolist()
+        assert sum(list_sizes) == assay_size
+        assert max(list_sizes) <= 16
+        assert min(list_sizes) >= 3
+        assert max(list_sizes) - min(list_sizes) <= 1
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_list_size": 4}, "max_list_size"),
+        ({"num_partitions": 0}, "num_partitions"),
+        ({"min_pchembl_span": -0.1}, "min_pchembl_span"),
+    ],
+)
+def test_validation_partitions_reject_invalid_settings(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        build_complete_coverage_ranking_partitions(
+            pchembl_values=torch.tensor([8.0, 7.0, 6.0]),
+            ranking_group_ids=torch.zeros(3, dtype=torch.long),
+            **kwargs,
+        )
+
+
+def test_joint_evaluation_averages_complete_coverage_partition_losses():
+    pchembl_values = torch.linspace(5.0, 8.0, 20)
+    ranking_scores = torch.linspace(-1.0, 1.0, 20)
+    assay_ids = torch.zeros(20, dtype=torch.long)
+    partitions = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        max_list_size=16,
+        num_partitions=2,
+        seed=17,
+        min_pchembl_span=0.5,
+    )
+    expected_loss = torch.stack(
+        [
+            ligunity_listwise_loss(
+                ranking_scores,
+                pchembl_values,
+                partition_ids,
+                min_pchembl_span=0.0,
+            )
+            for partition_ids in partitions
+        ]
+    ).mean()
+
+    metrics, assay_records = compute_joint_evaluation_metrics(
+        activity_logits=torch.linspace(-2.0, 2.0, 20),
+        ranking_scores=ranking_scores,
+        activity_labels=(pchembl_values >= 6.0).float(),
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        group_id_names=["T0__A0"],
+        classification_loss_weight=1.0,
+        ranking_loss_weight=1.0,
+        bce_pos_weight=1.0,
+        ranking_temperature=1.0,
+        ranking_affinity_margin=DEFAULT_RANKING_AFFINITY_MARGIN,
+        ranking_min_pchembl_span=0.5,
+        ranking_max_ligands=16,
+        ranking_num_partitions=2,
+        ranking_partition_seed=17,
+    )
+
+    assert metrics["eval_ranking_loss"] == pytest.approx(expected_loss.item())
+    assert metrics["eval_num_ranking_groups"] == pytest.approx(1.0)
+    assert metrics["eval_num_ranking_lists"] == pytest.approx(2.0)
+    assert metrics["eval_num_ranked_examples"] == pytest.approx(20.0)
+    assert metrics["eval_ranking_partitions"] == pytest.approx(2.0)
+    assert len(assay_records) == 1
 
 
 def test_assay_list_dataset_has_exact_coverage_and_dynamic_nonoverlapping_lists():
@@ -252,6 +570,7 @@ def test_assay_list_collator_marks_only_ranked_rows_and_keeps_all_labels():
     assert batch["num_ranked_examples"].item() == 16
     assert (batch["ranking_group_ids"] >= 0).sum().item() == 16
     assert (batch["ranking_group_ids"] < 0).sum().item() == 5
+    assert sorted(batch["evaluation_example_indices"].tolist()) == list(range(21))
 
 
 def test_joint_model_backward_reaches_both_heads_and_shared_trunk():
@@ -317,13 +636,38 @@ def test_classification_only_batch_has_zero_ranking_loss_and_valid_backpropagati
     assert ranking_grad is None or ranking_grad.abs().sum() == 0
 
 
-def test_model_uses_every_list_from_an_assay_eligible_at_the_dataset_level():
+def test_two_ligand_assay_is_classification_only():
+    dataset = RewardAssayListDataset(_tokenized_rows(group_sizes=(2,)))
+    batch = RewardAssayListCollator()([dataset[index] for index in range(len(dataset))])
+
+    assert dataset.stats.num_eligible_assays == 0
+    assert dataset.stats.num_ranking_lists == 0
+    assert batch["num_ranking_lists"].item() == 0
+    assert (batch["ranking_group_ids"] < 0).all()
+
+
+def test_model_skips_two_ligand_listwise_group():
     model = _dummy_model()
     scores = torch.tensor([0.1, 0.2], requires_grad=True)
     loss = model._compute_ranking_loss(
         scores,
         torch.tensor([6.0, 6.2]),
         torch.tensor([0, 0]),
+    )
+
+    assert loss.item() == pytest.approx(0.0)
+    loss.backward()
+    assert scores.grad is not None
+    assert scores.grad.abs().sum() == 0.0
+
+
+def test_model_ranks_three_ligand_list():
+    model = _dummy_model()
+    scores = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
+    loss = model._compute_ranking_loss(
+        scores,
+        torch.tensor([6.0, 6.6, 7.2]),
+        torch.tensor([0, 0, 0]),
     )
 
     assert loss.item() > 0.0
@@ -525,6 +869,9 @@ def test_cpu_trainer_smoke_trains_and_evaluates_joint_objective(tmp_path, monkey
     assert math.isfinite(metrics["eval_ranking_loss"])
     assert metrics["eval_num_examples"] == len(examples)
     assert metrics["eval_num_ranking_groups"] == 2
+    assert metrics["eval_num_ranking_lists"] == 2
+    assert metrics["eval_num_ranked_examples"] == len(examples)
+    assert metrics["eval_ranking_partitions"] == 3
     assert any(
         not torch.equal(initial_state[name], value)
         for name, value in model.state_dict().items()
@@ -533,7 +880,7 @@ def test_cpu_trainer_smoke_trains_and_evaluates_joint_objective(tmp_path, monkey
 
 def test_cpu_validation_is_deterministic_and_scores_each_row_once(tmp_path, monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-    examples = _tokenized_rows(group_sizes=(8, 6))
+    examples = _tokenized_rows(group_sizes=(17, 18))
     train_dataset = RewardAssayListDataset(
         examples,
         seed=31,
@@ -587,6 +934,9 @@ def test_cpu_validation_is_deterministic_and_scores_each_row_once(tmp_path, monk
     ):
         assert first[key] == pytest.approx(second[key])
     assert first["eval_num_examples"] == len(examples)
+    assert first["eval_num_ranked_examples"] == len(examples)
+    assert first["eval_num_ranking_lists"] == 4
+    assert first["eval_ranking_partitions"] == 3
 
 
 def test_cpu_validation_loss_is_independent_of_batch_partitioning(tmp_path, monkeypatch):

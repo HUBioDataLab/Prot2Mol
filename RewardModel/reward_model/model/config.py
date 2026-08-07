@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional
+
+from .losses import DEFAULT_RANKING_AFFINITY_MARGIN
 
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
 _VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
+_VALID_PAIR_SCORING_MODES = {"mlp", "scaled_cosine"}
 
 
 @dataclass(eq=True)
@@ -22,12 +26,18 @@ class RewardModelConfig:
     fusion_hidden_dim: int = 512
     fusion_num_heads: int = 8
     fusion_attention_backend: str = "manual"
+    fusion_residual: bool = False
     dropout: float = 0.1
     pooling_type: str = "mean"
+    pair_scoring_mode: str = "mlp"
+    cosine_scale_init: float = 13.0
+    cosine_scale_max: float = 100.0
+    cosine_classification_bias_init: float = 0.0
     activity_threshold: float = 6.0
     ranking_loss_weight: float = 1.0
     classification_loss_weight: float = 1.0
     ranking_temperature: float = 1.0
+    ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
     bce_pos_weight: float = 1.0
     deduplicate_protein_inputs: bool = True
@@ -57,11 +67,30 @@ class RewardModelConfig:
                 "fusion_attention_backend must be one of "
                 f"{sorted(_VALID_FUSION_ATTENTION_BACKENDS)}"
             )
+        if not isinstance(self.fusion_residual, bool):
+            raise ValueError("fusion_residual must be a boolean")
         if self.pooling_type not in _VALID_POOLING_TYPES:
             raise ValueError(
                 f"Unsupported pooling_type: {self.pooling_type}. "
                 f"Expected one of {sorted(_VALID_POOLING_TYPES)}"
             )
+        if self.pair_scoring_mode not in _VALID_PAIR_SCORING_MODES:
+            raise ValueError(
+                "pair_scoring_mode must be one of "
+                f"{sorted(_VALID_PAIR_SCORING_MODES)}"
+            )
+        if self.cosine_scale_init <= 0.0 or not math.isfinite(
+            float(self.cosine_scale_init)
+        ):
+            raise ValueError("cosine_scale_init must be finite and > 0")
+        if self.cosine_scale_max <= 0.0 or not math.isfinite(
+            float(self.cosine_scale_max)
+        ):
+            raise ValueError("cosine_scale_max must be finite and > 0")
+        if self.cosine_scale_init > self.cosine_scale_max:
+            raise ValueError("cosine_scale_init must be <= cosine_scale_max")
+        if not math.isfinite(float(self.cosine_classification_bias_init)):
+            raise ValueError("cosine_classification_bias_init must be finite")
         if self.protein_max_length <= 0:
             raise ValueError("protein_max_length must be > 0")
         if self.molecule_max_length <= 0:
@@ -76,6 +105,10 @@ class RewardModelConfig:
             raise ValueError("classification_loss_weight must be >= 0")
         if self.ranking_temperature <= 0.0:
             raise ValueError("ranking_temperature must be > 0")
+        if self.ranking_affinity_margin < 0.0 or not math.isfinite(
+            float(self.ranking_affinity_margin)
+        ):
+            raise ValueError("ranking_affinity_margin must be finite and >= 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
         if not isinstance(self.deduplicate_protein_inputs, bool):

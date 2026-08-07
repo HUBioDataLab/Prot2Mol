@@ -1,5 +1,8 @@
 import json
+import math
 import os
+import sys
+from pathlib import Path
 
 import pytest
 import torch
@@ -20,15 +23,22 @@ from reward_model.training import (
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_pairwise_accuracy,
+    compute_ranking_score_diagnostics,
     create_training_arguments,
     get_saved_pair_dataset_paths,
     get_tokenized_split_dataset_paths,
+    load_reward_training_config,
     load_saved_pair_dataset,
     prepare_pair_datasets_from_config,
     save_pair_dataset_from_example_dataset,
 )
 from reward_model.training.entry import train_reward_model_from_config
+from reward_model.training.entry import (
+    _resolve_warm_start_path,
+    _validate_warm_start_architecture,
+)
 from reward_model.training.trainer import LengthBucketSampler
+from train_reward_model import parse_args
 
 
 def _dummy_bundles():
@@ -230,6 +240,41 @@ def test_metric_helpers_compute_expected_values():
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
 
 
+def test_ranking_score_diagnostics_measure_cosine_margin_and_entropy():
+    metrics = compute_ranking_score_diagnostics(
+        ranking_scores=torch.tensor([3.0, 1.0, -2.0, 100.0]),
+        cosine_similarities=torch.tensor([0.3, 0.1, -0.2, 0.9]),
+        pchembl_values=torch.tensor([8.0, 7.0, 6.0, 1.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0, -1]),
+        temperature=1.0,
+        affinity_margin=0.5,
+    )
+
+    assert metrics["ranking_cosine_mean"] == pytest.approx(0.2 / 3.0)
+    assert metrics["ranking_cosine_std"] == pytest.approx(
+        torch.tensor([0.3, 0.1, -0.2]).std(unbiased=False).item()
+    )
+    assert metrics["ranking_cosine_p01"] < metrics["ranking_cosine_p99"]
+    assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(1.0)
+    assert metrics["ranking_margin_pair_gap_p50"] == pytest.approx(3.0)
+    assert metrics["ranking_margin_pair_count"] == pytest.approx(3.0)
+    assert 0.0 < metrics["ranking_list_normalized_entropy"] < 1.0
+    assert not any("tanh" in key for key in metrics)
+    assert not any(key.startswith("ranking_score_") for key in metrics)
+
+
+def test_ranking_score_diagnostics_exclude_pairs_inside_affinity_margin():
+    metrics = compute_ranking_score_diagnostics(
+        ranking_scores=torch.tensor([3.0, -100.0, -2.0]),
+        pchembl_values=torch.tensor([8.0, 7.8, 6.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        affinity_margin=0.5,
+    )
+
+    assert metrics["ranking_margin_pair_count"] == pytest.approx(2.0)
+    assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(0.5)
+
+
 def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     pytest.importorskip("accelerate")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
@@ -251,6 +296,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
             molecule_model_name_or_path="molecule/dummy",
             fusion_hidden_dim=10,
             fusion_num_heads=2,
+            pair_scoring_mode="scaled_cosine",
             dropout=0.0,
         ),
         protein_bundle=protein_bundle,
@@ -261,11 +307,13 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         args=create_training_arguments(
             RewardTrainerConfig(
                 output_dir=str(tmp_path / "trainer_output"),
-                num_train_epochs=1,
+                num_train_epochs=10,
+                max_steps=1,
                 per_device_train_batch_size=2,
                 per_device_eval_batch_size=2,
                 logging_steps=1,
                 fp16=False,
+                ranking_score_diagnostics=True,
             )
         ),
         train_dataset=train_dataset,
@@ -281,6 +329,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     trainer.save_model(str(save_dir))
 
     assert train_result.training_loss >= 0.0
+    assert trainer.state.global_step == 1
     assert "eval_ranking_loss" in eval_metrics
     assert "eval_classification_loss" in eval_metrics
     assert eval_metrics["eval_num_examples"] == len(examples)
@@ -292,6 +341,11 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_accuracy" in eval_metrics
     assert "eval_spearman" in eval_metrics
     assert "eval_spearman_num_groups" in eval_metrics
+    assert "eval_ranking_cosine_std" in eval_metrics
+    assert "eval_cosine_scale" in eval_metrics
+    assert "eval_classification_logit_bias" in eval_metrics
+    assert "eval_ranking_list_normalized_entropy" in eval_metrics
+    assert "eval_ranking_margin_pair_accuracy" in eval_metrics
     assert "eval_val2_loss" in eval_metrics
     assert "eval_val2_ranking_loss" in eval_metrics
     assert "eval_val2_classification_loss" in eval_metrics
@@ -303,6 +357,8 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_val2_accuracy" in eval_metrics
     assert "eval_val2_spearman" in eval_metrics
     assert "eval_val2_spearman_num_groups" in eval_metrics
+    assert "eval_val2_ranking_cosine_std" in eval_metrics
+    assert "eval_val2_cosine_scale" in eval_metrics
     assay_log_path = tmp_path / "trainer_output" / "eval_assay_spearman.jsonl"
     val2_assay_log_path = tmp_path / "trainer_output" / "eval_val2_assay_spearman.jsonl"
     assay_log_records = [
@@ -312,7 +368,12 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert len(assay_log_records) >= 1
     latest_assay_log = assay_log_records[-1]
     assert latest_assay_log["global_step"] == trainer.state.global_step
-    assert latest_assay_log["weighted_spearman"] == pytest.approx(eval_metrics["eval_spearman"])
+    if math.isnan(eval_metrics["eval_spearman"]):
+        assert math.isnan(latest_assay_log["weighted_spearman"])
+    else:
+        assert latest_assay_log["weighted_spearman"] == pytest.approx(
+            eval_metrics["eval_spearman"]
+        )
     assert latest_assay_log["num_eligible_groups"] == pytest.approx(
         eval_metrics["eval_spearman_num_groups"]
     )
@@ -328,9 +389,12 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         json.loads(line)
         for line in val2_assay_log_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
-        eval_metrics["eval_val2_spearman"]
-    )
+    if math.isnan(eval_metrics["eval_val2_spearman"]):
+        assert math.isnan(val2_assay_log_records[-1]["weighted_spearman"])
+    else:
+        assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
+            eval_metrics["eval_val2_spearman"]
+        )
     training_logs = [
         entry for entry in trainer.state.log_history if "ranking_loss" in entry
     ]
@@ -340,9 +404,32 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         "classification_mcc",
         "classification_f1",
         "classification_auroc",
-        "ranking_pairwise_accuracy",
-        "ranking_loss_per_ranked_example",
+        "ranking_cosine_std",
+        "cosine_scale",
+        "classification_logit_bias",
+        "ranking_list_normalized_entropy",
+        "ranking_margin_pair_accuracy",
     }.issubset(training_logs[-1])
+    diagnostic_log_path = (
+        tmp_path / "trainer_output" / "ranking_score_diagnostics.jsonl"
+    )
+    diagnostic_records = [
+        json.loads(line)
+        for line in diagnostic_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["split"] for record in diagnostic_records} >= {
+        "train",
+        "eval",
+        "eval_val2",
+    }
+    train_diagnostic_record = next(
+        record for record in diagnostic_records if record["split"] == "train"
+    )
+    eval_diagnostic_record = next(
+        record for record in diagnostic_records if record["split"] == "eval"
+    )
+    assert "ranking_loss" in train_diagnostic_record["metrics"]
+    assert "eval_spearman" in eval_diagnostic_record["metrics"]
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
 
@@ -359,6 +446,7 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
         RewardTrainerConfig(
             output_dir=str(tmp_path / "trainer_output"),
             eval_steps=25,
+            max_steps=1000,
             fp16=False,
         )
     )
@@ -369,6 +457,7 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
     assert _strategy_value(args.save_strategy) == "steps"
     assert args.eval_steps == 25
     assert args.save_steps == 25
+    assert args.max_steps == 1000
     if hasattr(args, "evaluation_strategy"):
         assert _strategy_value(args.evaluation_strategy) == "steps"
     if hasattr(args, "eval_strategy"):
@@ -400,13 +489,37 @@ def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch
     assert captured == {"eval_loss": 0.25}
 
 
+def test_reward_trainer_logs_scaled_cosine_parameters(monkeypatch):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(
+        pair_scoring_mode="scaled_cosine",
+        cosine_scale_init=13.0,
+        cosine_classification_bias_init=-0.5,
+    )
+    trainer.model.logit_scale = torch.nn.Parameter(torch.tensor(math.log(13.0)))
+    trainer.model.classification_logit_bias = torch.nn.Parameter(torch.tensor(-0.5))
+    trainer._consume_train_component_logs = lambda: {}
+    trainer._append_ranking_score_diagnostics_log = lambda logs: None
+
+    assert trainer.log({"loss": 0.25}) == "logged"
+    assert captured["cosine_scale"] == pytest.approx(13.0)
+    assert captured["classification_logit_bias"] == pytest.approx(-0.5)
+
+
 def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     trainer = object.__new__(RewardModelTrainer)
     trainer._reset_train_component_accumulator()
     trainer._record_train_components(
         ranking_loss=torch.tensor(3.0),
         classification_loss=torch.tensor(0.6),
-        total_loss=torch.tensor(3.6),
         num_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
@@ -419,7 +532,6 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     trainer._record_train_components(
         ranking_loss=torch.tensor(2.0),
         classification_loss=torch.tensor(0.4),
-        total_loss=torch.tensor(2.4),
         num_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
@@ -436,9 +548,10 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     assert logs["classification_mcc"] == pytest.approx(1.0 / 3.0)
     assert logs["classification_f1"] == pytest.approx(2.0 / 3.0)
     assert logs["classification_auroc"] == pytest.approx(2.0 / 3.0)
-    assert logs["ranking_pairwise_accuracy"] == pytest.approx(3.0 / 5.0)
-    assert logs["ranking_loss_per_ranked_example"] == pytest.approx(5.0 / 6.0)
     assert logs["ranking_loss"] == pytest.approx(2.5)
+    assert "total_loss" not in logs
+    assert "ranking_pairwise_accuracy" not in logs
+    assert "ranking_loss_per_ranked_example" not in logs
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
@@ -459,6 +572,15 @@ def test_trainer_config_enforces_shared_server_worker_limit(tmp_path):
         RewardTrainerConfig(
             output_dir=str(tmp_path / "trainer_output"),
             dataloader_num_workers=11,
+        )
+
+
+@pytest.mark.parametrize("max_steps", [0, -1])
+def test_reward_trainer_config_rejects_invalid_max_steps(tmp_path, max_steps):
+    with pytest.raises(ValueError, match="max_steps must be > 0"):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            max_steps=max_steps,
         )
 
 
@@ -561,13 +683,97 @@ def test_reward_trainer_config_normalizes_report_to_string(tmp_path):
     assert config.report_to == ["wandb"]
 
 
+def test_warm_start_path_requires_existing_disjoint_directory(tmp_path):
+    checkpoint = tmp_path / "phase1" / "checkpoint-1000"
+    checkpoint.mkdir(parents=True)
+    output = tmp_path / "phase2"
+
+    assert _resolve_warm_start_path(str(checkpoint), str(output)) == str(
+        checkpoint.resolve()
+    )
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        _resolve_warm_start_path(str(tmp_path / "missing"), str(output))
+    with pytest.raises(ValueError, match="separate, non-nested"):
+        _resolve_warm_start_path(str(checkpoint), str(tmp_path / "phase1"))
+    with pytest.raises(ValueError, match="separate, non-nested"):
+        _resolve_warm_start_path(str(checkpoint), str(checkpoint / "phase2"))
+
+
+def test_warm_start_architecture_allows_freeze_change_but_rejects_shape_change():
+    checkpoint_config = RewardModelConfig(
+        fusion_hidden_dim=512,
+        fusion_num_heads=8,
+        fusion_residual=True,
+        pooling_type="mean",
+        pair_scoring_mode="scaled_cosine",
+        freeze_protein_encoder=True,
+        freeze_molecule_encoder=True,
+    )
+    target_config = RewardModelConfig.from_dict(
+        {
+            **checkpoint_config.to_dict(),
+            "freeze_protein_encoder": False,
+            "freeze_molecule_encoder": False,
+        }
+    )
+
+    _validate_warm_start_architecture(checkpoint_config, target_config)
+
+    incompatible = RewardModelConfig.from_dict(
+        {
+            **target_config.to_dict(),
+            "fusion_hidden_dim": 256,
+            "fusion_num_heads": 4,
+        }
+    )
+    with pytest.raises(ValueError, match="fusion_hidden_dim"):
+        _validate_warm_start_architecture(checkpoint_config, incompatible)
+
+
+def test_train_cli_accepts_weight_only_warm_start(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "train_reward_model.py",
+            "--config",
+            "phase2.yaml",
+            "--init-from-checkpoint",
+            "checkpoint-1000",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.config == "phase2.yaml"
+    assert args.init_from_checkpoint == "checkpoint-1000"
+
+
+def test_unfrozen_phase_two_config_preserves_architecture_and_reduces_memory_batch():
+    config_path = Path(__file__).parents[1] / "configs" / "reward_train_unfrozen.yaml"
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.pair_scoring_mode == "scaled_cosine"
+    assert config.model.fusion_hidden_dim == 512
+    assert config.model.fusion_num_heads == 8
+    assert config.model.fusion_residual is True
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.training.per_device_train_batch_size == 12
+    assert config.training.gradient_accumulation_steps == 4
+    assert config.training.max_steps == 10_000
+    assert config.training.eval_steps == 500
+    assert config.training.learning_rate == pytest.approx(1.0e-5)
+    assert "unfrozen_10000_steps" in config.training.output_dir
+
+
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
 
-    pair_ready_examples = _pair_ready_examples()
-    train_examples = pair_ready_examples.select([0, 1])
-    val_examples = pair_ready_examples.select([2, 3])
+    listwise_ready_examples = _metric_ready_examples()
+    train_examples = listwise_ready_examples.select([0, 1, 2])
+    val_examples = listwise_ready_examples.select([3, 4, 5])
     test_examples = Dataset.from_list(
         [
             {
@@ -652,6 +858,19 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
                 "molecule_input_ids": [3, 3, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
             },
+            {
+                "example_id": 2,
+                "group_id": "T1__A1",
+                "target_chembl_id": "T1",
+                "assay_id": "A1",
+                "compound_id": "M2",
+                "pchembl_value": 5.5,
+                "binary_label": 0,
+                "protein_input_ids": [1, 1, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [4, 4, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
         ]
     )
     val_examples = Dataset.from_list(
@@ -680,6 +899,19 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
                 "protein_input_ids": [4, 4, 0],
                 "protein_attention_mask": [1, 1, 0],
                 "molecule_input_ids": [6, 6, 0, 0],
+                "molecule_attention_mask": [1, 1, 0, 0],
+            },
+            {
+                "example_id": 2,
+                "group_id": "T2__A2",
+                "target_chembl_id": "T2",
+                "assay_id": "A2",
+                "compound_id": "M4",
+                "pchembl_value": 6.0,
+                "binary_label": 1,
+                "protein_input_ids": [4, 4, 0],
+                "protein_attention_mask": [1, 1, 0],
+                "molecule_input_ids": [7, 7, 0, 0],
                 "molecule_attention_mask": [1, 1, 0, 0],
             },
         ]
@@ -735,6 +967,8 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     )
 
     captured = {}
+    warm_start = tmp_path / "phase1" / "checkpoint-1000"
+    warm_start.mkdir(parents=True)
 
     class _FakeTrainer:
         def __init__(
@@ -765,23 +999,41 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
             return {"eval_loss": 0.5}
 
     monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
-    monkeypatch.setattr("reward_model.training.entry.RewardModel", lambda config: object())
+
+    def _fake_initialize_training_model(config, init_from_checkpoint):
+        captured["model_config"] = config
+        captured["init_from_checkpoint"] = init_from_checkpoint
+        return object()
+
+    monkeypatch.setattr(
+        "reward_model.training.entry._initialize_training_model",
+        _fake_initialize_training_model,
+    )
     monkeypatch.setattr("reward_model.training.entry.create_training_arguments", lambda config: object())
 
-    summary = train_reward_model_from_config(str(config_path))
+    summary = train_reward_model_from_config(
+        str(config_path),
+        init_from_checkpoint=str(warm_start),
+    )
 
     assert captured["train_called"] is True
     assert captured["evaluate_called"] is True
     assert captured["train_dataset_len"] == 1
-    assert captured["eval_dataset_len"] == 2
+    assert captured["eval_dataset_len"] == 3
+    assert captured["eval_dataset"].ranking_max_ligands == 16
+    assert captured["eval_dataset"].ranking_num_partitions == 3
+    assert captured["eval_dataset"].ranking_partition_seed == 42
     assert captured["val2_eval_dataset"] is None
+    assert captured["init_from_checkpoint"] == str(warm_start.resolve())
     assert isinstance(captured["data_collator"], RewardAssayListCollator)
-    assert summary["train_examples"] == 2
-    assert summary["val_examples"] == 2
+    assert summary["train_examples"] == 3
+    assert summary["val_examples"] == 3
     assert summary["test_examples"] == 1
     assert summary["train_ranking_lists"] == 1
-    assert summary["train_ranked_examples"] == 2
-    assert summary["train_classification_examples"] == 2
+    assert summary["train_ranked_examples"] == 3
+    assert summary["train_classification_examples"] == 3
+    assert summary["init_from_checkpoint"] == str(warm_start.resolve())
+    assert summary["optimizer_state_restored"] is False
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):

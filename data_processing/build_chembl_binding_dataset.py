@@ -21,7 +21,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 import pandas as pd
 import numpy as np
@@ -57,6 +57,12 @@ CHEMBL_SQLITE_ARCHIVE_SHA256 = (
 DEFAULT_ARCHIVE_PATH = Path("dataset/raw/chembl_37/chembl_37_sqlite.tar.gz")
 DEFAULT_RAW_DIR = Path("dataset/raw/chembl_37")
 DEFAULT_OUTPUT_DIR = Path("dataset/processed/chembl_37/protein_cluster_50")
+DEFAULT_ACTIVITY_BALANCED_OUTPUT_DIR = Path(
+    "dataset/processed/chembl_37/protein_cluster_50_activity_balanced"
+)
+DEFAULT_ACTIVITY_BALANCE_ANCHOR = "Potency"
+DEFAULT_ACTIVITY_BALANCE_SPLITS = ("train", "val", "test")
+DEFAULT_REWARD_PROTEIN_MAX_RESIDUES = 1022
 
 BASE_OUTPUT_COLUMNS = [
     "source",
@@ -422,23 +428,205 @@ def _split_summary(frame: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def build_activity_balanced_cluster_stats(
+    split_frame: pd.DataFrame,
+    config: SplitConfig,
+    *,
+    anchor_activity_type: str = DEFAULT_ACTIVITY_BALANCE_ANCHOR,
+    reward_protein_max_residues: int | None = DEFAULT_REWARD_PROTEIN_MAX_RESIDUES,
+) -> tuple[pd.DataFrame, dict[str, float], dict[str, str], dict[str, object]]:
+    """Build whole-cluster metrics for an activity-type-aware split.
+
+    Non-anchor activity types are balanced primarily by rows, with assay-count
+    and dataset-diversity metrics as secondary objectives. The three largest
+    clusters for the anchor type are fixed to train, validation, and test
+    respectively. Raw activity rows and the rows surviving the reward model's
+    protein-length boundary are co-balanced. Overall row and label ratios
+    remain soft constraints because the fixed anchor distribution can
+    intentionally differ from 80/10/10.
+    """
+    required = {
+        "protein_cluster_50",
+        "protein_sequence",
+        "target_chembl_id",
+        "assay_group_id",
+        "binary_label",
+        "pchembl_value",
+        "activity_type",
+    }
+    if reward_protein_max_residues is not None:
+        required.add("protein_length")
+    missing = sorted(required.difference(split_frame.columns))
+    if missing:
+        raise ValueError(f"Activity-balanced split is missing columns: {missing}")
+
+    ratios = np.array(
+        [1.0 - config.val_ratio - config.test_ratio, config.val_ratio, config.test_ratio],
+        dtype=float,
+    )
+    if (ratios <= 0).any() or not np.isclose(ratios.sum(), 1.0):
+        raise ValueError(f"Split ratios must all be positive and sum to one, got {ratios.tolist()}")
+
+    stats = split_frame.groupby("protein_cluster_50").agg(
+        row_count=("binary_label", "size"),
+        pos_count=("binary_label", "sum"),
+        sequence_count=("protein_sequence", "nunique"),
+        target_count=("target_chembl_id", "nunique"),
+        assay_count=("assay_group_id", "nunique"),
+    )
+    stats["neg_count"] = stats["row_count"] - stats["pos_count"]
+    stats["cluster_count"] = 1
+
+    assay_stats = split_frame.groupby(
+        ["protein_cluster_50", "assay_group_id"]
+    )["pchembl_value"].agg(["size", "min", "max"])
+    eligible_assays = (assay_stats["size"] >= 3) & (
+        assay_stats["max"] - assay_stats["min"] >= 0.5
+    )
+    stats["eligible_assay_count"] = (
+        eligible_assays.groupby(level=0).sum().reindex(stats.index, fill_value=0)
+    )
+
+    exploded_columns = ["protein_cluster_50", "assay_group_id", "activity_type"]
+    if reward_protein_max_residues is not None:
+        exploded_columns.append("protein_length")
+    exploded = split_frame.loc[:, exploded_columns].copy()
+    exploded["activity_type"] = exploded["activity_type"].fillna("").str.split("|")
+    exploded = exploded.explode("activity_type")
+    exploded["activity_type"] = exploded["activity_type"].str.strip()
+    exploded = exploded.loc[exploded["activity_type"].ne("")]
+
+    row_counts = (
+        exploded.groupby(["protein_cluster_50", "activity_type"])
+        .size()
+        .unstack(fill_value=0)
+        .reindex(stats.index, fill_value=0)
+    )
+    assay_counts = (
+        exploded.drop_duplicates(
+            ["protein_cluster_50", "assay_group_id", "activity_type"]
+        )
+        .groupby(["protein_cluster_50", "activity_type"])
+        .size()
+        .unstack(fill_value=0)
+        .reindex(stats.index, fill_value=0)
+    )
+    reward_protein_row_counts = None
+    if reward_protein_max_residues is not None:
+        if reward_protein_max_residues < 1:
+            raise ValueError("reward_protein_max_residues must be >= 1 or None")
+        reward_protein_row_counts = (
+            exploded.loc[exploded["protein_length"].le(reward_protein_max_residues)]
+            .groupby(["protein_cluster_50", "activity_type"])
+            .size()
+            .unstack(fill_value=0)
+            .reindex(stats.index, fill_value=0)
+        )
+    activity_types = sorted(set(row_counts.columns) | set(assay_counts.columns))
+    for activity_type in activity_types:
+        stats[f"activity_rows__{activity_type}"] = row_counts.get(
+            activity_type, pd.Series(0, index=stats.index)
+        )
+        stats[f"activity_assays__{activity_type}"] = assay_counts.get(
+            activity_type, pd.Series(0, index=stats.index)
+        )
+        if reward_protein_row_counts is not None:
+            stats[f"reward_protein_rows__{activity_type}"] = reward_protein_row_counts.get(
+                activity_type, pd.Series(0, index=stats.index)
+            )
+
+    metric_weights: dict[str, float] = {
+        "row_count": 0.5,
+        "pos_count": 0.5,
+        "neg_count": 0.5,
+        "cluster_count": 2.0,
+        "sequence_count": 2.0,
+        "target_count": 2.0,
+        "assay_count": 2.0,
+        "eligible_assay_count": 2.0,
+    }
+    row_balanced_types: list[str] = []
+    assay_only_types: list[str] = []
+    for activity_type in activity_types:
+        row_metric = f"activity_rows__{activity_type}"
+        assay_metric = f"activity_assays__{activity_type}"
+        if activity_type != anchor_activity_type:
+            metric_weights[row_metric] = 40.0
+            reward_metric = f"reward_protein_rows__{activity_type}"
+            if reward_metric in stats.columns and stats[reward_metric].sum() > 0:
+                metric_weights[reward_metric] = 40.0
+            row_balanced_types.append(activity_type)
+        else:
+            assay_only_types.append(activity_type)
+        metric_weights[assay_metric] = 1.0
+
+    anchor_metric = f"activity_rows__{anchor_activity_type}"
+    if anchor_metric not in stats.columns:
+        raise ValueError(f"Anchor activity type not found: {anchor_activity_type}")
+    major_anchor_clusters = stats[anchor_metric].nlargest(3)
+    if len(major_anchor_clusters) < 3 or (major_anchor_clusters <= 0).any():
+        raise ValueError(
+            f"At least three protein clusters with {anchor_activity_type} rows are required"
+        )
+    fixed_assignments = dict(
+        zip(major_anchor_clusters.index.tolist(), DEFAULT_ACTIVITY_BALANCE_SPLITS)
+    )
+
+    metadata = {
+        "anchor_activity_type": anchor_activity_type,
+        "anchor_clusters": [
+            {
+                "protein_cluster_50": str(cluster_id),
+                "split": fixed_assignments[cluster_id],
+                "activity_rows": int(row_count),
+            }
+            for cluster_id, row_count in major_anchor_clusters.items()
+        ],
+        "row_balanced_activity_types": row_balanced_types,
+        "assay_count_only_activity_types": assay_only_types,
+        "reward_protein_max_residues": reward_protein_max_residues,
+        "metric_weights": metric_weights,
+    }
+    return stats.reset_index(), metric_weights, fixed_assignments, metadata
+
+
 def assign_cluster_splits_balanced(
     cluster_stats: pd.DataFrame,
     config: SplitConfig,
     *,
     swap_trials: int | None = None,
+    metric_weights: Mapping[str, float] | None = None,
+    fixed_assignments: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Deterministically balance rows, positives, and negatives by whole cluster.
+    """Deterministically balance weighted metrics by whole protein cluster.
 
     The initial largest-first assignment is improved by exact single-cluster
     moves followed by seeded pair swaps. This avoids the strong 72/14/14 skew
     produced by the older per-bin greedy scorer on ChEMBL's heavy-tailed
-    cluster sizes.
+    cluster sizes. Optional fixed assignments remain immovable throughout the
+    optimization and are useful for anchoring indivisible high-volume assays.
     """
     stats = cluster_stats.copy().reset_index(drop=True)
-    metrics = ["row_count", "pos_count", "neg_count"]
+    if metric_weights is None:
+        metric_weights = {
+            "row_count": 1.0,
+            "pos_count": 1.0,
+            "neg_count": 1.0,
+        }
+    metrics = list(metric_weights)
+    missing_metrics = sorted(set(metrics).difference(stats.columns))
+    if missing_metrics:
+        raise ValueError(f"Cluster statistics are missing metrics: {missing_metrics}")
+    if not metrics:
+        raise ValueError("At least one assignment metric is required")
+    weights = np.array([float(metric_weights[metric]) for metric in metrics], dtype=float)
+    if not np.isfinite(weights).all() or (weights <= 0).any():
+        raise ValueError("Assignment metric weights must be finite and > 0")
     values = stats.loc[:, metrics].to_numpy(dtype=float)
+    if not np.isfinite(values).all() or (values < 0).any():
+        raise ValueError("Assignment metrics must be finite and >= 0")
     split_names = np.array(["train", "val", "test"])
+    split_indices = {name: index for index, name in enumerate(split_names)}
     ratios = np.array(
         [1.0 - config.val_ratio - config.test_ratio, config.val_ratio, config.test_ratio],
         dtype=float,
@@ -449,12 +637,41 @@ def assign_cluster_splits_balanced(
         raise ValueError(f"Split ratios must all be positive and sum to one, got {ratios.tolist()}")
 
     totals = values.sum(axis=0)
+    if (totals <= 0).any():
+        empty_metrics = [metric for metric, total in zip(metrics, totals) if total <= 0]
+        raise ValueError(f"Assignment metrics must have positive totals: {empty_metrics}")
     targets = ratios[:, None] * totals[None, :]
-    weights = np.ones(3, dtype=float)
-    state = np.zeros((3, 3), dtype=float)
+    state = np.zeros((3, len(metrics)), dtype=float)
     assignments = np.full(len(stats), -1, dtype=np.int8)
+    fixed_mask = np.zeros(len(stats), dtype=bool)
     rng = np.random.default_rng(config.random_seed)
-    order = np.lexsort((rng.random(len(stats)), -values[:, 0]))
+
+    resolved_fixed_assignments = dict(fixed_assignments or {})
+    if resolved_fixed_assignments:
+        if "protein_cluster_50" not in stats.columns:
+            raise ValueError(
+                "protein_cluster_50 is required when fixed assignments are provided"
+            )
+        cluster_to_index = {
+            str(cluster_id): index
+            for index, cluster_id in enumerate(stats["protein_cluster_50"])
+        }
+        for cluster_id, split_name in resolved_fixed_assignments.items():
+            cluster_key = str(cluster_id)
+            if cluster_key not in cluster_to_index:
+                raise ValueError(f"Fixed protein cluster not found: {cluster_id}")
+            if split_name not in split_indices:
+                raise ValueError(f"Unsupported fixed split: {split_name}")
+            index = cluster_to_index[cluster_key]
+            destination = split_indices[split_name]
+            assignments[index] = destination
+            fixed_mask[index] = True
+            state[destination] += values[index]
+
+    movable_indices = np.flatnonzero(~fixed_mask)
+    order = movable_indices[
+        np.lexsort((rng.random(len(movable_indices)), -values[movable_indices, 0]))
+    ]
 
     def partial_objective(current: np.ndarray, target: np.ndarray) -> np.ndarray:
         return np.sum(weights * ((current - target) / np.maximum(target, 1.0)) ** 2, axis=-1)
@@ -477,7 +694,9 @@ def assign_cluster_splits_balanced(
         best_index = -1
         best_destination = -1
         for source in range(3):
-            indices = np.flatnonzero(assignments == source)
+            indices = np.flatnonzero((assignments == source) & ~fixed_mask)
+            if not len(indices):
+                continue
             candidates = values[indices]
             old_source = partial_objective(state[source], targets[source])
             for destination in range(3):
@@ -505,11 +724,15 @@ def assign_cluster_splits_balanced(
         swap_trials = min(1_000_000, max(10_000, len(stats) * 225))
     accepted_swaps = 0
     for _ in range(swap_trials):
-        first = int(rng.integers(len(stats)))
+        if not len(movable_indices):
+            break
+        first = int(movable_indices[int(rng.integers(len(movable_indices)))])
         source = int(assignments[first])
         destination = int(rng.integers(2))
         destination += int(destination >= source)
-        destination_indices = np.flatnonzero(assignments == destination)
+        destination_indices = np.flatnonzero(
+            (assignments == destination) & ~fixed_mask
+        )
         if not len(destination_indices):
             continue
         second = int(destination_indices[int(rng.integers(len(destination_indices)))])
@@ -528,6 +751,9 @@ def assign_cluster_splits_balanced(
             accepted_swaps += 1
 
     stats["split"] = split_names[assignments]
+    stats["fixed_split"] = ""
+    if resolved_fixed_assignments:
+        stats.loc[fixed_mask, "fixed_split"] = split_names[assignments[fixed_mask]]
     stats["assignment_objective"] = objective(state)
     stats["accepted_pair_swaps"] = accepted_swaps
     stats["swap_trials"] = swap_trials
@@ -539,19 +765,49 @@ def _assign_and_write_splits(
     cluster_frame: pd.DataFrame,
     output_dir: Path,
     config: SplitConfig,
+    *,
+    activity_balanced: bool = False,
+    anchor_activity_type: str = DEFAULT_ACTIVITY_BALANCE_ANCHOR,
+    reward_protein_max_residues: int | None = DEFAULT_REWARD_PROTEIN_MAX_RESIDUES,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     cluster_map = dict(zip(cluster_frame["protein_sequence"], cluster_frame["protein_cluster_50"]))
     split_frame = frame.copy()
     split_frame["protein_cluster_50"] = split_frame["protein_sequence"].map(cluster_map)
     if split_frame["protein_cluster_50"].isna().any():
         raise ValueError("At least one protein sequence was not assigned to an MMseqs cluster")
-    cluster_stats = (
-        split_frame.groupby("protein_cluster_50")["binary_label"]
-        .agg(row_count="size", pos_count="sum")
-        .reset_index()
-    )
-    cluster_stats["neg_count"] = cluster_stats["row_count"] - cluster_stats["pos_count"]
-    cluster_split = assign_cluster_splits_balanced(cluster_stats, config)
+    balance_metadata: dict[str, object] | None = None
+    if activity_balanced:
+        (
+            cluster_stats,
+            metric_weights,
+            fixed_assignments,
+            balance_metadata,
+        ) = build_activity_balanced_cluster_stats(
+            split_frame,
+            config,
+            anchor_activity_type=anchor_activity_type,
+            reward_protein_max_residues=reward_protein_max_residues,
+        )
+        cluster_split = assign_cluster_splits_balanced(
+            cluster_stats,
+            config,
+            metric_weights=metric_weights,
+            fixed_assignments=fixed_assignments,
+        )
+        assignment_method = (
+            "activity_balanced_fixed_anchor_largest_first_local_moves_seeded_pair_swaps"
+        )
+    else:
+        cluster_stats = (
+            split_frame.groupby("protein_cluster_50")["binary_label"]
+            .agg(row_count="size", pos_count="sum")
+            .reset_index()
+        )
+        cluster_stats["neg_count"] = (
+            cluster_stats["row_count"] - cluster_stats["pos_count"]
+        )
+        cluster_split = assign_cluster_splits_balanced(cluster_stats, config)
+        assignment_method = "largest_first_local_moves_seeded_pair_swaps"
     cluster_split_path = output_dir / "cluster_split.csv"
     temporary_cluster_split = Path(str(cluster_split_path) + ".tmp")
     cluster_split.to_csv(temporary_cluster_split, index=False)
@@ -591,10 +847,11 @@ def _assign_and_write_splits(
         "split_stats": split_stats,
         "leakage_checks": leakage,
         "assignment": {
-            "method": "largest_first_local_moves_seeded_pair_swaps",
+            "method": assignment_method,
             "objective": float(cluster_split["assignment_objective"].iloc[0]),
             "accepted_pair_swaps": int(cluster_split["accepted_pair_swaps"].iloc[0]),
             "swap_trials": int(cluster_split["swap_trials"].iloc[0]),
+            **({} if balance_metadata is None else {"balance": balance_metadata}),
         },
     }
 
@@ -668,6 +925,87 @@ def resplit_existing_dataset(output_dir: Path, config: SplitConfig) -> dict[str,
     temporary_summary = Path(str(summary_path) + ".tmp")
     temporary_summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     temporary_summary.replace(summary_path)
+    return summary
+
+
+def build_activity_balanced_resplit(
+    source_dir: Path,
+    output_dir: Path,
+    config: SplitConfig,
+    *,
+    anchor_activity_type: str = DEFAULT_ACTIVITY_BALANCE_ANCHOR,
+    reward_protein_max_residues: int | None = DEFAULT_REWARD_PROTEIN_MAX_RESIDUES,
+) -> dict[str, object]:
+    """Create a derived split while reusing an existing MMseqs cluster map."""
+    started = perf_counter()
+    source_dir = Path(source_dir)
+    output_dir = Path(output_dir)
+    source_all_path = source_dir / "all.parquet"
+    source_cluster_path = source_dir / "protein_cluster_50.csv"
+    source_summary_path = source_dir / "summary.json"
+    for path in (source_all_path, source_cluster_path, source_summary_path):
+        if not path.exists():
+            raise FileNotFoundError(f"Existing dataset artifact not found: {path}")
+
+    _prepare_output_dir(output_dir)
+    frame = pd.read_parquet(source_all_path)
+    cluster_frame = pd.read_csv(source_cluster_path)
+    all_path = output_dir / "all.parquet"
+    cluster_path = output_dir / "protein_cluster_50.csv"
+    frame.to_parquet(all_path, index=False)
+    cluster_frame.to_csv(cluster_path, index=False)
+
+    for artifact_name in ("protein_sequences.csv", "proteins.fasta"):
+        source_artifact = source_dir / artifact_name
+        if source_artifact.exists():
+            shutil.copy2(source_artifact, output_dir / artifact_name)
+
+    split_frame, artifacts = _assign_and_write_splits(
+        frame,
+        cluster_frame,
+        output_dir,
+        config,
+        activity_balanced=True,
+        anchor_activity_type=anchor_activity_type,
+        reward_protein_max_residues=reward_protein_max_residues,
+    )
+    source_summary = json.loads(source_summary_path.read_text(encoding="utf-8"))
+    activity_threshold = float(
+        source_summary.get("filters", {}).get("activity_threshold", 6.0)
+    )
+    validation = validate_dataset(split_frame, activity_threshold=activity_threshold)
+    summary = {
+        **source_summary,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "derived_from": {
+            "dataset_dir": str(source_dir),
+            "summary": str(source_summary_path),
+            "protein_cluster_50": str(source_cluster_path),
+            "contract": (
+                "Reuse the source MMseqs50 clusters; fix the three largest "
+                f"{anchor_activity_type} clusters to train, val, and test; "
+                "balance remaining whole clusters by rows, labels, targets, "
+                "assays, eligible ranking assays, activity types, and the "
+                f"reward-model protein boundary ({reward_protein_max_residues} residues)."
+            ),
+        },
+        "split_config": asdict(config),
+        "outputs": {
+            "all": str(all_path),
+            "train": str(output_dir / "train.parquet"),
+            "val": str(output_dir / "val.parquet"),
+            "test": str(output_dir / "test.parquet"),
+            "protein_cluster_50": str(cluster_path),
+            **artifacts,
+        },
+        "validation": validation,
+        "runtime_seconds": round(perf_counter() - started, 2),
+    }
+    summary_path = output_dir / "summary.json"
+    temporary_summary = Path(str(summary_path) + ".tmp")
+    temporary_summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    temporary_summary.replace(summary_path)
+    log(f"wrote {summary_path}")
     return summary
 
 

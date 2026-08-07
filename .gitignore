@@ -9,6 +9,8 @@ data/
 *.log
 *__pycache__*
 analysis/
+!RewardModel/reward_model/analysis/
+!RewardModel/reward_model/analysis/*.py
 *.ipynb
 prot2mol_env/
 wandb/

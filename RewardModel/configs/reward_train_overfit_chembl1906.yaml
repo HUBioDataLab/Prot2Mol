@@ -12,6 +12,7 @@ model:
   ranking_loss_weight: 1.0
   classification_loss_weight: 1.0
   ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
   ranking_min_pchembl_span: 0.5
   bce_pos_weight: 1.0
   deduplicate_protein_inputs: true
@@ -27,6 +28,7 @@ data:
   tokenization_batch_size: 64
   ranking_max_ligands: 16
   ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
   ranking_min_pchembl_span: 0.5
   max_classification_only_per_item: 16
 

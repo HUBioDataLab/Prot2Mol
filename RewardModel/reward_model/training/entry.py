@@ -13,11 +13,87 @@ from .data import (
     prepare_tokenized_split_datasets,
 )
 from .trainer import RewardModelTrainer, create_training_arguments
-from ..model import RewardModel
+from ..model import (
+    RewardModel,
+    RewardModelConfig,
+    load_reward_model,
+    load_reward_model_config,
+)
+
+
+_WARM_START_ARCHITECTURE_FIELDS = (
+    "protein_model_name_or_path",
+    "molecule_model_name_or_path",
+    "protein_hidden_size",
+    "molecule_hidden_size",
+    "fusion_hidden_dim",
+    "fusion_num_heads",
+    "fusion_residual",
+    "pooling_type",
+    "pair_scoring_mode",
+)
 
 
 def _split_dataset_path(tokenized_dataset_dir: str, split_name: str, dataset_kind: str) -> str:
     return os.path.join(os.path.abspath(tokenized_dataset_dir), f"{split_name}_{dataset_kind}")
+
+
+def _resolve_warm_start_path(
+    init_from_checkpoint: str | None,
+    output_dir: str,
+) -> str | None:
+    if init_from_checkpoint is None:
+        return None
+    checkpoint_path = os.path.realpath(os.path.abspath(init_from_checkpoint))
+    if not os.path.isdir(checkpoint_path):
+        raise FileNotFoundError(
+            f"Warm-start checkpoint directory does not exist: {checkpoint_path}"
+        )
+    resolved_output_dir = os.path.realpath(os.path.abspath(output_dir))
+    common_path = os.path.commonpath([checkpoint_path, resolved_output_dir])
+    if common_path in {checkpoint_path, resolved_output_dir}:
+        raise ValueError(
+            "Warm-start checkpoint and output directory must be separate, "
+            "non-nested directories so phase one cannot be overwritten"
+        )
+    return checkpoint_path
+
+
+def _validate_warm_start_architecture(
+    checkpoint_config: RewardModelConfig,
+    target_config: RewardModelConfig,
+) -> None:
+    mismatches = []
+    for field_name in _WARM_START_ARCHITECTURE_FIELDS:
+        checkpoint_value = getattr(checkpoint_config, field_name)
+        target_value = getattr(target_config, field_name)
+        if target_value is None or checkpoint_value is None:
+            continue
+        if checkpoint_value != target_value:
+            mismatches.append(
+                f"{field_name}: checkpoint={checkpoint_value!r}, "
+                f"target={target_value!r}"
+            )
+    if mismatches:
+        raise ValueError(
+            "Warm-start checkpoint architecture is incompatible with the "
+            "target config: " + "; ".join(mismatches)
+        )
+
+
+def _initialize_training_model(
+    model_config: RewardModelConfig,
+    init_from_checkpoint: str | None,
+) -> RewardModel:
+    if init_from_checkpoint is None:
+        return RewardModel(model_config)
+    checkpoint_config = load_reward_model_config(init_from_checkpoint)
+    _validate_warm_start_architecture(checkpoint_config, model_config)
+    return load_reward_model(
+        init_from_checkpoint,
+        strict=True,
+        config_overrides=model_config.to_dict(),
+    )
 
 
 def prepare_training_examples_from_config(config_path: str) -> Dict[str, Any]:
@@ -86,8 +162,15 @@ def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
     return summaries
 
 
-def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
+def train_reward_model_from_config(
+    config_path: str,
+    init_from_checkpoint: str | None = None,
+) -> Dict[str, Any]:
     config = load_reward_training_config(config_path)
+    warm_start_path = _resolve_warm_start_path(
+        init_from_checkpoint,
+        config.training.output_dir,
+    )
     example_paths = get_tokenized_split_dataset_paths(config.data.tokenized_dataset_dir)
 
     missing_example_paths = [
@@ -126,6 +209,9 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
     eval_dataset = RewardEvaluationDataset(
         val_examples,
         ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+        ranking_max_ligands=config.data.ranking_max_ligands,
+        ranking_num_partitions=config.data.evaluation_ranking_partitions,
+        ranking_partition_seed=config.training.seed,
     )
     val2_eval_dataset = None
     val2_examples = None
@@ -149,8 +235,11 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         val2_eval_dataset = RewardEvaluationDataset(
             val2_examples,
             ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+            ranking_max_ligands=config.data.ranking_max_ligands,
+            ranking_num_partitions=config.data.evaluation_ranking_partitions,
+            ranking_partition_seed=config.training.seed,
         )
-    model = RewardModel(config.model)
+    model = _initialize_training_model(config.model, warm_start_path)
     collator = RewardAssayListCollator(
         dynamic_padding=config.training.dynamic_padding,
         protein_pad_token_id=getattr(
@@ -188,6 +277,8 @@ def train_reward_model_from_config(config_path: str) -> Dict[str, Any]:
         "train_ranked_examples": train_dataset.stats.num_ranked_examples,
         "train_classification_examples": train_dataset.stats.num_examples,
         "output_dir": os.path.abspath(config.training.output_dir),
+        "init_from_checkpoint": warm_start_path,
+        "optimizer_state_restored": False,
         "eval_metrics": eval_metrics,
         **(
             {}

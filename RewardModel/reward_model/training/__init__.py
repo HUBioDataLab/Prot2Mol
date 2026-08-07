@@ -26,10 +26,12 @@ from .data import (
     save_pair_dataset_from_example_dataset,
 )
 from .evaluation import (
+    build_complete_coverage_ranking_partitions,
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_joint_evaluation_metrics,
     compute_pairwise_accuracy,
+    compute_ranking_score_diagnostics,
     compute_reward_model_eval_metrics,
 )
 from .entry import (
@@ -64,10 +66,12 @@ __all__ = [
     "TokenizedSplitArtifacts",
     "build_group_id",
     "build_pair_records",
+    "build_complete_coverage_ranking_partitions",
     "compute_classification_metrics",
     "compute_groupwise_spearman",
     "compute_joint_evaluation_metrics",
     "compute_pairwise_accuracy",
+    "compute_ranking_score_diagnostics",
     "compute_reward_model_eval_metrics",
     "create_training_arguments",
     "get_saved_pair_dataset_paths",

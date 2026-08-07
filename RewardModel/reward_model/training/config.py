@@ -27,6 +27,7 @@ class RewardTrainingDataConfig:
     tokenization_batch_size: int = 64
     ranking_max_ligands: int = 16
     ranking_opportunity_divisor: int = 32
+    evaluation_ranking_partitions: int = 3
     ranking_min_pchembl_span: float = 0.5
     max_classification_only_per_item: int = 16
 
@@ -44,12 +45,14 @@ class RewardTrainingDataConfig:
             raise ValueError("tokenized_dataset_dir must be provided")
         if self.tokenization_batch_size <= 0:
             raise ValueError("tokenization_batch_size must be > 0")
-        if self.ranking_max_ligands <= 1:
-            raise ValueError("ranking_max_ligands must be > 1")
+        if self.ranking_max_ligands < 5:
+            raise ValueError("ranking_max_ligands must be >= 5")
         if self.ranking_opportunity_divisor < self.ranking_max_ligands:
             raise ValueError(
                 "ranking_opportunity_divisor must be >= ranking_max_ligands"
             )
+        if self.evaluation_ranking_partitions <= 0:
+            raise ValueError("evaluation_ranking_partitions must be > 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
         if self.max_classification_only_per_item <= 0:
@@ -60,6 +63,7 @@ class RewardTrainingDataConfig:
 class RewardTrainerConfig:
     output_dir: str
     num_train_epochs: float = 1.0
+    max_steps: Optional[int] = None
     per_device_train_batch_size: int = 8
     per_device_eval_batch_size: int = 8
     gradient_accumulation_steps: int = 1
@@ -79,6 +83,7 @@ class RewardTrainerConfig:
     save_total_limit: int = 2
     training_mode: str = "single_gpu"
     report_to: Optional[Any] = None
+    ranking_score_diagnostics: bool = False
 
     def __post_init__(self) -> None:
         if self.report_to is None:
@@ -94,6 +99,8 @@ class RewardTrainerConfig:
             raise ValueError("output_dir must be provided")
         if self.num_train_epochs <= 0:
             raise ValueError("num_train_epochs must be > 0")
+        if self.max_steps is not None and self.max_steps <= 0:
+            raise ValueError("max_steps must be > 0 when provided")
         if self.per_device_train_batch_size <= 0:
             raise ValueError("per_device_train_batch_size must be > 0")
         if self.per_device_eval_batch_size <= 0:
@@ -126,6 +133,8 @@ class RewardTrainerConfig:
             raise ValueError(
                 f"training_mode must be one of {', '.join(VALID_TRAINING_MODES)}"
             )
+        if not isinstance(self.ranking_score_diagnostics, bool):
+            raise ValueError("ranking_score_diagnostics must be a boolean")
 
 
 @dataclass(eq=True)
@@ -164,6 +173,8 @@ def load_reward_training_config(config_path: str) -> RewardTrainingConfigBundle:
     data_config = RewardTrainingDataConfig(**data_section)
 
     training_section: Dict[str, Any] = dict(payload["training"])
+    # Accepted but ignored for compatibility with pre-cosine training YAMLs.
+    training_section.pop("ranking_score_diagnostic_scales", None)
     training_section["output_dir"] = _resolve_path(training_section["output_dir"], base_dir)
     training_config = RewardTrainerConfig(**training_section)
 
