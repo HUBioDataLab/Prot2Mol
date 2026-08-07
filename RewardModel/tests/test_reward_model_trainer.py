@@ -20,6 +20,7 @@ from reward_model.training import (
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_pairwise_accuracy,
+    compute_ranking_score_diagnostics,
     create_training_arguments,
     get_saved_pair_dataset_paths,
     get_tokenized_split_dataset_paths,
@@ -230,6 +231,43 @@ def test_metric_helpers_compute_expected_values():
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
 
 
+def test_ranking_score_diagnostics_measure_scale_margin_and_saturation():
+    metrics = compute_ranking_score_diagnostics(
+        ranking_scores=torch.tensor([3.0, 1.0, -2.0, 100.0]),
+        pchembl_values=torch.tensor([8.0, 7.0, 6.0, 1.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0, -1]),
+        temperature=1.0,
+        affinity_margin=0.5,
+        saturation_scales=(1.0, 5.0),
+    )
+
+    assert metrics["ranking_score_num_examples"] == pytest.approx(3.0)
+    assert metrics["ranking_score_mean"] == pytest.approx(2.0 / 3.0)
+    assert metrics["ranking_score_std"] == pytest.approx(
+        torch.tensor([3.0, 1.0, -2.0]).std(unbiased=False).item()
+    )
+    assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(1.0)
+    assert metrics["ranking_margin_pair_gap_p50"] == pytest.approx(3.0)
+    assert metrics["ranking_margin_pair_count"] == pytest.approx(3.0)
+    assert 0.0 < metrics["ranking_list_normalized_entropy"] < 1.0
+    assert metrics["ranking_score_tanh_1_saturation_fraction"] == pytest.approx(
+        2.0 / 3.0
+    )
+    assert metrics["ranking_score_tanh_5_saturation_fraction"] == pytest.approx(0.0)
+
+
+def test_ranking_score_diagnostics_exclude_pairs_inside_affinity_margin():
+    metrics = compute_ranking_score_diagnostics(
+        ranking_scores=torch.tensor([3.0, -100.0, -2.0]),
+        pchembl_values=torch.tensor([8.0, 7.8, 6.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        affinity_margin=0.5,
+    )
+
+    assert metrics["ranking_margin_pair_count"] == pytest.approx(2.0)
+    assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(0.5)
+
+
 def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     pytest.importorskip("accelerate")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
@@ -266,6 +304,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
                 per_device_eval_batch_size=2,
                 logging_steps=1,
                 fp16=False,
+                ranking_score_diagnostics=True,
             )
         ),
         train_dataset=train_dataset,
@@ -292,6 +331,9 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_accuracy" in eval_metrics
     assert "eval_spearman" in eval_metrics
     assert "eval_spearman_num_groups" in eval_metrics
+    assert "eval_ranking_score_std" in eval_metrics
+    assert "eval_ranking_list_normalized_entropy" in eval_metrics
+    assert "eval_ranking_margin_pair_accuracy" in eval_metrics
     assert "eval_val2_loss" in eval_metrics
     assert "eval_val2_ranking_loss" in eval_metrics
     assert "eval_val2_classification_loss" in eval_metrics
@@ -303,6 +345,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_val2_accuracy" in eval_metrics
     assert "eval_val2_spearman" in eval_metrics
     assert "eval_val2_spearman_num_groups" in eval_metrics
+    assert "eval_val2_ranking_score_std" in eval_metrics
     assay_log_path = tmp_path / "trainer_output" / "eval_assay_spearman.jsonl"
     val2_assay_log_path = tmp_path / "trainer_output" / "eval_val2_assay_spearman.jsonl"
     assay_log_records = [
@@ -342,7 +385,30 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         "classification_auroc",
         "ranking_pairwise_accuracy",
         "ranking_loss_per_ranked_example",
+        "ranking_score_std",
+        "ranking_list_normalized_entropy",
+        "ranking_margin_pair_accuracy",
     }.issubset(training_logs[-1])
+    diagnostic_log_path = (
+        tmp_path / "trainer_output" / "ranking_score_diagnostics.jsonl"
+    )
+    diagnostic_records = [
+        json.loads(line)
+        for line in diagnostic_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["split"] for record in diagnostic_records} >= {
+        "train",
+        "eval",
+        "eval_val2",
+    }
+    train_diagnostic_record = next(
+        record for record in diagnostic_records if record["split"] == "train"
+    )
+    eval_diagnostic_record = next(
+        record for record in diagnostic_records if record["split"] == "eval"
+    )
+    assert "ranking_loss" in train_diagnostic_record["metrics"]
+    assert "eval_spearman" in eval_diagnostic_record["metrics"]
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
 

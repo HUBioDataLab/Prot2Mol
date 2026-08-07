@@ -20,7 +20,11 @@ from sklearn.metrics import (
 )
 
 from .data import RewardPairCollator, RewardPairDataset
-from ..model.losses import MIN_LISTWISE_LIGANDS, ligunity_listwise_loss
+from ..model.losses import (
+    DEFAULT_RANKING_AFFINITY_MARGIN,
+    MIN_LISTWISE_LIGANDS,
+    ligunity_listwise_loss,
+)
 
 ASSAY_SPEARMAN_LOG_FILENAME = "eval_assay_spearman.jsonl"
 
@@ -108,6 +112,128 @@ def build_complete_coverage_ranking_partitions(
     return partitions
 
 
+def _diagnostic_scale_key(scale: float) -> str:
+    return f"{float(scale):g}".replace("-", "m").replace(".", "p")
+
+
+def compute_ranking_score_diagnostics(
+    *,
+    ranking_scores: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ranking_group_ids: torch.Tensor,
+    temperature: float = 1.0,
+    affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN,
+    saturation_scales: Sequence[float] = (3.0, 5.0, 13.0),
+) -> Dict[str, float]:
+    """Describe score scale and margin-eligible ranking geometry.
+
+    These metrics are observational only: they do not transform scores or
+    participate in the loss. Groups with negative ids are ignored.
+    """
+    scores = ranking_scores.reshape(-1).detach().cpu().float()
+    targets = pchembl_values.reshape(-1).detach().cpu().float()
+    group_ids = ranking_group_ids.reshape(-1).detach().cpu().long()
+    if not (scores.shape == targets.shape == group_ids.shape):
+        raise ValueError("ranking diagnostic tensors must have the same shape")
+    if not torch.isfinite(scores).all() or not torch.isfinite(targets).all():
+        raise ValueError("ranking diagnostic scores and targets must be finite")
+    if temperature <= 0.0 or not math.isfinite(float(temperature)):
+        raise ValueError("temperature must be finite and > 0")
+    if affinity_margin < 0.0 or not math.isfinite(float(affinity_margin)):
+        raise ValueError("affinity_margin must be finite and >= 0")
+    resolved_scales = tuple(float(scale) for scale in saturation_scales)
+    if not resolved_scales or any(
+        scale <= 0.0 or not math.isfinite(scale) for scale in resolved_scales
+    ):
+        raise ValueError("saturation_scales must contain finite values > 0")
+
+    ranked_mask = group_ids >= 0
+    ranked_scores = scores[ranked_mask]
+    if ranked_scores.numel() == 0:
+        return {}
+
+    quantiles = torch.quantile(
+        ranked_scores,
+        torch.tensor([0.01, 0.5, 0.99], dtype=ranked_scores.dtype),
+    )
+    metrics = {
+        "ranking_score_mean": float(ranked_scores.mean().item()),
+        "ranking_score_std": float(ranked_scores.std(unbiased=False).item()),
+        "ranking_score_min": float(ranked_scores.min().item()),
+        "ranking_score_p01": float(quantiles[0].item()),
+        "ranking_score_p50": float(quantiles[1].item()),
+        "ranking_score_p99": float(quantiles[2].item()),
+        "ranking_score_max": float(ranked_scores.max().item()),
+        "ranking_score_abs_mean": float(ranked_scores.abs().mean().item()),
+        "ranking_score_num_examples": float(ranked_scores.numel()),
+    }
+
+    for scale in resolved_scales:
+        normalized_scores = ranked_scores / scale
+        tanh_values = torch.tanh(normalized_scores)
+        scale_key = _diagnostic_scale_key(scale)
+        metrics[f"ranking_score_tanh_{scale_key}_saturation_fraction"] = float(
+            (tanh_values.abs() >= 0.95).float().mean().item()
+        )
+        metrics[f"ranking_score_tanh_{scale_key}_mean_slope"] = float(
+            (1.0 - tanh_values.square()).mean().item()
+        )
+
+    list_entropies: list[torch.Tensor] = []
+    signed_pair_gaps: list[torch.Tensor] = []
+    for group_id in torch.unique(group_ids[ranked_mask], sorted=True):
+        group_mask = group_ids == group_id
+        group_scores = scores[group_mask]
+        group_targets = targets[group_mask]
+        if group_scores.numel() >= 2:
+            probabilities = torch.softmax(group_scores / float(temperature), dim=0)
+            entropy = -(probabilities * probabilities.clamp_min(1e-12).log()).sum()
+            list_entropies.append(entropy / math.log(group_scores.numel()))
+
+            upper_triangle = torch.triu(
+                torch.ones(
+                    (group_scores.numel(), group_scores.numel()),
+                    dtype=torch.bool,
+                ),
+                diagonal=1,
+            )
+            target_differences = group_targets[:, None] - group_targets[None, :]
+            eligible_pairs = upper_triangle & (
+                target_differences.abs() > float(affinity_margin)
+            )
+            score_differences = group_scores[:, None] - group_scores[None, :]
+            signed_pair_gaps.append(
+                (score_differences * target_differences.sign())[eligible_pairs]
+            )
+
+    if list_entropies:
+        entropies = torch.stack(list_entropies)
+        metrics["ranking_list_normalized_entropy"] = float(entropies.mean().item())
+        metrics["ranking_list_entropy_num_lists"] = float(entropies.numel())
+
+    nonempty_gaps = [gaps for gaps in signed_pair_gaps if gaps.numel() > 0]
+    if nonempty_gaps:
+        gaps = torch.cat(nonempty_gaps)
+        gap_quantiles = torch.quantile(
+            gaps,
+            torch.tensor([0.1, 0.5, 0.9], dtype=gaps.dtype),
+        )
+        metrics.update(
+            {
+                "ranking_margin_pair_accuracy": float(
+                    ((gaps > 0).float() + 0.5 * (gaps == 0).float()).mean().item()
+                ),
+                "ranking_margin_pair_gap_mean": float(gaps.mean().item()),
+                "ranking_margin_pair_abs_gap_mean": float(gaps.abs().mean().item()),
+                "ranking_margin_pair_gap_p10": float(gap_quantiles[0].item()),
+                "ranking_margin_pair_gap_p50": float(gap_quantiles[1].item()),
+                "ranking_margin_pair_gap_p90": float(gap_quantiles[2].item()),
+                "ranking_margin_pair_count": float(gaps.numel()),
+            }
+        )
+    return metrics
+
+
 def compute_classification_metrics(
     probabilities: Sequence[float],
     labels: Sequence[float],
@@ -151,6 +277,8 @@ def compute_joint_evaluation_metrics(
     ranking_max_ligands: int = 16,
     ranking_num_partitions: int = 3,
     ranking_partition_seed: int = 42,
+    ranking_score_diagnostics: bool = False,
+    ranking_score_diagnostic_scales: Sequence[float] = (3.0, 5.0, 13.0),
 ) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     """Compute deterministic full-dataset losses and metrics from one scoring pass."""
     logits = activity_logits.reshape(-1).detach().cpu().float()
@@ -230,6 +358,20 @@ def compute_joint_evaluation_metrics(
             "eval_ranking_partitions": float(len(ranking_partitions)),
         }
     )
+    if ranking_score_diagnostics:
+        diagnostic_metrics = compute_ranking_score_diagnostics(
+            ranking_scores=scores,
+            pchembl_values=pchembl,
+            # The first deterministic partition covers every eligible row and
+            # keeps diagnostics bounded to the same maximum list size as loss.
+            ranking_group_ids=ranking_partitions[0],
+            temperature=ranking_temperature,
+            affinity_margin=ranking_affinity_margin,
+            saturation_scales=ranking_score_diagnostic_scales,
+        )
+        metrics.update(
+            {f"eval_{key}": value for key, value in diagnostic_metrics.items()}
+        )
     return metrics, assay_records
 
 

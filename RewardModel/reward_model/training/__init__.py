@@ -31,6 +31,7 @@ from .evaluation import (
     compute_groupwise_spearman,
     compute_joint_evaluation_metrics,
     compute_pairwise_accuracy,
+    compute_ranking_score_diagnostics,
     compute_reward_model_eval_metrics,
 )
 from .entry import (
@@ -70,6 +71,7 @@ __all__ = [
     "compute_groupwise_spearman",
     "compute_joint_evaluation_metrics",
     "compute_pairwise_accuracy",
+    "compute_ranking_score_diagnostics",
     "compute_reward_model_eval_metrics",
     "create_training_arguments",
     "get_saved_pair_dataset_paths",

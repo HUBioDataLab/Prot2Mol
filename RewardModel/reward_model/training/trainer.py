@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import os
 from array import array
 from typing import Any, Dict, Iterator, Optional, Sequence
@@ -18,8 +19,11 @@ from .evaluation import (
     _with_metric_prefix,
     compute_classification_metrics,
     compute_joint_evaluation_metrics,
+    compute_ranking_score_diagnostics,
 )
 
+
+RANKING_SCORE_DIAGNOSTICS_LOG_FILENAME = "ranking_score_diagnostics.jsonl"
 
 REQUIRED_DISTRIBUTED_ENV_VARS = (
     "WORLD_SIZE",
@@ -209,6 +213,26 @@ class RewardModelTrainer(Trainer):
         self._train_component_count = 0
         self._train_classification_probabilities: list[float] = []
         self._train_classification_labels: list[float] = []
+        self._train_ranking_diagnostic_sums: Dict[str, float] = {}
+        self._train_ranking_diagnostic_counts: Dict[str, int] = {}
+
+    def _ranking_score_diagnostics_enabled(self) -> bool:
+        return bool(
+            getattr(
+                getattr(self, "args", None),
+                "reward_ranking_score_diagnostics",
+                False,
+            )
+        )
+
+    def _ranking_score_diagnostic_scales(self) -> tuple[float, ...]:
+        return tuple(
+            getattr(
+                getattr(self, "args", None),
+                "reward_ranking_score_diagnostic_scales",
+                (3.0, 5.0, 13.0),
+            )
+        )
 
     def _get_train_sampler(self, train_dataset=None):
         active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
@@ -321,6 +345,25 @@ class RewardModelTrainer(Trainer):
                 self._train_component_sums["ranking_pairwise_count"] += float(
                     comparable.sum().item()
                 )
+                if self._ranking_score_diagnostics_enabled():
+                    diagnostics = compute_ranking_score_diagnostics(
+                        ranking_scores=scores,
+                        pchembl_values=targets,
+                        ranking_group_ids=group_ids,
+                        temperature=float(self.model.config.ranking_temperature),
+                        affinity_margin=float(
+                            self.model.config.ranking_affinity_margin
+                        ),
+                        saturation_scales=self._ranking_score_diagnostic_scales(),
+                    )
+                    for key, value in diagnostics.items():
+                        self._train_ranking_diagnostic_sums[key] = (
+                            self._train_ranking_diagnostic_sums.get(key, 0.0)
+                            + float(value)
+                        )
+                        self._train_ranking_diagnostic_counts[key] = (
+                            self._train_ranking_diagnostic_counts.get(key, 0) + 1
+                        )
         self._train_component_count += 1
 
     def _consume_train_component_logs(self) -> Dict[str, float]:
@@ -364,6 +407,13 @@ class RewardModelTrainer(Trainer):
                 self._train_component_sums["ranking_pairwise_correct"]
                 / ranking_pairwise_count
             )
+        logs.update(
+            {
+                key: total / self._train_ranking_diagnostic_counts[key]
+                for key, total in self._train_ranking_diagnostic_sums.items()
+                if self._train_ranking_diagnostic_counts.get(key, 0) > 0
+            }
+        )
         self._reset_train_component_accumulator()
         return logs
 
@@ -509,6 +559,8 @@ class RewardModelTrainer(Trainer):
                 "ranking_partition_seed",
                 int(self.args.seed),
             ),
+            ranking_score_diagnostics=self._ranking_score_diagnostics_enabled(),
+            ranking_score_diagnostic_scales=self._ranking_score_diagnostic_scales(),
         )
         metrics = _with_metric_prefix(metrics, metric_key_prefix)
         _append_assay_spearman_log(
@@ -546,10 +598,51 @@ class RewardModelTrainer(Trainer):
         logs = dict(logs)
         if "loss" in logs:
             logs.update(self._consume_train_component_logs())
+        self._append_ranking_score_diagnostics_log(logs)
         parent_log = super().log
         if "start_time" in inspect.signature(parent_log).parameters:
             return parent_log(logs, start_time=start_time)
         return parent_log(logs)
+
+    def _append_ranking_score_diagnostics_log(self, logs: Dict[str, Any]) -> None:
+        if not self._ranking_score_diagnostics_enabled():
+            return
+        if not self.is_world_process_zero():
+            return
+        diagnostic_metrics = {
+            key: float(value)
+            for key, value in logs.items()
+            if (
+                "ranking_score_" in key
+                or "ranking_margin_pair_" in key
+                or "ranking_list_" in key
+                or key in {"loss", "grad_norm", "ranking_loss", "total_loss"}
+                or key.endswith("_ranking_loss")
+                or key.endswith("_spearman")
+            )
+            and isinstance(value, (int, float))
+        }
+        if not diagnostic_metrics:
+            return
+
+        split = "train"
+        if any(key.startswith("eval_val2_") for key in diagnostic_metrics):
+            split = "eval_val2"
+        elif any(key.startswith("eval_") for key in diagnostic_metrics):
+            split = "eval"
+        os.makedirs(self.args.output_dir, exist_ok=True)
+        path = os.path.join(
+            self.args.output_dir,
+            RANKING_SCORE_DIAGNOSTICS_LOG_FILENAME,
+        )
+        record = {
+            "global_step": int(self.state.global_step),
+            "epoch": self.state.epoch,
+            "split": split,
+            "metrics": diagnostic_metrics,
+        }
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
         if not self.args.should_save:
@@ -609,6 +702,12 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         training_args = TrainingArguments(**args_kwargs)
         training_args.reward_length_bucketing = config.length_bucketing
         training_args.length_bucket_size_multiplier = config.length_bucket_size_multiplier
+        training_args.reward_ranking_score_diagnostics = (
+            config.ranking_score_diagnostics
+        )
+        training_args.reward_ranking_score_diagnostic_scales = (
+            config.ranking_score_diagnostic_scales
+        )
         return training_args
     except ImportError as exc:
         raise ImportError(
