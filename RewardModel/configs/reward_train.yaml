@@ -6,6 +6,7 @@ model:
   fusion_hidden_dim: 512
   fusion_num_heads: 8
   fusion_attention_backend: sdpa
+  fusion_residual: true
   dropout: 0.1
   pooling_type: mean
   activity_threshold: 6.0
@@ -33,7 +34,7 @@ data:
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_ranking_loss_1.0
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_ranking_loss_1.0_residual
   num_train_epochs: 10
   per_device_train_batch_size: 48
   per_device_eval_batch_size: 64

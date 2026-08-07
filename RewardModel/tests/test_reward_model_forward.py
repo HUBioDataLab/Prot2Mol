@@ -66,6 +66,18 @@ def test_reward_model_forward_handles_hidden_dim_mismatch_and_losses():
     ] == expected_head_dims
 
 
+def test_reward_model_passes_fusion_residual_config_to_fusion():
+    baseline = _build_model(fusion_residual=False)
+    residual = _build_model(fusion_residual=True)
+
+    assert baseline.fusion.residual is False
+    assert baseline.fusion.protein_residual_norm is None
+    assert baseline.fusion.molecule_residual_norm is None
+    assert residual.fusion.residual is True
+    assert residual.fusion.protein_residual_norm is not None
+    assert residual.fusion.molecule_residual_norm is not None
+
+
 def test_reward_model_encoders_can_be_frozen_independently():
     protein_frozen = _build_model(
         freeze_protein_encoder=True,

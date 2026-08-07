@@ -71,6 +71,7 @@ def test_reward_model_save_and_load_round_trip(tmp_path):
         molecule_model_name_or_path="molecule/dummy",
         fusion_hidden_dim=10,
         fusion_num_heads=2,
+        fusion_residual=True,
         dropout=0.0,
     )
     model = RewardModel(config=config, protein_bundle=protein_bundle, molecule_bundle=molecule_bundle)
@@ -86,7 +87,9 @@ def test_reward_model_save_and_load_round_trip(tmp_path):
     )
 
     assert loaded_config.fusion_hidden_dim == 10
+    assert loaded_config.fusion_residual is True
     assert reloaded.config.fusion_hidden_dim == 10
+    assert reloaded.config.fusion_residual is True
     assert reloaded.config.protein_hidden_size == 6
 
     original_state = model.state_dict()

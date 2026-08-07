@@ -11,6 +11,7 @@ def test_reward_model_config_round_trip(tmp_path):
         molecule_model_name_or_path="molecule/local",
         fusion_hidden_dim=256,
         fusion_num_heads=8,
+        fusion_residual=True,
         pooling_type="mean_all_tok",
         bce_pos_weight=3.0,
     )
@@ -41,6 +42,7 @@ def test_reward_model_config_loads_legacy_payload_with_deduplication_defaults():
     assert config.deduplicate_protein_inputs is True
     assert config.deduplicate_molecule_inputs is True
     assert config.fusion_attention_backend == "manual"
+    assert config.fusion_residual is False
     assert config.ranking_affinity_margin == pytest.approx(math.log10(3.0))
     assert config.ranking_affinity_margin == pytest.approx(
         DEFAULT_RANKING_AFFINITY_MARGIN
@@ -67,6 +69,11 @@ def test_reward_model_config_rejects_unknown_fusion_attention_backend():
         assert "fusion_attention_backend" in str(exc)
     else:
         raise AssertionError("Expected an invalid fusion backend to be rejected")
+
+
+def test_reward_model_config_rejects_non_boolean_fusion_residual():
+    with pytest.raises(ValueError, match="fusion_residual must be a boolean"):
+        RewardModelConfig(fusion_residual="true")
 
 
 @pytest.mark.parametrize(

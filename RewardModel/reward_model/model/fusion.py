@@ -32,6 +32,7 @@ class TokenFusion(nn.Module):
         hidden_dim: int,
         num_heads: int,
         attention_backend: str = "manual",
+        residual: bool = False,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -43,8 +44,11 @@ class TokenFusion(nn.Module):
         self.num_heads = num_heads
         self.head_size = hidden_dim // num_heads
         self.attention_backend = attention_backend
+        self.residual = residual
         if self.attention_backend not in {"manual", "sdpa"}:
             raise ValueError("attention_backend must be 'manual' or 'sdpa'")
+        if not isinstance(self.residual, bool):
+            raise ValueError("residual must be a boolean")
 
         self.query_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.key_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -53,6 +57,9 @@ class TokenFusion(nn.Module):
         self.query_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.key_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.value_m = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        self.protein_residual_norm = nn.LayerNorm(hidden_dim) if residual else None
+        self.molecule_residual_norm = nn.LayerNorm(hidden_dim) if residual else None
 
     def _apply_heads(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, _ = x.shape
@@ -175,6 +182,12 @@ class TokenFusion(nn.Module):
                 torch.einsum("blkh,bkhd->blhd", alpha_mp, protein_v).flatten(-2)
                 + torch.einsum("blkh,bkhd->blhd", alpha_mm, molecule_v).flatten(-2)
             ) / 2.0
+
+        if self.residual:
+            if self.protein_residual_norm is None or self.molecule_residual_norm is None:
+                raise RuntimeError("Residual fusion norms are not initialized")
+            fused_protein = self.protein_residual_norm(protein_tokens + fused_protein)
+            fused_molecule = self.molecule_residual_norm(molecule_tokens + fused_molecule)
 
         fused_protein = fused_protein * protein_mask.unsqueeze(-1).to(fused_protein.dtype)
         fused_molecule = fused_molecule * molecule_mask.unsqueeze(-1).to(fused_molecule.dtype)

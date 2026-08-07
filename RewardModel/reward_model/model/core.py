@@ -60,6 +60,7 @@ class RewardModel(nn.Module):
             hidden_dim=self._config.fusion_hidden_dim,
             num_heads=self._config.fusion_num_heads,
             attention_backend=self._config.fusion_attention_backend,
+            residual=self._config.fusion_residual,
         )
         head_input_dim = self._config.fusion_hidden_dim * 2
         ranking_hidden_dims = (2048, 1024, 512, 256, 128)

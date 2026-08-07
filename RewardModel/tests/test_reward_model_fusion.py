@@ -1,14 +1,21 @@
 import copy
 
+import pytest
 import torch
 import torch.nn.functional as F
 
 from reward_model.model.fusion import TokenFusion
 
 
-def test_sdpa_fusion_matches_manual_forward_and_backward():
+@pytest.mark.parametrize("residual", [False, True])
+def test_sdpa_fusion_matches_manual_forward_and_backward(residual):
     torch.manual_seed(42)
-    manual = TokenFusion(hidden_dim=8, num_heads=2, attention_backend="manual")
+    manual = TokenFusion(
+        hidden_dim=8,
+        num_heads=2,
+        attention_backend="manual",
+        residual=residual,
+    )
     sdpa = copy.deepcopy(manual)
     sdpa.attention_backend = "sdpa"
     manual_protein = torch.randn(2, 5, 8, requires_grad=True)
@@ -40,8 +47,18 @@ def test_sdpa_fusion_matches_manual_forward_and_backward():
     for manual_output, sdpa_output in zip(manual_outputs, sdpa_outputs):
         assert torch.allclose(manual_output, sdpa_output, atol=1e-6, rtol=1e-5)
 
-    sum(output.square().sum() for output in manual_outputs).backward()
-    sum(output.square().sum() for output in sdpa_outputs).backward()
+    output_weights = [
+        torch.linspace(0.1, 1.0, output.numel()).reshape_as(output)
+        for output in manual_outputs
+    ]
+    sum(
+        (output * weight).sum()
+        for output, weight in zip(manual_outputs, output_weights)
+    ).backward()
+    sum(
+        (output * weight).sum()
+        for output, weight in zip(sdpa_outputs, output_weights)
+    ).backward()
     assert torch.allclose(manual_protein.grad, sdpa_protein.grad, atol=1e-6, rtol=1e-5)
     assert torch.allclose(manual_molecule.grad, sdpa_molecule.grad, atol=1e-6, rtol=1e-5)
     sdpa_parameters = dict(sdpa.named_parameters())
@@ -105,3 +122,53 @@ def test_fusion_rejects_unknown_attention_backend():
         assert "attention_backend" in str(exc)
     else:
         raise AssertionError("Expected an invalid attention backend to be rejected")
+
+
+def test_fusion_residual_can_be_enabled_and_disabled():
+    torch.manual_seed(7)
+    protein_tokens = torch.randn(1, 3, 8)
+    molecule_tokens = torch.randn(1, 2, 8)
+    protein_mask = torch.tensor([[1, 1, 0]], dtype=torch.long)
+    molecule_mask = torch.tensor([[1, 0]], dtype=torch.long)
+
+    baseline = TokenFusion(hidden_dim=8, num_heads=2, residual=False)
+    residual = TokenFusion(hidden_dim=8, num_heads=2, residual=True)
+    with torch.no_grad():
+        for fusion in (baseline, residual):
+            for projection_name in (
+                "query_p",
+                "key_p",
+                "value_p",
+                "query_m",
+                "key_m",
+                "value_m",
+            ):
+                getattr(fusion, projection_name).weight.zero_()
+
+    baseline_protein, baseline_molecule = baseline(
+        protein_tokens,
+        molecule_tokens,
+        protein_mask,
+        molecule_mask,
+    )
+    residual_protein, residual_molecule = residual(
+        protein_tokens,
+        molecule_tokens,
+        protein_mask,
+        molecule_mask,
+    )
+
+    assert torch.count_nonzero(baseline_protein) == 0
+    assert torch.count_nonzero(baseline_molecule) == 0
+
+    expected_protein = F.layer_norm(protein_tokens, (8,))
+    expected_molecule = F.layer_norm(molecule_tokens, (8,))
+    expected_protein = expected_protein * protein_mask.unsqueeze(-1)
+    expected_molecule = expected_molecule * molecule_mask.unsqueeze(-1)
+    assert torch.allclose(residual_protein, expected_protein)
+    assert torch.allclose(residual_molecule, expected_molecule)
+
+
+def test_fusion_rejects_non_boolean_residual_flag():
+    with pytest.raises(ValueError, match="residual must be a boolean"):
+        TokenFusion(hidden_dim=8, num_heads=2, residual="true")

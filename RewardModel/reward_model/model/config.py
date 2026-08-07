@@ -25,6 +25,7 @@ class RewardModelConfig:
     fusion_hidden_dim: int = 512
     fusion_num_heads: int = 8
     fusion_attention_backend: str = "manual"
+    fusion_residual: bool = False
     dropout: float = 0.1
     pooling_type: str = "mean"
     activity_threshold: float = 6.0
@@ -61,6 +62,8 @@ class RewardModelConfig:
                 "fusion_attention_backend must be one of "
                 f"{sorted(_VALID_FUSION_ATTENTION_BACKENDS)}"
             )
+        if not isinstance(self.fusion_residual, bool):
+            raise ValueError("fusion_residual must be a boolean")
         if self.pooling_type not in _VALID_POOLING_TYPES:
             raise ValueError(
                 f"Unsupported pooling_type: {self.pooling_type}. "
