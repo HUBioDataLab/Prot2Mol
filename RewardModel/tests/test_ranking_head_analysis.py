@@ -17,10 +17,13 @@ from reward_model.analysis.ranking_head import (
     capture_head_activations,
     load_assay_manifest,
     margin_pair_counts,
+    run_fusion_cosine_sensitivity,
     run_input_sensitivity,
+    score_fusion_cosines,
     score_dataset_pairs,
     select_complete_assays,
     write_assay_manifest,
+    write_fusion_cosine_analysis,
     write_prediction_analysis,
     write_sensitivity_analysis,
 )
@@ -79,7 +82,7 @@ def _analysis_dataset() -> Dataset:
     return Dataset.from_list(rows)
 
 
-def _dummy_model() -> RewardModel:
+def _dummy_model(*, fusion_residual: bool = False) -> RewardModel:
     torch.manual_seed(7)
     protein_bundle = LoadedEncoder(
         name_or_path="protein/dummy",
@@ -99,6 +102,7 @@ def _dummy_model() -> RewardModel:
             molecule_model_name_or_path="molecule/dummy",
             fusion_hidden_dim=10,
             fusion_num_heads=2,
+            fusion_residual=fusion_residual,
             dropout=0.0,
         ),
         protein_bundle=protein_bundle,
@@ -134,6 +138,47 @@ class _FormulaModel(torch.nn.Module):
             activity_logits=activity_logits,
             activity_probability=torch.sigmoid(activity_logits),
             joint_embedding=torch.stack([protein, molecule], dim=1),
+        )
+
+
+class _FusionCosineFormulaModel(torch.nn.Module):
+    def __init__(self, *, collapse_after_fusion: bool):
+        super().__init__()
+        self.collapse_after_fusion = collapse_after_fusion
+        self.protein_tokenizer = DummyTokenizer()
+        self.molecule_tokenizer = DummyTokenizer()
+        self.config = SimpleNamespace(pooling_type="mean", fusion_residual=True)
+
+    def forward(
+        self,
+        protein_input_ids,
+        molecule_input_ids,
+        protein_attention_mask,
+        molecule_attention_mask,
+        return_token_embeddings=False,
+        return_dict=True,
+    ):
+        protein_values = protein_input_ids.float()
+        molecule_values = molecule_input_ids.float()
+        protein_tokens = torch.stack(
+            [protein_values, torch.ones_like(protein_values)], dim=-1
+        )
+        molecule_tokens = torch.stack(
+            [molecule_values, torch.ones_like(molecule_values)], dim=-1
+        )
+        if self.collapse_after_fusion:
+            fused_protein = torch.ones_like(protein_tokens)
+            fused_molecule = torch.ones_like(molecule_tokens)
+        else:
+            fused_protein = protein_tokens
+            fused_molecule = molecule_tokens
+        return SimpleNamespace(
+            protein_token_embeddings=(protein_tokens if return_token_embeddings else None),
+            molecule_token_embeddings=(molecule_tokens if return_token_embeddings else None),
+            fused_protein_tokens=(fused_protein if return_token_embeddings else None),
+            fused_molecule_tokens=(fused_molecule if return_token_embeddings else None),
+            protein_attention_mask=protein_attention_mask.bool(),
+            molecule_attention_mask=molecule_attention_mask.bool(),
         )
 
 
@@ -335,6 +380,85 @@ def test_input_sensitivity_detects_ligand_only_and_interacting_scores(tmp_path):
     )
 
 
+def test_fusion_cosine_analysis_detects_post_fusion_collapse(tmp_path):
+    dataset, _ = select_complete_assays(_analysis_dataset())
+    model = _FusionCosineFormulaModel(collapse_after_fusion=True)
+    model.train()
+
+    scored = score_fusion_cosines(
+        model,
+        dataset,
+        batch_size=4,
+        device=torch.device("cpu"),
+    )
+    assert model.training is True
+    assert scored["pre_fusion_cosine"].std() > 0.0
+    assert scored["post_fusion_cosine"].std() == pytest.approx(0.0)
+
+    rows, by_repeat, distributions, summary = run_fusion_cosine_sensitivity(
+        model,
+        dataset,
+        split="val",
+        batch_size=4,
+        device=torch.device("cpu"),
+        num_shuffles=2,
+        seed=5,
+    )
+
+    assert model.training is True
+    assert len(rows) == len(dataset) * 2 * 2
+    assert len(by_repeat) == 2 * 2 * 2
+    assert len(distributions) == 2 + 2 * 2 * 2
+    assert summary["pooling_type"] == "mean"
+    assert summary["fusion_residual"] is True
+    assert summary["stages"]["pre_fusion"]["correct"]["distribution"][
+        "std"
+    ] > 0.0
+    assert summary["stages"]["post_fusion"]["correct"]["distribution"][
+        "std"
+    ] == pytest.approx(0.0)
+    assert summary["stages"]["post_fusion"]["perturbations"][
+        "protein_shuffled"
+    ]["cosine_mae"]["mean"] == pytest.approx(0.0)
+    assert summary["fusion_effect"][
+        "correct_cosine_std_ratio_post_to_pre"
+    ] == pytest.approx(0.0)
+
+    paths = write_fusion_cosine_analysis(
+        str(tmp_path),
+        split="val",
+        sensitivity_rows=rows,
+        by_repeat=by_repeat,
+        distributions=distributions,
+        summary=summary,
+    )
+    assert all(os.path.exists(path) for path in paths.values())
+    saved = json.loads((tmp_path / "val_fusion_cosine_summary.json").read_text())
+    assert saved["num_shuffles"] == 2
+
+
+def test_fusion_cosine_scoring_runs_through_real_residual_model():
+    dataset, _ = select_complete_assays(_analysis_dataset())
+    model = _dummy_model(fusion_residual=True)
+    model.train()
+
+    scored = score_fusion_cosines(
+        model,
+        dataset,
+        batch_size=4,
+        device=torch.device("cpu"),
+    )
+
+    assert model.training is True
+    assert model.config.fusion_residual is True
+    assert len(scored) == len(dataset)
+    assert np.isfinite(scored["pre_fusion_cosine"]).all()
+    assert np.isfinite(scored["post_fusion_cosine"]).all()
+    assert not np.allclose(
+        scored["pre_fusion_cosine"], scored["post_fusion_cosine"]
+    )
+
+
 def test_checkpoint_comparison_reads_prediction_artifacts(tmp_path):
     run_specs = []
     for label, spearman in (("step1000", 0.2), ("final", 0.1)):
@@ -374,6 +498,7 @@ def test_checkpoint_comparison_reads_prediction_artifacts(tmp_path):
     [
         ("inspect_ranking_predictions.py", "--checkpoint"),
         ("inspect_ranking_input_sensitivity.py", "--checkpoint"),
+        ("inspect_fusion_cosine_sensitivity.py", "--checkpoint"),
         ("inspect_ranking_head_activations.py", "--checkpoint"),
         ("compare_ranking_checkpoints.py", "--runs"),
     ],

@@ -45,7 +45,30 @@ replaces ligands. A protein rank-stability value near one, a near-zero protein
 target-Spearman change, and a protein-to-ligand centered-sensitivity ratio near
 zero indicate ligand-only ranking behavior.
 
-## 3. Inspect head activations
+## 3. Inspect fusion cosine geometry
+
+Before changing the scalar heads, compare the cosine geometry immediately
+before fusion with the geometry after fusion and its optional residual:
+
+```bash
+python inspect_fusion_cosine_sensitivity.py \
+  --checkpoint outputs/RUN/checkpoint-1000 \
+  --config configs/reward_train.yaml \
+  --output-dir diagnostics/step1000_fusion_cosine \
+  --split val \
+  --assay-manifest diagnostics/step1000_sensitivity/val_assays.json \
+  --num-shuffles 3 \
+  --device cpu
+```
+
+The tool uses the model's configured pooling rule at both stages. It records
+correct-pair, protein-shuffled, and ligand-shuffled cosine distributions,
+within-assay rank stability, centered sensitivity, target Spearman changes,
+and post/pre fusion variance ratios. A narrow post-fusion distribution together
+with high protein-shuffle rank stability indicates that post-fusion cosine would
+not provide a useful protein-conditioned ranking score.
+
+## 4. Inspect head activations
 
 ```bash
 python inspect_ranking_head_activations.py \
@@ -61,7 +84,7 @@ This records streaming mean, standard deviation, range, near-zero fraction,
 and non-finite counts for every linear and layer-normalization module in both
 heads.
 
-## 4. Compare checkpoints
+## 5. Compare checkpoints
 
 After running prediction inspection for step 1000, the best checkpoint, and
 the final model:

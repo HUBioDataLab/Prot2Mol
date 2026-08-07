@@ -11,8 +11,10 @@ from typing import Any, Mapping, Optional, Sequence
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from scipy.stats import pearsonr, spearmanr
 
+from ..model.fusion import masked_pool
 from ..training.data import RewardPairCollator
 
 
@@ -317,6 +319,163 @@ def score_dataset_pairs(
                         "joint_embedding_norm": float(embedding_norms[local_index]),
                         "protein_source_index": int(protein_indices[start + local_index]),
                         "molecule_source_index": int(molecule_indices[start + local_index]),
+                        "protein_source_group_id": str(
+                            protein_source_row["group_id"]
+                        ),
+                        "molecule_source_group_id": str(
+                            molecule_source_row["group_id"]
+                        ),
+                        "molecule_source_compound_id": str(
+                            molecule_source_row["compound_id"]
+                        ),
+                    }
+                )
+                records.append(record)
+    finally:
+        model.train(was_training)
+    return pd.DataFrame.from_records(records)
+
+
+def score_fusion_cosines(
+    model,
+    dataset,
+    *,
+    batch_size: int,
+    device: torch.device,
+    protein_source_indices: Optional[Sequence[int]] = None,
+    molecule_source_indices: Optional[Sequence[int]] = None,
+) -> pd.DataFrame:
+    """Measure cosine similarity before fusion and after fusion plus residuals."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+    row_count = len(dataset)
+    protein_indices = (
+        np.arange(row_count, dtype=np.int64)
+        if protein_source_indices is None
+        else np.asarray(protein_source_indices, dtype=np.int64)
+    )
+    molecule_indices = (
+        np.arange(row_count, dtype=np.int64)
+        if molecule_source_indices is None
+        else np.asarray(molecule_source_indices, dtype=np.int64)
+    )
+    if protein_indices.shape != (row_count,) or molecule_indices.shape != (row_count,):
+        raise ValueError("source index arrays must have one entry per dataset row")
+    if row_count and (
+        protein_indices.min() < 0
+        or molecule_indices.min() < 0
+        or protein_indices.max() >= row_count
+        or molecule_indices.max() >= row_count
+    ):
+        raise ValueError("source indices must refer to rows in the selected dataset")
+
+    pooling_type = str(getattr(getattr(model, "config", None), "pooling_type", "mean"))
+    collator = RewardPairCollator(
+        dynamic_padding=True,
+        protein_pad_token_id=getattr(
+            getattr(model, "protein_tokenizer", None), "pad_token_id", 0
+        ),
+        molecule_pad_token_id=getattr(
+            getattr(model, "molecule_tokenizer", None), "pad_token_id", 0
+        ),
+    )
+    was_training = model.training
+    model.eval()
+    records: list[dict[str, Any]] = []
+    try:
+        for start in range(0, row_count, batch_size):
+            end = min(start + batch_size, row_count)
+            rows = []
+            metadata_rows = []
+            protein_source_rows = []
+            molecule_source_rows = []
+            for index in range(start, end):
+                metadata_row = dict(dataset[index])
+                protein_row = dict(dataset[int(protein_indices[index])])
+                molecule_row = dict(dataset[int(molecule_indices[index])])
+                rows.append(_hybrid_row(metadata_row, protein_row, molecule_row))
+                metadata_rows.append(metadata_row)
+                protein_source_rows.append(protein_row)
+                molecule_source_rows.append(molecule_row)
+            token_batch = {
+                key: value.to(device)
+                for key, value in collator.collate_example_tokens(rows).items()
+            }
+            with torch.no_grad():
+                outputs = model(
+                    **token_batch,
+                    return_token_embeddings=True,
+                    return_dict=True,
+                )
+            required_outputs = {
+                "protein_token_embeddings": outputs.protein_token_embeddings,
+                "molecule_token_embeddings": outputs.molecule_token_embeddings,
+                "fused_protein_tokens": outputs.fused_protein_tokens,
+                "fused_molecule_tokens": outputs.fused_molecule_tokens,
+                "protein_attention_mask": outputs.protein_attention_mask,
+                "molecule_attention_mask": outputs.molecule_attention_mask,
+            }
+            missing = [name for name, value in required_outputs.items() if value is None]
+            if missing:
+                raise ValueError(
+                    "Model did not return representations required for fusion cosine "
+                    f"analysis: {missing}"
+                )
+
+            pre_protein = masked_pool(
+                outputs.protein_token_embeddings,
+                outputs.protein_attention_mask,
+                pooling_type,
+            ).float()
+            pre_molecule = masked_pool(
+                outputs.molecule_token_embeddings,
+                outputs.molecule_attention_mask,
+                pooling_type,
+            ).float()
+            post_protein = masked_pool(
+                outputs.fused_protein_tokens,
+                outputs.protein_attention_mask,
+                pooling_type,
+            ).float()
+            post_molecule = masked_pool(
+                outputs.fused_molecule_tokens,
+                outputs.molecule_attention_mask,
+                pooling_type,
+            ).float()
+
+            pre_cosines = F.cosine_similarity(pre_protein, pre_molecule, dim=-1)
+            post_cosines = F.cosine_similarity(post_protein, post_molecule, dim=-1)
+            tensors = {
+                "pre_fusion_cosine": pre_cosines,
+                "post_fusion_cosine": post_cosines,
+                "pre_protein_norm": pre_protein.norm(dim=-1),
+                "pre_molecule_norm": pre_molecule.norm(dim=-1),
+                "post_protein_norm": post_protein.norm(dim=-1),
+                "post_molecule_norm": post_molecule.norm(dim=-1),
+            }
+            arrays = {
+                name: value.detach().cpu().numpy() for name, value in tensors.items()
+            }
+            for local_index, metadata_row in enumerate(metadata_rows):
+                protein_source_row = protein_source_rows[local_index]
+                molecule_source_row = molecule_source_rows[local_index]
+                record = {
+                    column: metadata_row[column] for column in PREDICTION_COLUMNS
+                }
+                record.update(
+                    {
+                        name: float(values[local_index])
+                        for name, values in arrays.items()
+                    }
+                )
+                record.update(
+                    {
+                        "protein_source_index": int(
+                            protein_indices[start + local_index]
+                        ),
+                        "molecule_source_index": int(
+                            molecule_indices[start + local_index]
+                        ),
                         "protein_source_group_id": str(
                             protein_source_row["group_id"]
                         ),
@@ -841,6 +1000,384 @@ def write_sensitivity_analysis(
     }
     sensitivity_rows.to_parquet(paths["predictions"], index=False)
     by_repeat.to_csv(paths["by_repeat"], index=False)
+    with open(paths["summary"], "w", encoding="utf-8") as handle:
+        json.dump(dict(summary), handle, indent=2, sort_keys=True)
+    return paths
+
+
+def _distribution_summary(values: Sequence[float]) -> dict[str, float | int]:
+    array = np.asarray(values, dtype=np.float64)
+    array = array[np.isfinite(array)]
+    if array.size == 0:
+        return {
+            "count": 0,
+            "mean": float("nan"),
+            "std": float("nan"),
+            "min": float("nan"),
+            "p01": float("nan"),
+            "p10": float("nan"),
+            "p50": float("nan"),
+            "p90": float("nan"),
+            "p99": float("nan"),
+            "max": float("nan"),
+        }
+    quantiles = np.quantile(array, [0.01, 0.10, 0.50, 0.90, 0.99])
+    return {
+        "count": int(array.size),
+        "mean": float(array.mean()),
+        "std": float(array.std()),
+        "min": float(array.min()),
+        "p01": float(quantiles[0]),
+        "p10": float(quantiles[1]),
+        "p50": float(quantiles[2]),
+        "p90": float(quantiles[3]),
+        "p99": float(quantiles[4]),
+        "max": float(array.max()),
+    }
+
+
+def _mean_within_assay_std(frame: pd.DataFrame, column: str) -> float:
+    values = frame.groupby("group_id", sort=True)[column].agg(
+        lambda group: float(np.asarray(group, dtype=np.float64).std())
+    )
+    return float(values.mean()) if len(values) else float("nan")
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    return (
+        float(numerator / denominator)
+        if math.isfinite(float(numerator))
+        and math.isfinite(float(denominator))
+        and float(denominator) != 0.0
+        else float("nan")
+    )
+
+
+def run_fusion_cosine_sensitivity(
+    model,
+    dataset,
+    *,
+    split: str,
+    batch_size: int,
+    device: torch.device,
+    num_shuffles: int = 3,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Compare pre- and post-fusion cosine behavior under input shuffles."""
+    if num_shuffles <= 0:
+        raise ValueError("num_shuffles must be > 0")
+    baseline = score_fusion_cosines(
+        model,
+        dataset,
+        batch_size=batch_size,
+        device=device,
+    )
+    group_ids = [str(value) for value in dataset["group_id"]]
+    unique_groups = sorted(set(group_ids))
+    if len(unique_groups) < 2:
+        raise ValueError("Protein shuffling requires at least two assays")
+    first_group_index = {}
+    for index, group_id in enumerate(group_ids):
+        first_group_index.setdefault(group_id, index)
+
+    generator = np.random.default_rng(int(seed))
+    frames = []
+    repeat_records = []
+    distribution_records = []
+    stage_columns = {
+        "pre_fusion": "pre_fusion_cosine",
+        "post_fusion": "post_fusion_cosine",
+    }
+    for stage, column in stage_columns.items():
+        distribution_records.append(
+            {
+                "split": str(split),
+                "repeat": -1,
+                "stage": stage,
+                "pairing": "correct",
+                **_distribution_summary(baseline[column]),
+            }
+        )
+
+    for repeat in range(int(num_shuffles)):
+        group_sources = _cyclic_derangement(len(unique_groups), generator)
+        source_group_by_group = {
+            unique_groups[index]: unique_groups[int(group_sources[index])]
+            for index in range(len(unique_groups))
+        }
+        protein_indices = np.asarray(
+            [first_group_index[source_group_by_group[group_id]] for group_id in group_ids],
+            dtype=np.int64,
+        )
+        molecule_indices = _cyclic_derangement(len(dataset), generator)
+        variants = {
+            "protein_shuffled": score_fusion_cosines(
+                model,
+                dataset,
+                batch_size=batch_size,
+                device=device,
+                protein_source_indices=protein_indices,
+            ),
+            "ligand_shuffled": score_fusion_cosines(
+                model,
+                dataset,
+                batch_size=batch_size,
+                device=device,
+                molecule_source_indices=molecule_indices,
+            ),
+        }
+        for perturbation, variant in variants.items():
+            frame = baseline[list(PREDICTION_COLUMNS)].copy()
+            frame.insert(0, "split", str(split))
+            frame.insert(1, "repeat", repeat)
+            frame.insert(2, "perturbation", perturbation)
+            for source_column in (
+                "protein_source_index",
+                "molecule_source_index",
+                "protein_source_group_id",
+                "molecule_source_group_id",
+                "molecule_source_compound_id",
+            ):
+                frame[source_column] = variant[source_column].to_numpy()
+
+            for stage, source_column in stage_columns.items():
+                baseline_column = f"baseline_{stage}_cosine"
+                perturbed_column = f"perturbed_{stage}_cosine"
+                delta_column = f"{stage}_cosine_delta"
+                baseline_centered_column = f"baseline_{stage}_centered_cosine"
+                perturbed_centered_column = f"perturbed_{stage}_centered_cosine"
+                centered_delta_column = f"{stage}_centered_cosine_delta"
+                frame[baseline_column] = baseline[source_column].to_numpy()
+                frame[perturbed_column] = variant[source_column].to_numpy()
+                frame[delta_column] = frame[perturbed_column] - frame[baseline_column]
+                frame[baseline_centered_column] = frame.groupby("group_id")[
+                    baseline_column
+                ].transform(lambda values: values - values.mean())
+                frame[perturbed_centered_column] = frame.groupby("group_id")[
+                    perturbed_column
+                ].transform(lambda values: values - values.mean())
+                frame[centered_delta_column] = (
+                    frame[perturbed_centered_column]
+                    - frame[baseline_centered_column]
+                )
+
+                baseline_target_spearman = _weighted_group_spearman(
+                    frame,
+                    baseline_column,
+                    "pchembl_value",
+                )
+                perturbed_target_spearman = _weighted_group_spearman(
+                    frame,
+                    perturbed_column,
+                    "pchembl_value",
+                )
+                repeat_records.append(
+                    {
+                        "split": str(split),
+                        "repeat": repeat,
+                        "stage": stage,
+                        "perturbation": perturbation,
+                        "cosine_mae": float(frame[delta_column].abs().mean()),
+                        "centered_cosine_mae": float(
+                            frame[centered_delta_column].abs().mean()
+                        ),
+                        "baseline_perturbed_pearson": _safe_correlation(
+                            frame[baseline_column],
+                            frame[perturbed_column],
+                            method="pearson",
+                        ),
+                        "within_assay_rank_stability": _weighted_group_spearman(
+                            frame,
+                            baseline_column,
+                            perturbed_column,
+                        ),
+                        "baseline_target_spearman": baseline_target_spearman,
+                        "perturbed_target_spearman": perturbed_target_spearman,
+                        "target_spearman_delta": (
+                            perturbed_target_spearman - baseline_target_spearman
+                        ),
+                        "baseline_within_assay_cosine_std_mean": (
+                            _mean_within_assay_std(frame, baseline_column)
+                        ),
+                        "perturbed_within_assay_cosine_std_mean": (
+                            _mean_within_assay_std(frame, perturbed_column)
+                        ),
+                    }
+                )
+                distribution_records.append(
+                    {
+                        "split": str(split),
+                        "repeat": repeat,
+                        "stage": stage,
+                        "pairing": perturbation,
+                        **_distribution_summary(frame[perturbed_column]),
+                    }
+                )
+            frames.append(frame)
+
+    sensitivity_rows = pd.concat(frames, ignore_index=True)
+    by_repeat = pd.DataFrame.from_records(repeat_records)
+    distributions = pd.DataFrame.from_records(distribution_records)
+    metric_columns = (
+        "cosine_mae",
+        "centered_cosine_mae",
+        "baseline_perturbed_pearson",
+        "within_assay_rank_stability",
+        "baseline_target_spearman",
+        "perturbed_target_spearman",
+        "target_spearman_delta",
+        "baseline_within_assay_cosine_std_mean",
+        "perturbed_within_assay_cosine_std_mean",
+    )
+    stages: dict[str, Any] = {}
+    for stage, source_column in stage_columns.items():
+        stage_repeats = by_repeat[by_repeat["stage"] == stage]
+        perturbations = {}
+        for perturbation, group in stage_repeats.groupby("perturbation", sort=True):
+            perturbation_rows = sensitivity_rows[
+                sensitivity_rows["perturbation"] == perturbation
+            ]
+            perturbations[str(perturbation)] = {
+                column: {
+                    "mean": float(group[column].mean()),
+                    "std": float(group[column].std(ddof=0)),
+                }
+                for column in metric_columns
+            }
+            perturbations[str(perturbation)]["distribution"] = _distribution_summary(
+                perturbation_rows[f"perturbed_{stage}_cosine"]
+            )
+
+        protein_centered = perturbations["protein_shuffled"][
+            "centered_cosine_mae"
+        ]["mean"]
+        ligand_centered = perturbations["ligand_shuffled"][
+            "centered_cosine_mae"
+        ]["mean"]
+        stages[stage] = {
+            "correct": {
+                "distribution": _distribution_summary(baseline[source_column]),
+                "target_spearman": _weighted_group_spearman(
+                    baseline,
+                    source_column,
+                    "pchembl_value",
+                ),
+                "within_assay_cosine_std_mean": _mean_within_assay_std(
+                    baseline,
+                    source_column,
+                ),
+            },
+            "perturbations": perturbations,
+            "protein_to_ligand_centered_sensitivity_ratio": _safe_ratio(
+                protein_centered,
+                ligand_centered,
+            ),
+        }
+
+    pre_correct = stages["pre_fusion"]["correct"]
+    post_correct = stages["post_fusion"]["correct"]
+    pre_perturbations = stages["pre_fusion"]["perturbations"]
+    post_perturbations = stages["post_fusion"]["perturbations"]
+    fusion_effect = {
+        "correct_pre_post_pearson": _safe_correlation(
+            baseline["pre_fusion_cosine"],
+            baseline["post_fusion_cosine"],
+            method="pearson",
+        ),
+        "correct_pre_post_within_assay_rank_stability": _weighted_group_spearman(
+            baseline,
+            "pre_fusion_cosine",
+            "post_fusion_cosine",
+        ),
+        "correct_target_spearman_delta": float(
+            post_correct["target_spearman"] - pre_correct["target_spearman"]
+        ),
+        "correct_cosine_std_ratio_post_to_pre": _safe_ratio(
+            post_correct["distribution"]["std"],
+            pre_correct["distribution"]["std"],
+        ),
+        "correct_within_assay_std_ratio_post_to_pre": _safe_ratio(
+            post_correct["within_assay_cosine_std_mean"],
+            pre_correct["within_assay_cosine_std_mean"],
+        ),
+        "protein_shuffle_rank_stability_change": float(
+            post_perturbations["protein_shuffled"][
+                "within_assay_rank_stability"
+            ]["mean"]
+            - pre_perturbations["protein_shuffled"][
+                "within_assay_rank_stability"
+            ]["mean"]
+        ),
+        "ligand_shuffle_rank_stability_change": float(
+            post_perturbations["ligand_shuffled"][
+                "within_assay_rank_stability"
+            ]["mean"]
+            - pre_perturbations["ligand_shuffled"][
+                "within_assay_rank_stability"
+            ]["mean"]
+        ),
+        "protein_centered_sensitivity_ratio_post_to_pre": _safe_ratio(
+            post_perturbations["protein_shuffled"]["centered_cosine_mae"][
+                "mean"
+            ],
+            pre_perturbations["protein_shuffled"]["centered_cosine_mae"][
+                "mean"
+            ],
+        ),
+        "ligand_centered_sensitivity_ratio_post_to_pre": _safe_ratio(
+            post_perturbations["ligand_shuffled"]["centered_cosine_mae"][
+                "mean"
+            ],
+            pre_perturbations["ligand_shuffled"]["centered_cosine_mae"][
+                "mean"
+            ],
+        ),
+    }
+    summary = {
+        "split": str(split),
+        "num_examples": len(dataset),
+        "num_assays": len(unique_groups),
+        "num_shuffles": int(num_shuffles),
+        "seed": int(seed),
+        "pooling_type": str(
+            getattr(getattr(model, "config", None), "pooling_type", "mean")
+        ),
+        "fusion_residual": bool(
+            getattr(getattr(model, "config", None), "fusion_residual", False)
+        ),
+        "stages": stages,
+        "fusion_effect": fusion_effect,
+    }
+    return sensitivity_rows, by_repeat, distributions, summary
+
+
+def write_fusion_cosine_analysis(
+    output_dir: str,
+    *,
+    split: str,
+    sensitivity_rows: pd.DataFrame,
+    by_repeat: pd.DataFrame,
+    distributions: pd.DataFrame,
+    summary: Mapping[str, Any],
+) -> dict[str, str]:
+    os.makedirs(output_dir, exist_ok=True)
+    paths = {
+        "predictions": os.path.abspath(
+            os.path.join(output_dir, f"{split}_fusion_cosine_sensitivity.parquet")
+        ),
+        "by_repeat": os.path.abspath(
+            os.path.join(output_dir, f"{split}_fusion_cosine_by_repeat.csv")
+        ),
+        "distributions": os.path.abspath(
+            os.path.join(output_dir, f"{split}_fusion_cosine_distributions.csv")
+        ),
+        "summary": os.path.abspath(
+            os.path.join(output_dir, f"{split}_fusion_cosine_summary.json")
+        ),
+    }
+    sensitivity_rows.to_parquet(paths["predictions"], index=False)
+    by_repeat.to_csv(paths["by_repeat"], index=False)
+    distributions.to_csv(paths["distributions"], index=False)
     with open(paths["summary"], "w", encoding="utf-8") as handle:
         json.dump(dict(summary), handle, indent=2, sort_keys=True)
     return paths
