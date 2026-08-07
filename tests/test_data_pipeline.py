@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
@@ -7,6 +10,9 @@ from conftest import DummyBatchTokenizer
 from prot2mol.data.pipeline import (
     extract_smiles_list,
     find_molecule_column,
+    get_processed_stats_path,
+    has_matching_precomputed_split,
+    load_processed_stats,
     split_train_eval_dataset,
     tokenize_molecule_batch,
     tokenize_protein_batch,
@@ -35,6 +41,47 @@ def test_split_train_eval_dataset_aid_no_overlap():
     test_aids = set(test["AID"])
     assert train_aids.isdisjoint(test_aids)
     assert len(test_aids) >= 1
+
+
+def test_split_train_eval_dataset_boundary_ratios():
+    ds = Dataset.from_dict({"x": list(range(4))})
+
+    train, test = split_train_eval_dataset(ds, split_ratio=0.0)
+    assert train["x"] == [0, 1, 2, 3]
+    assert len(test) == 0
+
+    train, test = split_train_eval_dataset(ds, split_ratio=1.0)
+    assert len(train) == 0
+    assert test["x"] == [0, 1, 2, 3]
+
+
+def test_processed_stats_loading_and_validation(tmp_path):
+    dataset_path = tmp_path / "binding.data.csv"
+    cache_dir = tmp_path / "cache"
+    stats_path = get_processed_stats_path(str(dataset_path), cache_dir=str(cache_dir))
+    os_path = Path(stats_path)
+    os_path.parent.mkdir(parents=True)
+
+    expected = {"eval_split": "aid", "eval_split_ratio": 0.2, "split_seed": 7}
+    os_path.write_text(json.dumps(expected))
+    assert load_processed_stats(str(dataset_path), cache_dir=str(cache_dir)) == expected
+
+    os_path.write_text("[]")
+    assert load_processed_stats(str(dataset_path), cache_dir=str(cache_dir)) is None
+
+    os_path.write_text("not json")
+    assert load_processed_stats(str(dataset_path), cache_dir=str(cache_dir)) is None
+
+
+def test_matching_precomputed_split_requires_exact_metadata():
+    dataset = {"train": object(), "test": object()}
+    stats = {"eval_split": "aid", "eval_split_ratio": 0.2, "split_seed": 7}
+
+    assert has_matching_precomputed_split(dataset, stats, "aid", 0.2, 7)
+    assert not has_matching_precomputed_split(dataset, stats, "random", 0.2, 7)
+    assert not has_matching_precomputed_split(dataset, stats, "aid", 0.1, 7)
+    assert not has_matching_precomputed_split(dataset, stats, "aid", 0.2, 8)
+    assert not has_matching_precomputed_split({"train": object()}, stats, "aid", 0.2, 7)
 
 
 def test_extract_smiles_list_from_dataframe_selfies():

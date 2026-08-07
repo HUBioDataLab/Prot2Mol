@@ -157,6 +157,70 @@ def test_generator_predict_pchembl_for_all_rows(monkeypatch):
     assert np.allclose(out["Predicted_pChEMBL"].values, 7.2)
 
 
+def test_generator_predict_pchembl_preserves_per_row_targets(monkeypatch):
+    cfg = _generator_config(mode="prediction", prot_id=None)
+
+    def _fake_load_components(self):
+        from conftest import DummyBatchTokenizer
+
+        self.mol_tokenizer = DummyBatchTokenizer()
+        self.prot_tokenizer = DummyBatchTokenizer()
+        self.generation_model = SimpleNamespace()
+        self.prediction_model = SimpleNamespace()
+
+    sequence_values = {"AAA": 1.0, "BBB": 2.0}
+    monkeypatch.setattr(MoleculeGenerator, "_load_components", _fake_load_components)
+    monkeypatch.setattr(
+        MoleculeGenerator,
+        "_get_protein_embeddings",
+        lambda self, seq: (
+            torch.tensor([[sequence_values[seq]]]),
+            torch.ones(1, 1, dtype=torch.long),
+        ),
+    )
+    monkeypatch.setattr(
+        MoleculeGenerator,
+        "_encode_protein_for_model",
+        lambda self, model, ids, mask: ids.unsqueeze(-1),
+    )
+    monkeypatch.setattr(
+        "prot2mol.inference.produce_molecules.tokenize_selfies_for_inference",
+        lambda selfies_list, mol_tokenizer, max_mol_len, device=None: (
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+            torch.ones(len(selfies_list), max_mol_len, dtype=torch.long),
+        ),
+    )
+    monkeypatch.setattr(
+        MoleculeGenerator,
+        "_predict_pchembl_batch",
+        lambda self, protein_embeddings, prot_mask, mol_ids, mol_mask: np.full(
+            len(mol_ids), protein_embeddings[0, 0, 0].item()
+        ),
+    )
+
+    gen = MoleculeGenerator(cfg)
+    df = pd.DataFrame(
+        {
+            "Target_FASTA": ["AAA", "BBB", "AAA"],
+            "smiles": ["CCO", "N", "O"],
+        }
+    )
+    out = gen.predict_pchembl(df)
+
+    assert out["Target_FASTA"].tolist() == ["AAA", "BBB", "AAA"]
+    assert out["Predicted_pChEMBL"].tolist() == [1.0, 2.0, 1.0]
+
+
+def test_generator_normalizes_and_validates_mode(monkeypatch):
+    monkeypatch.setattr(MoleculeGenerator, "_load_components", lambda self: None)
+
+    gen = MoleculeGenerator(_generator_config(mode=" Prediction "))
+    assert gen.config.mode == "prediction"
+
+    with pytest.raises(ValueError, match="Unsupported mode"):
+        MoleculeGenerator(_generator_config(mode="invalid"))
+
+
 def test_predictor_dataframe_prediction(monkeypatch):
     cfg = _predictor_config(batch_size=2)
 
@@ -239,6 +303,117 @@ def test_predictor_load_eval_split_dataset_respects_mode(monkeypatch):
     assert captured["split_mode"] == "aid"
     assert captured["split_ratio"] == 0.25
     assert captured["split_seed"] == 13
+
+
+def test_predictor_uses_matching_precomputed_split(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+    monkeypatch.setattr(
+        predict_module,
+        "load_processed_dataset",
+        lambda input_file, cache_dir=None: (
+            {"train": "TRAIN", "test": "EVAL"},
+            "/tmp/cache/in",
+        ),
+    )
+    monkeypatch.setattr(
+        predict_module,
+        "load_processed_stats",
+        lambda input_file, cache_dir=None: {
+            "eval_split": "aid",
+            "eval_split_ratio": 0.25,
+            "split_seed": 13,
+        },
+    )
+    monkeypatch.setattr(
+        predict_module,
+        "split_train_eval_dataset",
+        lambda *args, **kwargs: pytest.fail("matching cached split should not be rebuilt"),
+    )
+
+    pred = PChemblPredictor(cfg)
+    train, eval_data = pred._load_requested_split_dataset(
+        dataset_path=cfg.input_file,
+        split_mode="aid",
+        split_ratio=0.25,
+        split_seed=13,
+    )
+
+    assert train == "TRAIN"
+    assert eval_data == "EVAL"
+
+
+def test_predictor_resolves_checkpoint_split_settings(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+    pred = PChemblPredictor(cfg)
+    pred.saved_model_config = {
+        "eval_split": "aid",
+        "eval_split_ratio": 0.2,
+        "split_seed": 17,
+    }
+
+    assert pred._resolve_reproduce_settings("auto") == ("aid", 0.2, 17)
+    assert pred._resolve_reproduce_settings("aid") == ("aid", 0.2, 17)
+    assert pred._resolve_reproduce_settings("random") == ("random", 0.01, 42)
+
+    pred.config.reproduce_split_ratio = 0.3
+    pred.config.reproduce_split_seed = 23
+    assert pred._resolve_reproduce_settings("random") == ("random", 0.3, 23)
+
+
+def test_predictor_auto_reproduce_requires_checkpoint_metadata(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+    pred = PChemblPredictor(cfg)
+
+    with pytest.raises(ValueError, match="does not contain eval split metadata"):
+        pred._resolve_reproduce_settings("auto")
+
+
+def test_predictor_filters_reference_rows_case_insensitively(monkeypatch):
+    cfg = _predictor_config()
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+    pred = PChemblPredictor(cfg)
+    df = pd.DataFrame(
+        {
+            "target_chembl_id": ["CHEMBL1", "chembl2", "CHEMBL1"],
+            "pchembl_value_Median": [5.0, 6.0, 7.0],
+        }
+    )
+
+    matched = pred._filter_reference_rows_for_protein(df, "chembl1")
+    assert matched["pchembl_value_Median"].tolist() == [5.0, 7.0]
+
+
+def test_predictor_distribution_plot_handles_finite_values(tmp_path, monkeypatch):
+    cfg = _predictor_config(distribution_bins=12)
+    monkeypatch.setattr(PChemblPredictor, "_auto_configure_model", lambda self: None)
+    monkeypatch.setattr(PChemblPredictor, "_load_components", lambda self: None)
+    pred = PChemblPredictor(cfg)
+    output = tmp_path / "plots" / "distribution.png"
+
+    saved = pred._save_distribution_plot(
+        batch_predictions=[5.0, np.nan, 6.0, 7.0],
+        output_path=str(output),
+        title="Predictions",
+        batch_label="Batch",
+        reference_values=[4.0, 5.0, np.inf],
+        reference_label="Reference",
+    )
+
+    assert saved == str(output)
+    assert output.exists() and output.stat().st_size > 0
+    assert pred._save_distribution_plot(
+        batch_predictions=[np.nan, np.inf],
+        output_path=str(tmp_path / "empty.png"),
+        title="Empty",
+        batch_label="Batch",
+    ) is None
 
 
 def test_predictor_sanitize_output_dataframe_drops_internal_columns(monkeypatch):
@@ -484,10 +659,12 @@ def test_parse_args_accepts_reproduce_and_rejects_legacy_eval_flag():
             "--output_file",
             "/tmp/out.csv",
             "--reproduce",
-            "random",
+            "auto",
         ]
     )
-    assert args.reproduce == "random"
+    assert args.reproduce == "auto"
+    assert args.reproduce_split_ratio is None
+    assert args.reproduce_split_seed is None
 
     with pytest.raises(SystemExit):
         parse_args(

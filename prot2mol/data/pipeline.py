@@ -1,3 +1,5 @@
+import json
+import math
 import os
 from typing import Iterable, Optional, Sequence, Tuple
 
@@ -27,6 +29,49 @@ def get_processed_data_path(selfies_path: str, cache_dir: Optional[str] = None) 
     return os.path.join(effective_cache_dir, dataset_name)
 
 
+def get_processed_stats_path(selfies_path: str, cache_dir: Optional[str] = None) -> str:
+    """Return the stats JSON path stored beside a cached dataset."""
+    return os.path.join(get_processed_data_path(selfies_path, cache_dir=cache_dir), "pchembl_stats.json")
+
+
+def load_processed_stats(selfies_path: str, cache_dir: Optional[str] = None) -> Optional[dict]:
+    """Load preprocessing stats if present, otherwise return None."""
+    stats_path = get_processed_stats_path(selfies_path, cache_dir=cache_dir)
+    if not os.path.exists(stats_path):
+        return None
+    try:
+        with open(stats_path, "r", encoding="utf-8") as handle:
+            stats = json.load(handle)
+        return stats if isinstance(stats, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def has_matching_precomputed_split(dataset, stats, split_mode: str, split_ratio: float, split_seed: int) -> bool:
+    """Return True when the cached dataset already contains the requested split."""
+    if not isinstance(stats, dict):
+        return False
+    if not hasattr(dataset, "keys"):
+        return False
+    split_names = set(dataset.keys())
+    if not {"train", "test"}.issubset(split_names):
+        return False
+    cached_mode = stats.get("eval_split")
+    cached_ratio = stats.get("eval_split_ratio")
+    cached_seed = stats.get("split_seed")
+    if cached_mode != split_mode:
+        return False
+    try:
+        if not math.isclose(float(cached_ratio), float(split_ratio), rel_tol=0.0, abs_tol=1e-12):
+            return False
+    except (TypeError, ValueError):
+        return False
+    try:
+        return int(cached_seed) == int(split_seed)
+    except (TypeError, ValueError):
+        return False
+
+
 def load_processed_dataset(selfies_path: str, cache_dir: Optional[str] = None):
     """Load preprocessed dataset from disk cache."""
     processed_data_path = get_processed_data_path(selfies_path, cache_dir=cache_dir)
@@ -47,6 +92,11 @@ def split_train_eval_dataset(
     Split a tokenized HF dataset into train/eval partitions.
     Supports random split and AID hold-out split.
     """
+    if split_ratio <= 0.0:
+        return full_data, full_data.select([])
+    if split_ratio >= 1.0:
+        return full_data.select([]), full_data
+
     if split_mode == "aid":
         if "AID" not in full_data.column_names:
             if logger is not None:
@@ -68,7 +118,7 @@ def split_train_eval_dataset(
                 split_ratio,
                 len(aids),
             )
-        proc = num_proc if (num_proc is None or num_proc >= 1) else None
+        proc = num_proc if (num_proc is not None and num_proc > 1) else None
         test_data = full_data.filter(lambda x: x["AID"] in holdout_aids, num_proc=proc)
         train_data = full_data.filter(lambda x: x["AID"] not in holdout_aids, num_proc=proc)
         return train_data, test_data

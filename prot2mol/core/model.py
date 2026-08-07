@@ -482,7 +482,8 @@ class FusionDTITokenFusion(nn.Module):
 
     def _masked_softmax(self, logits: torch.Tensor, row_mask: torch.Tensor, col_mask: torch.Tensor) -> torch.Tensor:
         valid_pairs = row_mask.unsqueeze(2).unsqueeze(-1) & col_mask.unsqueeze(1).unsqueeze(-1)
-        masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, -1e9))
+        mask_fill_value = torch.finfo(logits.dtype).min
+        masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, mask_fill_value))
         alpha = torch.softmax(masked_logits, dim=2)
         return torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
 

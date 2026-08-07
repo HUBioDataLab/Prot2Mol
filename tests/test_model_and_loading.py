@@ -146,6 +146,26 @@ def test_token_fusion_head_respects_masks_and_non_divisible_grouping():
     assert torch.allclose(base_pred, masked_pred, atol=1e-5)
 
 
+def test_token_fusion_masked_softmax_is_finite_in_float16():
+    fusion = model_module.FusionDTITokenFusion(hidden_dim=4, num_heads=2)
+    logits = torch.tensor(
+        [[[[1.0, -1.0], [2.0, 0.0], [3.0, 1.0]], [[4.0, 2.0], [5.0, 3.0], [6.0, 4.0]]]],
+        dtype=torch.float16,
+    )
+    row_mask = torch.tensor([[True, False]])
+    col_mask = torch.tensor([[True, True, False]])
+
+    probabilities = fusion._masked_softmax(logits, row_mask, col_mask)
+
+    assert torch.isfinite(probabilities).all()
+    assert torch.all(probabilities[:, 1] == 0)
+    assert torch.all(probabilities[:, :, 2] == 0)
+    assert torch.allclose(
+        probabilities[:, 0, :2].sum(dim=1),
+        torch.ones((1, 2), dtype=torch.float16),
+    )
+
+
 def test_load_prot2mol_inference_model_prefers_saved_token_fusion_config(tmp_path, monkeypatch):
     model_parent = tmp_path / "run_dir"
     ckpt = model_parent / "checkpoint-123"
