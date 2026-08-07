@@ -38,13 +38,13 @@ data:
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_unfrozen_1000_steps
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_unfrozen_10000_steps
   num_train_epochs: 10
-  max_steps: 1000
+  max_steps: 10000
   per_device_train_batch_size: 12
   per_device_eval_batch_size: 32
   gradient_accumulation_steps: 4
-  eval_steps: 1000
+  eval_steps: 500
   learning_rate: 1.0e-5
   weight_decay: 0.01
   max_grad_norm: 1.0
