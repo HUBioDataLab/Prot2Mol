@@ -19,12 +19,6 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--tail", type=int, default=20, help="Rows to show initially")
     parser.add_argument(
-        "--scale",
-        type=float,
-        default=5.0,
-        help="Hypothetical scaled-tanh bound to display",
-    )
-    parser.add_argument(
         "--follow",
         action="store_true",
         help="Keep printing new records until interrupted",
@@ -38,8 +32,6 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.tail <= 0:
         parser.error("--tail must be > 0")
-    if args.scale <= 0.0:
-        parser.error("--scale must be > 0")
     if args.interval <= 0.0:
         parser.error("--interval must be > 0")
     return args
@@ -74,22 +66,20 @@ def _format(value: Any) -> str:
     return f"{float(value):.4g}"
 
 
-def _print_records(records: Iterable[dict[str, Any]], scale: float) -> None:
-    scale_key = f"{scale:g}".replace("-", "m").replace(".", "p")
+def _print_records(records: Iterable[dict[str, Any]]) -> None:
     headers = (
         "step",
         "split",
         "rank_loss",
         "spearman",
         "grad_norm",
-        "score_std",
-        "p01",
-        "p99",
+        "scale",
+        "cos_mean",
+        "cos_std",
         "entropy",
         "margin_acc",
         "gap_p50",
-        f"sat@{scale:g}",
-        f"slope@{scale:g}",
+        "class_bias",
     )
     rows = []
     for record in records:
@@ -100,21 +90,13 @@ def _print_records(records: Iterable[dict[str, Any]], scale: float) -> None:
                 _format(_metric(record, "ranking_loss")),
                 _format(_metric(record, "spearman")),
                 _format(_metric(record, "grad_norm")),
-                _format(_metric(record, "ranking_score_std")),
-                _format(_metric(record, "ranking_score_p01")),
-                _format(_metric(record, "ranking_score_p99")),
+                _format(_metric(record, "cosine_scale")),
+                _format(_metric(record, "ranking_cosine_mean")),
+                _format(_metric(record, "ranking_cosine_std")),
                 _format(_metric(record, "ranking_list_normalized_entropy")),
                 _format(_metric(record, "ranking_margin_pair_accuracy")),
                 _format(_metric(record, "ranking_margin_pair_gap_p50")),
-                _format(
-                    _metric(
-                        record,
-                        f"ranking_score_tanh_{scale_key}_saturation_fraction",
-                    )
-                ),
-                _format(
-                    _metric(record, f"ranking_score_tanh_{scale_key}_mean_slope")
-                ),
+                _format(_metric(record, "classification_logit_bias")),
             )
         )
     widths = [len(header) for header in headers]
@@ -128,7 +110,7 @@ def _print_records(records: Iterable[dict[str, Any]], scale: float) -> None:
 def main() -> None:
     args = _parse_args()
     records = _read_records(args.log_path)
-    _print_records(records[-args.tail :], args.scale)
+    _print_records(records[-args.tail :])
     if not args.follow:
         return
 
@@ -138,7 +120,7 @@ def main() -> None:
             time.sleep(args.interval)
             records = _read_records(args.log_path)
             if len(records) > seen:
-                _print_records(records[seen:], args.scale)
+                _print_records(records[seen:])
                 seen = len(records)
     except KeyboardInterrupt:
         pass

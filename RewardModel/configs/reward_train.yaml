@@ -9,6 +9,10 @@ model:
   fusion_residual: true
   dropout: 0.1
   pooling_type: mean
+  pair_scoring_mode: scaled_cosine
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
+  cosine_classification_bias_init: 0.0
   activity_threshold: 6.0
   ranking_loss_weight: 1.0
   classification_loss_weight: 1.0
@@ -34,7 +38,7 @@ data:
   max_classification_only_per_item: 16
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_ranking_1000_steps
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_1000_steps
   num_train_epochs: 10
   max_steps: 1000
   per_device_train_batch_size: 48
@@ -56,9 +60,5 @@ training:
   save_total_limit: 2
   training_mode: single_gpu
   ranking_score_diagnostics: true
-  ranking_score_diagnostic_scales:
-    - 3.0
-    - 5.0
-    - 13.0
   report_to:
     - wandb

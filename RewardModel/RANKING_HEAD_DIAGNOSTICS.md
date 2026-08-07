@@ -3,6 +3,53 @@
 Run these tools from `RewardModel/`. Model inference can run on CPU, although a
 GPU is substantially faster for complete validation assays.
 
+The primary training config now uses `pair_scoring_mode: scaled_cosine`. After
+fusion, residual addition, and configured pooling, protein and ligand vectors
+are independently L2-normalized. One shared score is then used by both tasks:
+
+```text
+cosine = dot(normalize(fused_protein), normalize(fused_ligand))
+ranking_score = exp(logit_scale) * cosine
+activity_logit = ranking_score + classification_logit_bias
+```
+
+`logit_scale` starts at `log(13)`, following LigUnity, and is capped at a
+configured positive scale of 100. Unlike LigUnity's released ranking-loss code,
+which detaches its scale, this implementation lets both listwise ranking and
+classification update the same scale and cosine geometry. The classification
+bias changes only the activity threshold; it cannot change ligand ordering.
+Legacy checkpoints remain loadable because configs without `pair_scoring_mode`
+default to the former `mlp` heads.
+
+Reference comparison:
+
+| Detail | LigUnity released code | This reward model |
+| --- | --- | --- |
+| Representation | Separate pocket/protein and ligand encoders; token 0 projected to 128 dimensions | Pair-conditioned cross-fusion with residual; configured pooling in 512 dimensions |
+| Similarity | L2-normalized dot product over the pocket-by-ligand matrix | L2-normalized dot product for each supplied protein-ligand pair |
+| Scale | `exp(logit_scale)`, initialized at 13 and detached in the released ranking loss | Same initialization, positive and capped, jointly learned by ranking and classification |
+| Objectives | Retrieval contrastive loss plus listwise ranking | Listwise Plackett-Luce ranking plus binary activity classification |
+| Bias | Declared by the model but unused by the released ranking loss | Learned classification threshold only; absent from ranking |
+
+The relevant LigUnity references are its
+[ranking model](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/models/pocket_ranking.py)
+and [released joint loss](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/losses/contras_rank_loss.py).
+
+The live diagnostic log is intentionally compact for this scoring mode. It
+keeps the learned `cosine_scale`, classification bias, cosine mean/spread,
+Plackett-Luce entropy, affinity-margin pair accuracy/median gap, losses,
+Spearman, and gradient norm. The former hypothetical tanh transforms and
+redundant scaled-score distribution statistics are no longer emitted. The
+unmargined pair accuracy, per-ranked-example loss, and duplicate training
+`total_loss` were also removed; their margin-aware or trainer-native versions
+already carry the useful information.
+
+```bash
+python analyze_ranking_score_diagnostics.py \
+  outputs/RUN/ranking_score_diagnostics.jsonl \
+  --tail 20 --follow
+```
+
 ## 1. Inspect predictions
 
 Run the same deterministic assay selection at each checkpoint:
@@ -68,7 +115,7 @@ and post/pre fusion variance ratios. A narrow post-fusion distribution together
 with high protein-shuffle rank stability indicates that post-fusion cosine would
 not provide a useful protein-conditioned ranking score.
 
-## 4. Inspect head activations
+## 4. Inspect legacy MLP head activations
 
 ```bash
 python inspect_ranking_head_activations.py \
@@ -82,7 +129,8 @@ python inspect_ranking_head_activations.py \
 
 This records streaming mean, standard deviation, range, near-zero fraction,
 and non-finite counts for every linear and layer-normalization module in both
-heads.
+legacy heads. Scaled-cosine checkpoints have no MLP heads, so use sections 2
+and 3 plus the logged `cosine_scale` for them.
 
 ## 5. Compare checkpoints
 

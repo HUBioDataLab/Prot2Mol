@@ -1409,7 +1409,7 @@ class _ActivationMoments:
 
 
 class ActivationCollector:
-    """Streaming activation checks for both MLP heads."""
+    """Streaming activation checks for MLP heads when they are configured."""
 
     def __init__(self, model):
         self.model = model
@@ -1418,7 +1418,9 @@ class ActivationCollector:
 
     def __enter__(self):
         for head_name in ("ranking_head", "classification_head"):
-            head = getattr(self.model, head_name)
+            head = getattr(self.model, head_name, None)
+            if not isinstance(head, torch.nn.Module):
+                continue
             for module_name, module in head.named_modules():
                 if not isinstance(module, (torch.nn.Linear, torch.nn.LayerNorm)):
                     continue

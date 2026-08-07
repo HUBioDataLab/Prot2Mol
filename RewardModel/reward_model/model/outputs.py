@@ -21,6 +21,11 @@ class RewardModelOutput:
     fused_molecule_tokens: Optional[torch.Tensor] = None
     protein_attention_mask: Optional[torch.Tensor] = None
     molecule_attention_mask: Optional[torch.Tensor] = None
+    cosine_similarity: Optional[torch.Tensor] = None
+    score_scale: Optional[torch.Tensor] = None
+    classification_logit_bias: Optional[torch.Tensor] = None
+    normalized_protein_embedding: Optional[torch.Tensor] = None
+    normalized_molecule_embedding: Optional[torch.Tensor] = None
 
     @property
     def pair_loss(self) -> Optional[torch.Tensor]:

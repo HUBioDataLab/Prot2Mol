@@ -1,4 +1,5 @@
 import json
+import math
 import os
 
 import pytest
@@ -231,29 +232,27 @@ def test_metric_helpers_compute_expected_values():
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
 
 
-def test_ranking_score_diagnostics_measure_scale_margin_and_saturation():
+def test_ranking_score_diagnostics_measure_cosine_margin_and_entropy():
     metrics = compute_ranking_score_diagnostics(
         ranking_scores=torch.tensor([3.0, 1.0, -2.0, 100.0]),
+        cosine_similarities=torch.tensor([0.3, 0.1, -0.2, 0.9]),
         pchembl_values=torch.tensor([8.0, 7.0, 6.0, 1.0]),
         ranking_group_ids=torch.tensor([0, 0, 0, -1]),
         temperature=1.0,
         affinity_margin=0.5,
-        saturation_scales=(1.0, 5.0),
     )
 
-    assert metrics["ranking_score_num_examples"] == pytest.approx(3.0)
-    assert metrics["ranking_score_mean"] == pytest.approx(2.0 / 3.0)
-    assert metrics["ranking_score_std"] == pytest.approx(
-        torch.tensor([3.0, 1.0, -2.0]).std(unbiased=False).item()
+    assert metrics["ranking_cosine_mean"] == pytest.approx(0.2 / 3.0)
+    assert metrics["ranking_cosine_std"] == pytest.approx(
+        torch.tensor([0.3, 0.1, -0.2]).std(unbiased=False).item()
     )
+    assert metrics["ranking_cosine_p01"] < metrics["ranking_cosine_p99"]
     assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(1.0)
     assert metrics["ranking_margin_pair_gap_p50"] == pytest.approx(3.0)
     assert metrics["ranking_margin_pair_count"] == pytest.approx(3.0)
     assert 0.0 < metrics["ranking_list_normalized_entropy"] < 1.0
-    assert metrics["ranking_score_tanh_1_saturation_fraction"] == pytest.approx(
-        2.0 / 3.0
-    )
-    assert metrics["ranking_score_tanh_5_saturation_fraction"] == pytest.approx(0.0)
+    assert not any("tanh" in key for key in metrics)
+    assert not any(key.startswith("ranking_score_") for key in metrics)
 
 
 def test_ranking_score_diagnostics_exclude_pairs_inside_affinity_margin():
@@ -289,6 +288,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
             molecule_model_name_or_path="molecule/dummy",
             fusion_hidden_dim=10,
             fusion_num_heads=2,
+            pair_scoring_mode="scaled_cosine",
             dropout=0.0,
         ),
         protein_bundle=protein_bundle,
@@ -333,7 +333,9 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_accuracy" in eval_metrics
     assert "eval_spearman" in eval_metrics
     assert "eval_spearman_num_groups" in eval_metrics
-    assert "eval_ranking_score_std" in eval_metrics
+    assert "eval_ranking_cosine_std" in eval_metrics
+    assert "eval_cosine_scale" in eval_metrics
+    assert "eval_classification_logit_bias" in eval_metrics
     assert "eval_ranking_list_normalized_entropy" in eval_metrics
     assert "eval_ranking_margin_pair_accuracy" in eval_metrics
     assert "eval_val2_loss" in eval_metrics
@@ -347,7 +349,8 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert "eval_val2_accuracy" in eval_metrics
     assert "eval_val2_spearman" in eval_metrics
     assert "eval_val2_spearman_num_groups" in eval_metrics
-    assert "eval_val2_ranking_score_std" in eval_metrics
+    assert "eval_val2_ranking_cosine_std" in eval_metrics
+    assert "eval_val2_cosine_scale" in eval_metrics
     assay_log_path = tmp_path / "trainer_output" / "eval_assay_spearman.jsonl"
     val2_assay_log_path = tmp_path / "trainer_output" / "eval_val2_assay_spearman.jsonl"
     assay_log_records = [
@@ -357,7 +360,12 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert len(assay_log_records) >= 1
     latest_assay_log = assay_log_records[-1]
     assert latest_assay_log["global_step"] == trainer.state.global_step
-    assert latest_assay_log["weighted_spearman"] == pytest.approx(eval_metrics["eval_spearman"])
+    if math.isnan(eval_metrics["eval_spearman"]):
+        assert math.isnan(latest_assay_log["weighted_spearman"])
+    else:
+        assert latest_assay_log["weighted_spearman"] == pytest.approx(
+            eval_metrics["eval_spearman"]
+        )
     assert latest_assay_log["num_eligible_groups"] == pytest.approx(
         eval_metrics["eval_spearman_num_groups"]
     )
@@ -373,9 +381,12 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         json.loads(line)
         for line in val2_assay_log_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
-        eval_metrics["eval_val2_spearman"]
-    )
+    if math.isnan(eval_metrics["eval_val2_spearman"]):
+        assert math.isnan(val2_assay_log_records[-1]["weighted_spearman"])
+    else:
+        assert val2_assay_log_records[-1]["weighted_spearman"] == pytest.approx(
+            eval_metrics["eval_val2_spearman"]
+        )
     training_logs = [
         entry for entry in trainer.state.log_history if "ranking_loss" in entry
     ]
@@ -385,9 +396,9 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         "classification_mcc",
         "classification_f1",
         "classification_auroc",
-        "ranking_pairwise_accuracy",
-        "ranking_loss_per_ranked_example",
-        "ranking_score_std",
+        "ranking_cosine_std",
+        "cosine_scale",
+        "classification_logit_bias",
         "ranking_list_normalized_entropy",
         "ranking_margin_pair_accuracy",
     }.issubset(training_logs[-1])
@@ -470,13 +481,37 @@ def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch
     assert captured == {"eval_loss": 0.25}
 
 
+def test_reward_trainer_logs_scaled_cosine_parameters(monkeypatch):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(
+        pair_scoring_mode="scaled_cosine",
+        cosine_scale_init=13.0,
+        cosine_classification_bias_init=-0.5,
+    )
+    trainer.model.logit_scale = torch.nn.Parameter(torch.tensor(math.log(13.0)))
+    trainer.model.classification_logit_bias = torch.nn.Parameter(torch.tensor(-0.5))
+    trainer._consume_train_component_logs = lambda: {}
+    trainer._append_ranking_score_diagnostics_log = lambda logs: None
+
+    assert trainer.log({"loss": 0.25}) == "logged"
+    assert captured["cosine_scale"] == pytest.approx(13.0)
+    assert captured["classification_logit_bias"] == pytest.approx(-0.5)
+
+
 def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     trainer = object.__new__(RewardModelTrainer)
     trainer._reset_train_component_accumulator()
     trainer._record_train_components(
         ranking_loss=torch.tensor(3.0),
         classification_loss=torch.tensor(0.6),
-        total_loss=torch.tensor(3.6),
         num_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
@@ -489,7 +524,6 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     trainer._record_train_components(
         ranking_loss=torch.tensor(2.0),
         classification_loss=torch.tensor(0.4),
-        total_loss=torch.tensor(2.4),
         num_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
@@ -506,9 +540,10 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     assert logs["classification_mcc"] == pytest.approx(1.0 / 3.0)
     assert logs["classification_f1"] == pytest.approx(2.0 / 3.0)
     assert logs["classification_auroc"] == pytest.approx(2.0 / 3.0)
-    assert logs["ranking_pairwise_accuracy"] == pytest.approx(3.0 / 5.0)
-    assert logs["ranking_loss_per_ranked_example"] == pytest.approx(5.0 / 6.0)
     assert logs["ranking_loss"] == pytest.approx(2.5)
+    assert "total_loss" not in logs
+    assert "ranking_pairwise_accuracy" not in logs
+    assert "ranking_loss_per_ranked_example" not in logs
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):

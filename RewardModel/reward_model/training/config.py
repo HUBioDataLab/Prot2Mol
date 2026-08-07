@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
@@ -85,7 +84,6 @@ class RewardTrainerConfig:
     training_mode: str = "single_gpu"
     report_to: Optional[Any] = None
     ranking_score_diagnostics: bool = False
-    ranking_score_diagnostic_scales: tuple[float, ...] = (3.0, 5.0, 13.0)
 
     def __post_init__(self) -> None:
         if self.report_to is None:
@@ -94,9 +92,6 @@ class RewardTrainerConfig:
             self.report_to = [self.report_to]
         else:
             self.report_to = list(self.report_to)
-        self.ranking_score_diagnostic_scales = tuple(
-            float(scale) for scale in self.ranking_score_diagnostic_scales
-        )
         self.validate()
 
     def validate(self) -> None:
@@ -140,15 +135,6 @@ class RewardTrainerConfig:
             )
         if not isinstance(self.ranking_score_diagnostics, bool):
             raise ValueError("ranking_score_diagnostics must be a boolean")
-        if not self.ranking_score_diagnostic_scales:
-            raise ValueError("ranking_score_diagnostic_scales must not be empty")
-        if any(
-            scale <= 0.0 or not math.isfinite(scale)
-            for scale in self.ranking_score_diagnostic_scales
-        ):
-            raise ValueError(
-                "ranking_score_diagnostic_scales must contain finite values > 0"
-            )
 
 
 @dataclass(eq=True)
@@ -187,6 +173,8 @@ def load_reward_training_config(config_path: str) -> RewardTrainingConfigBundle:
     data_config = RewardTrainingDataConfig(**data_section)
 
     training_section: Dict[str, Any] = dict(payload["training"])
+    # Accepted but ignored for compatibility with pre-cosine training YAMLs.
+    training_section.pop("ranking_score_diagnostic_scales", None)
     training_section["output_dir"] = _resolve_path(training_section["output_dir"], base_dir)
     training_config = RewardTrainerConfig(**training_section)
 
