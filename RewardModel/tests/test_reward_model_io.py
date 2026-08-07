@@ -137,3 +137,96 @@ def test_scaled_cosine_reward_model_save_and_load_round_trip(tmp_path):
         model.classification_logit_bias,
         reloaded.classification_logit_bias,
     )
+
+
+def test_weight_only_warm_start_unfreezes_encoders_with_fresh_optimizer(tmp_path):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    frozen_config = RewardModelConfig(
+        protein_model_name_or_path="protein/dummy",
+        molecule_model_name_or_path="molecule/dummy",
+        fusion_hidden_dim=10,
+        fusion_num_heads=2,
+        fusion_residual=True,
+        pair_scoring_mode="scaled_cosine",
+        freeze_protein_encoder=True,
+        freeze_molecule_encoder=True,
+        dropout=0.0,
+    )
+    frozen_model = RewardModel(
+        config=frozen_config,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+    with torch.no_grad():
+        frozen_model.protein_projection.weight.fill_(0.125)
+        frozen_model.molecule_projection.weight.fill_(-0.25)
+        frozen_model.logit_scale.fill_(1.75)
+    expected_state = {
+        key: value.detach().clone() for key, value in frozen_model.state_dict().items()
+    }
+    save_reward_model(frozen_model, str(tmp_path))
+
+    reloaded = load_reward_model(
+        str(tmp_path),
+        strict=True,
+        config_overrides={
+            "freeze_protein_encoder": False,
+            "freeze_molecule_encoder": False,
+        },
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    assert reloaded.config.freeze_protein_encoder is False
+    assert reloaded.config.freeze_molecule_encoder is False
+    assert all(parameter.requires_grad for parameter in reloaded.protein_encoder.parameters())
+    assert all(parameter.requires_grad for parameter in reloaded.molecule_encoder.parameters())
+    for key, expected in expected_state.items():
+        assert torch.equal(reloaded.state_dict()[key], expected), key
+
+    optimizer = torch.optim.AdamW(
+        parameter for parameter in reloaded.parameters() if parameter.requires_grad
+    )
+    assert optimizer.state == {}
+    optimized_ids = {
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    assert {
+        id(parameter) for parameter in reloaded.protein_encoder.parameters()
+    }.issubset(optimized_ids)
+    assert {
+        id(parameter) for parameter in reloaded.molecule_encoder.parameters()
+    }.issubset(optimized_ids)
+
+    protein_parameter = next(reloaded.protein_encoder.parameters())
+    molecule_parameter = next(reloaded.molecule_encoder.parameters())
+    protein_before = protein_parameter.detach().clone()
+    molecule_before = molecule_parameter.detach().clone()
+    outputs = reloaded(
+        protein_input_ids=torch.tensor(
+            [[1, 2, 0], [2, 3, 0], [3, 4, 0]], dtype=torch.long
+        ),
+        protein_attention_mask=torch.tensor(
+            [[1, 1, 0], [1, 1, 0], [1, 1, 0]], dtype=torch.long
+        ),
+        molecule_input_ids=torch.tensor(
+            [[4, 5, 0], [5, 6, 0], [6, 7, 0]], dtype=torch.long
+        ),
+        molecule_attention_mask=torch.tensor(
+            [[1, 1, 0], [1, 1, 0], [1, 1, 0]], dtype=torch.long
+        ),
+        activity_labels=torch.tensor([0.0, 1.0, 0.0]),
+        pchembl_values=torch.tensor([4.0, 7.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+    assert outputs.loss is not None
+    outputs.loss.backward()
+    assert protein_parameter.grad is not None
+    assert molecule_parameter.grad is not None
+    assert torch.count_nonzero(protein_parameter.grad).item() > 0
+    assert torch.count_nonzero(molecule_parameter.grad).item() > 0
+    optimizer.step()
+    assert not torch.equal(protein_parameter, protein_before)
+    assert not torch.equal(molecule_parameter, molecule_before)

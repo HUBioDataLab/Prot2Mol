@@ -1,6 +1,8 @@
 import json
 import math
 import os
+import sys
+from pathlib import Path
 
 import pytest
 import torch
@@ -25,12 +27,18 @@ from reward_model.training import (
     create_training_arguments,
     get_saved_pair_dataset_paths,
     get_tokenized_split_dataset_paths,
+    load_reward_training_config,
     load_saved_pair_dataset,
     prepare_pair_datasets_from_config,
     save_pair_dataset_from_example_dataset,
 )
 from reward_model.training.entry import train_reward_model_from_config
+from reward_model.training.entry import (
+    _resolve_warm_start_path,
+    _validate_warm_start_architecture,
+)
 from reward_model.training.trainer import LengthBucketSampler
+from train_reward_model import parse_args
 
 
 def _dummy_bundles():
@@ -675,6 +683,88 @@ def test_reward_trainer_config_normalizes_report_to_string(tmp_path):
     assert config.report_to == ["wandb"]
 
 
+def test_warm_start_path_requires_existing_disjoint_directory(tmp_path):
+    checkpoint = tmp_path / "phase1" / "checkpoint-1000"
+    checkpoint.mkdir(parents=True)
+    output = tmp_path / "phase2"
+
+    assert _resolve_warm_start_path(str(checkpoint), str(output)) == str(
+        checkpoint.resolve()
+    )
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        _resolve_warm_start_path(str(tmp_path / "missing"), str(output))
+    with pytest.raises(ValueError, match="separate, non-nested"):
+        _resolve_warm_start_path(str(checkpoint), str(tmp_path / "phase1"))
+    with pytest.raises(ValueError, match="separate, non-nested"):
+        _resolve_warm_start_path(str(checkpoint), str(checkpoint / "phase2"))
+
+
+def test_warm_start_architecture_allows_freeze_change_but_rejects_shape_change():
+    checkpoint_config = RewardModelConfig(
+        fusion_hidden_dim=512,
+        fusion_num_heads=8,
+        fusion_residual=True,
+        pooling_type="mean",
+        pair_scoring_mode="scaled_cosine",
+        freeze_protein_encoder=True,
+        freeze_molecule_encoder=True,
+    )
+    target_config = RewardModelConfig.from_dict(
+        {
+            **checkpoint_config.to_dict(),
+            "freeze_protein_encoder": False,
+            "freeze_molecule_encoder": False,
+        }
+    )
+
+    _validate_warm_start_architecture(checkpoint_config, target_config)
+
+    incompatible = RewardModelConfig.from_dict(
+        {
+            **target_config.to_dict(),
+            "fusion_hidden_dim": 256,
+            "fusion_num_heads": 4,
+        }
+    )
+    with pytest.raises(ValueError, match="fusion_hidden_dim"):
+        _validate_warm_start_architecture(checkpoint_config, incompatible)
+
+
+def test_train_cli_accepts_weight_only_warm_start(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "train_reward_model.py",
+            "--config",
+            "phase2.yaml",
+            "--init-from-checkpoint",
+            "checkpoint-1000",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.config == "phase2.yaml"
+    assert args.init_from_checkpoint == "checkpoint-1000"
+
+
+def test_unfrozen_phase_two_config_preserves_architecture_and_reduces_memory_batch():
+    config_path = Path(__file__).parents[1] / "configs" / "reward_train_unfrozen.yaml"
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.pair_scoring_mode == "scaled_cosine"
+    assert config.model.fusion_hidden_dim == 512
+    assert config.model.fusion_num_heads == 8
+    assert config.model.fusion_residual is True
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.training.per_device_train_batch_size == 12
+    assert config.training.gradient_accumulation_steps == 4
+    assert config.training.learning_rate == pytest.approx(1.0e-5)
+    assert "unfrozen" in config.training.output_dir
+
+
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
@@ -875,6 +965,8 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     )
 
     captured = {}
+    warm_start = tmp_path / "phase1" / "checkpoint-1000"
+    warm_start.mkdir(parents=True)
 
     class _FakeTrainer:
         def __init__(
@@ -905,10 +997,22 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
             return {"eval_loss": 0.5}
 
     monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
-    monkeypatch.setattr("reward_model.training.entry.RewardModel", lambda config: object())
+
+    def _fake_initialize_training_model(config, init_from_checkpoint):
+        captured["model_config"] = config
+        captured["init_from_checkpoint"] = init_from_checkpoint
+        return object()
+
+    monkeypatch.setattr(
+        "reward_model.training.entry._initialize_training_model",
+        _fake_initialize_training_model,
+    )
     monkeypatch.setattr("reward_model.training.entry.create_training_arguments", lambda config: object())
 
-    summary = train_reward_model_from_config(str(config_path))
+    summary = train_reward_model_from_config(
+        str(config_path),
+        init_from_checkpoint=str(warm_start),
+    )
 
     assert captured["train_called"] is True
     assert captured["evaluate_called"] is True
@@ -918,6 +1022,7 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert captured["eval_dataset"].ranking_num_partitions == 3
     assert captured["eval_dataset"].ranking_partition_seed == 42
     assert captured["val2_eval_dataset"] is None
+    assert captured["init_from_checkpoint"] == str(warm_start.resolve())
     assert isinstance(captured["data_collator"], RewardAssayListCollator)
     assert summary["train_examples"] == 3
     assert summary["val_examples"] == 3
@@ -925,6 +1030,8 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert summary["train_ranking_lists"] == 1
     assert summary["train_ranked_examples"] == 3
     assert summary["train_classification_examples"] == 3
+    assert summary["init_from_checkpoint"] == str(warm_start.resolve())
+    assert summary["optimizer_state_restored"] is False
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):

@@ -35,6 +35,25 @@ The relevant LigUnity references are its
 [ranking model](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/models/pocket_ranking.py)
 and [released joint loss](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/losses/contras_rank_loss.py).
 
+## Two-stage training
+
+The primary config warms up the projection, fusion, residual, and cosine
+parameters with both encoders frozen. Start phase two from those model weights
+with the lower-memory unfrozen config:
+
+```bash
+python train_reward_model.py \
+  --config configs/reward_train_unfrozen.yaml \
+  --init-from-checkpoint outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_1000_steps/checkpoint-1000
+```
+
+This is deliberately a weight-only warm start, not a full Trainer resume. It
+strictly loads the model weights, applies the phase-two freeze settings, and
+starts a fresh optimizer, learning-rate schedule, and global step in a separate
+output directory. The phase-two batch size is 12 with four-step gradient
+accumulation, preserving an effective batch size of 48 while retaining encoder
+activations for backpropagation.
+
 The live diagnostic log is intentionally compact for this scoring mode. It
 keeps the learned `cosine_scale`, classification bias, cosine mean/spread,
 Plackett-Luce entropy, affinity-margin pair accuracy/median gap, losses,

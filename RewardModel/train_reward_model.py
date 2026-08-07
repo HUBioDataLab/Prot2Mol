@@ -27,12 +27,24 @@ def parse_args() -> argparse.Namespace:
         default=default_config,
         help="Path to the RewardModel training YAML config",
     )
+    parser.add_argument(
+        "--init-from-checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Initialize model weights from a RewardModel checkpoint while "
+            "starting a fresh optimizer, scheduler, and training step count"
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    summary = train_reward_model_from_config(args.config)
+    summary = train_reward_model_from_config(
+        args.config,
+        init_from_checkpoint=args.init_from_checkpoint,
+    )
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 
