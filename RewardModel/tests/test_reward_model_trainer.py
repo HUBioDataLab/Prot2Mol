@@ -299,7 +299,8 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         args=create_training_arguments(
             RewardTrainerConfig(
                 output_dir=str(tmp_path / "trainer_output"),
-                num_train_epochs=1,
+                num_train_epochs=10,
+                max_steps=1,
                 per_device_train_batch_size=2,
                 per_device_eval_batch_size=2,
                 logging_steps=1,
@@ -320,6 +321,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     trainer.save_model(str(save_dir))
 
     assert train_result.training_loss >= 0.0
+    assert trainer.state.global_step == 1
     assert "eval_ranking_loss" in eval_metrics
     assert "eval_classification_loss" in eval_metrics
     assert eval_metrics["eval_num_examples"] == len(examples)
@@ -425,6 +427,7 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
         RewardTrainerConfig(
             output_dir=str(tmp_path / "trainer_output"),
             eval_steps=25,
+            max_steps=1000,
             fp16=False,
         )
     )
@@ -435,6 +438,7 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
     assert _strategy_value(args.save_strategy) == "steps"
     assert args.eval_steps == 25
     assert args.save_steps == 25
+    assert args.max_steps == 1000
     if hasattr(args, "evaluation_strategy"):
         assert _strategy_value(args.evaluation_strategy) == "steps"
     if hasattr(args, "eval_strategy"):
@@ -525,6 +529,15 @@ def test_trainer_config_enforces_shared_server_worker_limit(tmp_path):
         RewardTrainerConfig(
             output_dir=str(tmp_path / "trainer_output"),
             dataloader_num_workers=11,
+        )
+
+
+@pytest.mark.parametrize("max_steps", [0, -1])
+def test_reward_trainer_config_rejects_invalid_max_steps(tmp_path, max_steps):
+    with pytest.raises(ValueError, match="max_steps must be > 0"):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            max_steps=max_steps,
         )
 
 

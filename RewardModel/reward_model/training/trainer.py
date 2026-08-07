@@ -681,6 +681,8 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         metric_for_best_model="eval_loss",
         greater_is_better=False,
     )
+    if config.max_steps is not None:
+        args_kwargs["max_steps"] = config.max_steps
 
     schedule_strategy = "steps" if config.eval_steps is not None else "epoch"
     args_kwargs["save_strategy"] = schedule_strategy

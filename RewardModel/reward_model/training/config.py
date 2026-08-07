@@ -64,6 +64,7 @@ class RewardTrainingDataConfig:
 class RewardTrainerConfig:
     output_dir: str
     num_train_epochs: float = 1.0
+    max_steps: Optional[int] = None
     per_device_train_batch_size: int = 8
     per_device_eval_batch_size: int = 8
     gradient_accumulation_steps: int = 1
@@ -103,6 +104,8 @@ class RewardTrainerConfig:
             raise ValueError("output_dir must be provided")
         if self.num_train_epochs <= 0:
             raise ValueError("num_train_epochs must be > 0")
+        if self.max_steps is not None and self.max_steps <= 0:
+            raise ValueError("max_steps must be > 0 when provided")
         if self.per_device_train_batch_size <= 0:
             raise ValueError("per_device_train_batch_size must be > 0")
         if self.per_device_eval_batch_size <= 0:
