@@ -1,34 +1,20 @@
 generate:
-  model_file: /absolute/path/to/generation_model_dir
-  prediction_model_file: null
-  prot_emb_model: prot_t5
-
-  selfies_path: /absolute/path/to/dataset_or_dir
+  model_file: /absolute/path/to/prot2mol_checkpoint
+  prot_emb_model: esm2
+  protein_model_id: facebook/esm2_t33_650M_UR50D
+  decoder_model_id: zjunlp/MolGen-large
+  conditioning_dropout: 0.1
   models_base: null
-  data_path: null
-  chembl_uniprot_mapping_path: null
-  protein_targets_path: null
-  reference_dataset: null
-  compare_protein_id: null
-  save_distribution_plot: true
-  distribution_bins: 40
-  prot_id: CHEMBLxxxx
-  target_chembl_id: null
 
-  mode: generation
-  input_molecules: null
+  protein_sequence: null
+  protein_id: CHEMBLxxxx
+  dataset_path: ../../dataset/processed/chembl_37/protein_cluster_50_generation
+  train_reference_limit: 10000
 
-  pchembl_mean: 5.924
-  pchembl_std: 1.362
-
-  num_samples: 10000
-  batch_size: 100
-  prot_max_length: 1000
-  max_mol_len: 200
-
-  output_file: ./generated_molecules.csv
-  attn_output: false
-
-  n_layer: 1
-  n_head: 16
-  n_emb: 1024
+  num_samples: 1000
+  batch_size: 32
+  prot_max_length: 1024
+  max_mol_len: 256
+  temperature: 1.0
+  top_p: 0.9
+  output_file: ../../generated_molecules.csv

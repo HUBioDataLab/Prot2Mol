@@ -60,5 +60,6 @@ training:
   save_total_limit: 2
   training_mode: single_gpu
   ranking_score_diagnostics: true
+  protein_shuffle_sensitivity: true
   report_to:
     - wandb

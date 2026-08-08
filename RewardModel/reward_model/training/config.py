@@ -84,6 +84,7 @@ class RewardTrainerConfig:
     training_mode: str = "single_gpu"
     report_to: Optional[Any] = None
     ranking_score_diagnostics: bool = False
+    protein_shuffle_sensitivity: bool = True
 
     def __post_init__(self) -> None:
         if self.report_to is None:
@@ -135,6 +136,8 @@ class RewardTrainerConfig:
             )
         if not isinstance(self.ranking_score_diagnostics, bool):
             raise ValueError("ranking_score_diagnostics must be a boolean")
+        if not isinstance(self.protein_shuffle_sensitivity, bool):
+            raise ValueError("protein_shuffle_sensitivity must be a boolean")
 
 
 @dataclass(eq=True)

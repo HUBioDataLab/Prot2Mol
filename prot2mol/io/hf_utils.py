@@ -6,46 +6,26 @@ import torch
 
 MODEL_CONFIG_KEYS = (
     "prot_emb_model",
-    "n_layer",
-    "n_head",
-    "n_emb",
+    "protein_model_id",
+    "decoder_model_id",
+    "conditioning_dropout",
     "max_mol_len",
     "prot_max_length",
     "train_encoder_model",
+    "train_projection_model",
     "train_decoder_model",
-    "train_pchembl_head",
-    "training_stage",
-    "pchembl_huber_delta",
-    "stop_pchembl_gradients",
-    "pchembl_tf_hidden_dim",
-    "pchembl_tf_num_heads",
-    "pchembl_tf_group_size",
-    "pchembl_tf_agg_mode",
-    "pchembl_tf_dropout",
-    "pchembl_mean",
-    "pchembl_std",
-    "pchembl_threshold",
     "dataset_name",
     "dataset_source_path",
     "dataset_total_samples",
     "train_samples",
     "eval_samples",
-    "train_lm_positive_samples",
     "train_unique_proteins",
     "eval_unique_proteins",
     "train_unique_molecules",
     "eval_unique_molecules",
-    "eval_split",
-    "eval_split_ratio",
     "split_seed",
-)
-
-PCHEMBL_TF_CONFIG_KEYS = (
-    "pchembl_tf_hidden_dim",
-    "pchembl_tf_num_heads",
-    "pchembl_tf_group_size",
-    "pchembl_tf_agg_mode",
-    "pchembl_tf_dropout",
+    "generation_eval_proteins",
+    "generation_samples_per_protein",
 )
 
 
@@ -58,6 +38,11 @@ def resolve_model_path(model_name: str, models_base: Optional[str] = None, fallb
     """
     if os.path.exists(model_name):
         return model_name
+
+    canonical_name = model_name
+    if "/" not in canonical_name and "--" in canonical_name:
+        namespace, repository = canonical_name.split("--", 1)
+        canonical_name = f"{namespace}/{repository}"
 
     bases = []
     if models_base:
@@ -77,24 +62,50 @@ def resolve_model_path(model_name: str, models_base: Optional[str] = None, fallb
 
     for base in bases:
         base = os.path.expanduser(base)
-        model_dir = os.path.join(base, f"models--{model_name}")
+        cache_name = canonical_name.replace("/", "--")
+        model_dir = os.path.join(base, f"models--{cache_name}")
         snapshots_dir = os.path.join(model_dir, "snapshots")
         if os.path.isdir(snapshots_dir):
+            main_ref = os.path.join(model_dir, "refs", "main")
+            if os.path.isfile(main_ref):
+                with open(main_ref, "r", encoding="utf-8") as handle:
+                    revision = handle.read().strip()
+                referenced_snapshot = os.path.join(snapshots_dir, revision)
+                if revision and os.path.isdir(referenced_snapshot):
+                    return referenced_snapshot
             snapshots = sorted(os.listdir(snapshots_dir))
             if snapshots:
+                snapshots.sort(
+                    key=lambda name: os.path.getmtime(os.path.join(snapshots_dir, name)),
+                    reverse=True,
+                )
                 return os.path.join(snapshots_dir, snapshots[0])
         if os.path.isdir(model_dir):
             return model_dir
 
-    return os.path.join(os.path.expanduser(bases[0]), f"models--{model_name}")
+    # A nonexistent local-looking path prevents Hugging Face from recognizing a
+    # valid repository id. Fall back to the canonical Hub id so HF_HOME and the
+    # standard cache/download behavior work as intended.
+    return canonical_name
 
 
-def load_molgen_tokenizer(models_base: Optional[str] = None, fallback_bases: Optional[Sequence[str]] = None, padding_side: str = "left"):
-    """Load the MolGen tokenizer from a local cache."""
-    from transformers import BartTokenizer
+def load_molgen_tokenizer(
+    models_base: Optional[str] = None,
+    fallback_bases: Optional[Sequence[str]] = None,
+    padding_side: str = "right",
+    model_id: str = "zjunlp/MolGen-large",
+):
+    """Load the tokenizer from the same MolGen checkpoint as the decoder."""
+    from transformers import AutoTokenizer
 
-    model_path = resolve_model_path("zjunlp--MolGen-large", models_base=models_base, fallback_bases=fallback_bases)
-    return BartTokenizer.from_pretrained(model_path, padding_side=padding_side)
+    model_path = resolve_model_path(
+        model_id,
+        models_base=models_base,
+        fallback_bases=fallback_bases,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.padding_side = padding_side
+    return tokenizer
 
 
 def find_model_config_path(model_path: str) -> Optional[str]:
@@ -149,36 +160,12 @@ def save_model_config(output_dir: str, model_config: Dict[str, object], logger=N
     return config_path
 
 
-def is_legacy_pchembl_checkpoint(model_config: Optional[Dict[str, object]]) -> bool:
-    """Return True when a saved checkpoint predates the token-fusion pChEMBL head."""
-    if not model_config:
-        return True
-    return not any(key in model_config for key in PCHEMBL_TF_CONFIG_KEYS)
-
-
-def filter_legacy_pchembl_head_state(
-    model_state: Dict[str, torch.Tensor],
-    saved_model_config: Optional[Dict[str, object]],
-    logger=None,
-) -> Dict[str, torch.Tensor]:
-    """Drop legacy pChEMBL head weights that do not match the token-fusion head."""
-    if not is_legacy_pchembl_checkpoint(saved_model_config):
-        return model_state
-
-    legacy_head_keys = [key for key in model_state if key.startswith("pchembl_head.")]
-    if not legacy_head_keys:
-        return model_state
-
-    if logger is not None:
-        logger.info(
-            "Dropping %s legacy pChEMBL head weights from checkpoint before load",
-            len(legacy_head_keys),
-        )
-    return {key: value for key, value in model_state.items() if not key.startswith("pchembl_head.")}
-
-
 def _resolve_checkpoint_file(model_path: str) -> str:
     """Resolve checkpoint file path in a model directory."""
+    if os.path.isfile(model_path):
+        if model_path.endswith((".bin", ".safetensors")):
+            return model_path
+        raise ValueError(f"Unsupported checkpoint file: {model_path}")
     pytorch_path = os.path.join(model_path, "pytorch_model.bin")
     safetensors_path = os.path.join(model_path, "model.safetensors")
     if os.path.exists(pytorch_path):
@@ -196,16 +183,11 @@ def load_prot2mol_inference_model(
     device: torch.device,
     mol_tokenizer,
     prot_emb_model: str,
-    n_layer: int,
-    n_head: int,
-    n_emb: int,
     max_mol_len: int,
     prot_max_length: int,
-    pchembl_tf_hidden_dim: int = 768,
-    pchembl_tf_num_heads: int = 8,
-    pchembl_tf_group_size: int = 1,
-    pchembl_tf_agg_mode: str = "mean",
-    pchembl_tf_dropout: float = 0.1,
+    protein_model_id: Optional[str] = None,
+    decoder_model_id: str = "zjunlp/MolGen-large",
+    conditioning_dropout: float = 0.1,
     strict: bool = True,
     allow_strict_fallback: bool = False,
     logger=None,
@@ -229,30 +211,23 @@ def load_prot2mol_inference_model(
         model_state = torch.load(checkpoint_file, map_location=device)
 
     saved_model_config = load_saved_model_config(model_path, logger=logger)
-    model_state = filter_legacy_pchembl_head_state(model_state, saved_model_config, logger=logger)
 
     model_config = {
         "prot_emb_model": prot_emb_model,
-        "n_layer": n_layer,
-        "n_head": n_head,
-        "n_emb": n_emb,
+        "protein_model_id": protein_model_id,
+        "decoder_model_id": decoder_model_id,
+        "conditioning_dropout": conditioning_dropout,
         "max_mol_len": max_mol_len,
         "prot_max_length": prot_max_length,
         "train_encoder_model": False,
+        "train_projection_model": False,
         "train_decoder_model": False,
-        "train_pchembl_head": True,
-        "stop_pchembl_gradients": True,
-        "pchembl_tf_hidden_dim": pchembl_tf_hidden_dim,
-        "pchembl_tf_num_heads": pchembl_tf_num_heads,
-        "pchembl_tf_group_size": pchembl_tf_group_size,
-        "pchembl_tf_agg_mode": pchembl_tf_agg_mode,
-        "pchembl_tf_dropout": pchembl_tf_dropout,
         "mol_tokenizer": mol_tokenizer,
     }
     model_config.update(saved_model_config)
     model_config["train_encoder_model"] = False
+    model_config["train_projection_model"] = False
     model_config["train_decoder_model"] = False
-    model_config["train_pchembl_head"] = True
     model_config["mol_tokenizer"] = mol_tokenizer
 
     model = Prot2MolModel(model_config)

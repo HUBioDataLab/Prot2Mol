@@ -5,6 +5,17 @@ from typing import Any, Dict, Optional
 import yaml
 
 
+PATH_CONFIG_KEYS = {
+    "dataset_path",
+    "save_dir",
+    "model_file",
+    "output_file",
+    "resume_from_checkpoint",
+    "load_pretrained_model",
+    "models_base",
+}
+
+
 def _normalize_config_keys(data: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize YAML keys to argparse-style destination names."""
     normalized = {}
@@ -57,6 +68,11 @@ def parse_args_with_config(parser: argparse.ArgumentParser, section: Optional[st
 
     if pre_args.config:
         config_values = load_yaml_config(pre_args.config, section=section)
+        config_dir = os.path.dirname(os.path.abspath(pre_args.config))
+        for key in PATH_CONFIG_KEYS.intersection(config_values):
+            value = config_values[key]
+            if isinstance(value, str) and value and not os.path.isabs(value):
+                config_values[key] = os.path.normpath(os.path.join(config_dir, value))
 
         valid_keys = {action.dest for action in parser._actions}
         unknown_keys = sorted(k for k in config_values.keys() if k not in valid_keys)

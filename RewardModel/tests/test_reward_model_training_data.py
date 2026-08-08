@@ -284,6 +284,7 @@ def _tokenized_example_rows():
 
 def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_path, monkeypatch):
     split_rows = _split_parquet_rows()
+    split_rows["train"][0]["activity_type"] = "Potency"
     for split_name, rows in split_rows.items():
         _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
 
@@ -323,6 +324,8 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     assert train_dataset[0]["group_id"] == "T1__A1"
     assert train_dataset[0]["compound_id"] == "M0"
     assert train_dataset[0]["binary_label"] == 0
+    assert train_dataset[0]["activity_type"] == "Potency"
+    assert val_dataset[0]["activity_type"] == "Unknown"
     assert len(train_dataset[0]["protein_input_ids"]) == 6
     assert len(train_dataset[0]["molecule_input_ids"]) == 8
     assert train_dataset[0]["protein_length"] == 5

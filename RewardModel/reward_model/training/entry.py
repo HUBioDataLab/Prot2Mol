@@ -187,6 +187,16 @@ def train_reward_model_from_config(
     train_examples = load_tokenized_example_dataset(example_paths["train"])
     val_examples = load_tokenized_example_dataset(example_paths["val"])
     test_examples = load_tokenized_example_dataset(example_paths["test"])
+    for split_name, split_examples in (
+        ("val", val_examples),
+        ("test", test_examples),
+    ):
+        if "activity_type" not in split_examples.column_names:
+            raise ValueError(
+                f"Tokenized {split_name} examples do not contain activity_type. "
+                "Rerun prepare_reward_training_data.py so Potency/qHTS metrics "
+                "are computed from the current split parquet files."
+            )
     if config.model.ranking_min_pchembl_span != config.data.ranking_min_pchembl_span:
         raise ValueError(
             "model.ranking_min_pchembl_span and data.ranking_min_pchembl_span must match"
@@ -212,6 +222,15 @@ def train_reward_model_from_config(
         ranking_max_ligands=config.data.ranking_max_ligands,
         ranking_num_partitions=config.data.evaluation_ranking_partitions,
         ranking_partition_seed=config.training.seed,
+        protein_shuffle_sensitivity=config.training.protein_shuffle_sensitivity,
+    )
+    test_eval_dataset = RewardEvaluationDataset(
+        test_examples,
+        ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+        ranking_max_ligands=config.data.ranking_max_ligands,
+        ranking_num_partitions=config.data.evaluation_ranking_partitions,
+        ranking_partition_seed=config.training.seed,
+        protein_shuffle_sensitivity=config.training.protein_shuffle_sensitivity,
     )
     val2_eval_dataset = None
     val2_examples = None
@@ -238,6 +257,7 @@ def train_reward_model_from_config(
             ranking_max_ligands=config.data.ranking_max_ligands,
             ranking_num_partitions=config.data.evaluation_ranking_partitions,
             ranking_partition_seed=config.training.seed,
+            protein_shuffle_sensitivity=config.training.protein_shuffle_sensitivity,
         )
     model = _initialize_training_model(config.model, warm_start_path)
     collator = RewardAssayListCollator(
@@ -265,6 +285,10 @@ def train_reward_model_from_config(
     trainer.train()
     trainer.save_model(config.training.output_dir)
     eval_metrics = trainer.evaluate()
+    test_metrics = trainer.evaluate(
+        eval_dataset=test_eval_dataset,
+        metric_key_prefix="test",
+    )
 
     return {
         "train_examples": len(train_examples),
@@ -280,6 +304,7 @@ def train_reward_model_from_config(
         "init_from_checkpoint": warm_start_path,
         "optimizer_state_restored": False,
         "eval_metrics": eval_metrics,
+        "test_metrics": test_metrics,
         **(
             {}
             if val2_eval_dataset is None

@@ -20,24 +20,44 @@ def test_resolve_model_path_uses_snapshot_dir(tmp_path, monkeypatch):
     assert resolved == str(snapshot)
 
 
+def test_resolve_model_path_honors_huggingface_main_ref(tmp_path):
+    models_base = tmp_path / "models"
+    model_dir = models_base / "models--zjunlp--MolGen-large"
+    old_snapshot = model_dir / "snapshots" / "old"
+    current_snapshot = model_dir / "snapshots" / "current"
+    old_snapshot.mkdir(parents=True)
+    current_snapshot.mkdir()
+    (model_dir / "refs").mkdir()
+    (model_dir / "refs" / "main").write_text("current\n", encoding="utf-8")
+
+    assert hf_utils.resolve_model_path(
+        "zjunlp/MolGen-large",
+        models_base=str(models_base),
+    ) == str(current_snapshot)
+
+
+def test_resolve_model_path_falls_back_to_canonical_hub_id(tmp_path):
+    assert hf_utils.resolve_model_path(
+        "zjunlp--MolGen-large", models_base=str(tmp_path)
+    ) == "zjunlp/MolGen-large"
+
+
 def test_load_molgen_tokenizer_uses_resolved_path_and_padding(monkeypatch):
     called = {}
 
-    class DummyBartTokenizer:
+    class DummyAutoTokenizer:
         @staticmethod
-        def from_pretrained(path, padding_side="left"):
+        def from_pretrained(path):
             called["path"] = path
-            called["padding_side"] = padding_side
-            return {"tokenizer_path": path, "padding_side": padding_side}
+            return type("Tokenizer", (), {"tokenizer_path": path, "padding_side": None})()
 
     monkeypatch.setattr(hf_utils, "resolve_model_path", lambda *a, **k: "/tmp/molgen")
-    monkeypatch.setattr(transformers, "BartTokenizer", DummyBartTokenizer)
+    monkeypatch.setattr(transformers, "AutoTokenizer", DummyAutoTokenizer)
 
     tokenizer = hf_utils.load_molgen_tokenizer(padding_side="right")
-    assert tokenizer["tokenizer_path"] == "/tmp/molgen"
-    assert tokenizer["padding_side"] == "right"
+    assert tokenizer.tokenizer_path == "/tmp/molgen"
+    assert tokenizer.padding_side == "right"
     assert called["path"] == "/tmp/molgen"
-    assert called["padding_side"] == "right"
 
 
 def test_resolve_checkpoint_file_bin_then_safetensors_and_error(tmp_path):
@@ -54,3 +74,4 @@ def test_resolve_checkpoint_file_bin_then_safetensors_and_error(tmp_path):
     pytorch_file = model_dir / "pytorch_model.bin"
     pytorch_file.write_bytes(b"x")
     assert hf_utils._resolve_checkpoint_file(str(model_dir)) == str(pytorch_file)
+    assert hf_utils._resolve_checkpoint_file(str(pytorch_file)) == str(pytorch_file)

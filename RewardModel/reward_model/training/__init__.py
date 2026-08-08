@@ -27,10 +27,12 @@ from .data import (
 )
 from .evaluation import (
     build_complete_coverage_ranking_partitions,
+    compute_activity_type_metrics,
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_joint_evaluation_metrics,
     compute_pairwise_accuracy,
+    compute_protein_shuffle_sensitivity,
     compute_ranking_score_diagnostics,
     compute_reward_model_eval_metrics,
 )
@@ -67,10 +69,12 @@ __all__ = [
     "build_group_id",
     "build_pair_records",
     "build_complete_coverage_ranking_partitions",
+    "compute_activity_type_metrics",
     "compute_classification_metrics",
     "compute_groupwise_spearman",
     "compute_joint_evaluation_metrics",
     "compute_pairwise_accuracy",
+    "compute_protein_shuffle_sensitivity",
     "compute_ranking_score_diagnostics",
     "compute_reward_model_eval_metrics",
     "create_training_arguments",

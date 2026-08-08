@@ -40,6 +40,7 @@ TOKENIZED_DATASET_COLUMNS = (
     "compound_id",
     "pchembl_value",
     "binary_label",
+    "activity_type",
     "protein_input_ids",
     "protein_attention_mask",
     "protein_length",
@@ -165,14 +166,39 @@ def _load_split_parquet_rows(path: str) -> List[Dict[str, Any]]:
         ) from exc
 
     resolved_path = os.path.abspath(path)
-    frame = pd.read_parquet(resolved_path)
-    missing_columns = [column for column in SOURCE_PARQUET_COLUMNS if column not in frame.columns]
+    try:
+        import pyarrow.parquet as parquet
+
+        available_columns = set(parquet.ParquetFile(resolved_path).schema.names)
+        missing_columns = [
+            column
+            for column in SOURCE_PARQUET_COLUMNS
+            if column not in available_columns
+        ]
+        if missing_columns:
+            raise ValueError(
+                f"Split parquet at {resolved_path} is missing required columns: "
+                f"{missing_columns}"
+            )
+        selected_columns = list(SOURCE_PARQUET_COLUMNS)
+        if "activity_type" in available_columns:
+            selected_columns.append("activity_type")
+        frame = pd.read_parquet(resolved_path, columns=selected_columns)
+    except ImportError:
+        frame = pd.read_parquet(resolved_path)
+        available_columns = set(frame.columns)
+    missing_columns = [column for column in SOURCE_PARQUET_COLUMNS if column not in available_columns]
     if missing_columns:
         raise ValueError(
             f"Split parquet at {resolved_path} is missing required columns: {missing_columns}"
         )
 
-    minimal_frame = frame.loc[:, list(SOURCE_PARQUET_COLUMNS)]
+    minimal_frame = frame.loc[:, list(SOURCE_PARQUET_COLUMNS)].copy()
+    minimal_frame["activity_type"] = (
+        frame["activity_type"].fillna("").astype(str)
+        if "activity_type" in frame.columns
+        else "Unknown"
+    )
     return minimal_frame.to_dict(orient="records")
 
 
@@ -205,6 +231,7 @@ def _prepare_split_rows(
                 "compound_selfies": str(row["compound_selfies"]),
                 "pchembl_value": pchembl_value,
                 "binary_label": binary_label,
+                "activity_type": str(row.get("activity_type", "Unknown")),
             }
         )
     return prepared_rows
@@ -705,6 +732,7 @@ class RewardEvaluationDataset(TorchDataset):
         ranking_max_ligands: int = 16,
         ranking_num_partitions: int = 3,
         ranking_partition_seed: int = 42,
+        protein_shuffle_sensitivity: bool = True,
     ):
         if ranking_min_pchembl_span < 0.0 or not math.isfinite(
             float(ranking_min_pchembl_span)
@@ -719,6 +747,7 @@ class RewardEvaluationDataset(TorchDataset):
         self.ranking_max_ligands = int(ranking_max_ligands)
         self.ranking_num_partitions = int(ranking_num_partitions)
         self.ranking_partition_seed = int(ranking_partition_seed)
+        self.protein_shuffle_sensitivity = bool(protein_shuffle_sensitivity)
         group_ids = [str(group_id) for group_id in example_dataset["group_id"]]
         self.group_id_to_index = {
             group_id: index for index, group_id in enumerate(sorted(set(group_ids)))
@@ -729,18 +758,44 @@ class RewardEvaluationDataset(TorchDataset):
         self._row_group_indices = array(
             "I", (self.group_id_to_index[group_id] for group_id in group_ids)
         )
+        target_ids = [str(value) for value in example_dataset["target_chembl_id"]]
+        target_representatives: Dict[str, int] = {}
+        for row_index, target_id in enumerate(target_ids):
+            target_representatives.setdefault(target_id, row_index)
+        unique_targets = sorted(target_representatives)
+        self._protein_shuffle_indices: array | None = None
+        if self.protein_shuffle_sensitivity and len(unique_targets) > 1:
+            shift = 1 + (self.ranking_partition_seed % (len(unique_targets) - 1))
+            shuffled_target = {
+                target_id: unique_targets[(index + shift) % len(unique_targets)]
+                for index, target_id in enumerate(unique_targets)
+            }
+            self._protein_shuffle_indices = array(
+                "I",
+                (
+                    target_representatives[shuffled_target[target_id]]
+                    for target_id in target_ids
+                ),
+            )
 
     def __len__(self) -> int:
         return len(self.example_dataset)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
-        return {
-            "rows": [dict(self.example_dataset[int(index)])],
+        resolved_index = int(index)
+        feature = {
+            "rows": [dict(self.example_dataset[resolved_index])],
             "example_indices": [int(index)],
             "ranking_group_sizes": [],
             "ranking_assay_ids": [],
-            "evaluation_group_indices": [int(self._row_group_indices[int(index)])],
+            "evaluation_group_indices": [int(self._row_group_indices[resolved_index])],
         }
+        if self._protein_shuffle_indices is not None:
+            shuffled_index = int(self._protein_shuffle_indices[resolved_index])
+            feature["protein_shuffled_rows"] = [
+                dict(self.example_dataset[shuffled_index])
+            ]
+        return feature
 
 
 def load_saved_pair_dataset(dataset_path: str) -> Dataset:
@@ -1084,6 +1139,8 @@ class RewardAssayListCollator(RewardPairCollator):
         ranking_assay_ids: list[str] = []
         evaluation_group_indices: list[int] = []
         evaluation_example_indices: list[int] = []
+        protein_shuffled_rows: list[Dict[str, Any]] = []
+        protein_shuffle_presence: list[bool] = []
         next_group_id = 0
         for feature in features:
             rows = [dict(row) for row in feature["rows"]]
@@ -1128,12 +1185,27 @@ class RewardAssayListCollator(RewardPairCollator):
                     int(value) for value in feature_example_indices
                 )
             all_rows.extend(rows)
+            feature_shuffled_rows = feature.get("protein_shuffled_rows")
+            protein_shuffle_presence.append(feature_shuffled_rows is not None)
+            if feature_shuffled_rows is not None:
+                if len(feature_shuffled_rows) != len(rows):
+                    raise ValueError(
+                        "protein_shuffled_rows must align with feature rows"
+                    )
+                protein_shuffled_rows.extend(
+                    dict(row) for row in feature_shuffled_rows
+                )
+
+        if any(protein_shuffle_presence) and not all(protein_shuffle_presence):
+            raise ValueError(
+                "protein_shuffled_rows must be present for every feature or none"
+            )
 
         if not all_rows:
             raise ValueError("RewardAssayListCollator received no example rows")
         token_batch = self.collate_example_tokens(all_rows)
         ranked_examples = sum(group_id >= 0 for group_id in ranking_group_ids)
-        return {
+        batch = {
             **token_batch,
             "activity_labels": torch.tensor(
                 [float(row["binary_label"]) for row in all_rows],
@@ -1157,3 +1229,12 @@ class RewardAssayListCollator(RewardPairCollator):
             "num_ranking_lists": torch.tensor(next_group_id, dtype=torch.long),
             "num_ranked_examples": torch.tensor(ranked_examples, dtype=torch.long),
         }
+        if all(protein_shuffle_presence):
+            shuffled_tokens = self.collate_example_tokens(protein_shuffled_rows)
+            batch["protein_shuffled_input_ids"] = shuffled_tokens[
+                "protein_input_ids"
+            ]
+            batch["protein_shuffled_attention_mask"] = shuffled_tokens[
+                "protein_attention_mask"
+            ]
+        return batch

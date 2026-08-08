@@ -1,39 +1,36 @@
 train:
-  selfies_path: ./data/papyrus/prot_comp_set_pchembl_6_protlen_1000_human_False.csv
-  prot_emb_model: saprot
-  n_layer: 1
-  n_head: 16
-  n_emb: 1024
-  max_mol_len: 200
-  prot_max_length: 1000
+  dataset_path: ../../dataset/cache/prot2mol/chembl_37_mmseqs50_generation_esm2
 
-  epoch: 50
+  prot_emb_model: esm2
+  protein_model_id: facebook/esm2_t33_650M_UR50D
+  decoder_model_id: zjunlp/MolGen-large
+  conditioning_dropout: 0.1
+  max_mol_len: 256
+  prot_max_length: 1024
+
+  epoch: 10
   learning_rate: 1.0e-5
   train_batch_size: 4
-  valid_batch_size: 4
+  valid_batch_size: 8
   gradient_accumulation_steps: 1
   dataloader_num_workers: 4
   weight_decay: 0.01
+  max_grad_norm: 1.0
+  precision: auto
+  logging_steps: 50
   training_mode: single_gpu
-  training_stage: pchembl_only
-  eval_split: random
-  eval_split_ratio: 0.01
   split_seed: 42
-  pchembl_huber_delta: 1.0
 
   train_encoder_model: false
-  train_decoder_model: false
-  train_pchembl_head: true
-  stop_pchembl_gradients: true
-  pchembl_tf_hidden_dim: 768
-  pchembl_tf_num_heads: 8
-  pchembl_tf_group_size: 1
-  pchembl_tf_agg_mode: mean
-  pchembl_tf_dropout: 0.1
+  train_projection_model: true
+  train_decoder_model: true
 
-  save_dir: /gpfs/projects/etur29/atabey/saved_models
+  generation_eval_proteins: 32
+  generation_samples_per_protein: 4
+  generation_train_reference_limit: 10000
+
+  save_dir: ../../outputs/prot2mol
   run_name_suffix: null
   log_level: INFO
   resume_from_checkpoint: null
   load_pretrained_model: null
-  ignore_mismatched_optimizer: false

@@ -1,87 +1,72 @@
-# Standard library imports
-from collections import Counter
+"""End-to-end Prot2Mol training entrypoint."""
+
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import os
-import shutil
-import sys
-from typing import Dict, Optional
+from pathlib import Path
 
-from torch.distributed import destroy_process_group
-
-# Third-party library imports
 import numpy as np
 import torch
 import wandb
-from datasets import load_from_disk
+from torch.distributed import destroy_process_group
 
-# Local application imports
-# Add project root to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from prot2mol.chem import generate_morgan_fingerprints_parallel
+from prot2mol.core.model import create_prot2mol_model
+from prot2mol.core.protein_encoders import (
+    get_protein_tokenizer,
+    resolve_protein_model_id,
+)
 from prot2mol.data.pipeline import (
     extract_smiles_list,
-    get_processed_data_path,
     load_processed_dataset,
-    split_train_eval_dataset,
     tokenize_protein_sequences_for_inference,
 )
-from prot2mol.chem import generate_morgan_fingerprints_parallel
-from prot2mol.io.hf_utils import (
-    filter_legacy_pchembl_head_state,
-    load_molgen_tokenizer,
-    load_saved_model_config,
-)
-from prot2mol.core.model import create_prot2mol_model
-from prot2mol.core.protein_encoders import get_protein_tokenizer
+from prot2mol.io.hf_utils import load_molgen_tokenizer
+from prot2mol.training.distributed import resolve_distributed_context
 from prot2mol.training.entry import (
     create_run_name,
     parse_arguments,
     setup_logging,
     validate_and_process_paths,
 )
-from prot2mol.training.distributed import resolve_distributed_context
 from prot2mol.training.metrics import (
+    compute_conditional_generation_metrics,
     compute_generation_metrics,
-    compute_pchembl_metrics,
-    preprocess_logits_for_metrics as preprocess_logits_for_metrics_fn,
 )
 from prot2mol.training.training_runner import TrainingRunner
 
-# Set environment variables
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["WANDB_MODE"] = "offline"
-os.environ["WANDB_DIR"] = "/gpfs/projects/etur29/atabey/"
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("WANDB_DIR", os.path.abspath("./wandb"))
 
 
 class TrainingScript:
-    """Trainer orchestrator for the Prot2Mol model."""
+    """Own model construction, split validation, and bounded final evaluation."""
 
-    def __init__(self, config, selfies_path, pretrain_save_to, dataset_name, run_name, distributed_context):
+    def __init__(self, config, pretrain_save_to, dataset_name, run_name, distributed_context):
         self.logger = logging.getLogger(__name__)
+        self.config = config
+        self.dataset_path = config.dataset_path
+        self.pretrain_save_to = pretrain_save_to
+        self.dataset_name = dataset_name
+        self.run_name = run_name
         self.distributed_context = distributed_context
         self.local_rank = distributed_context.local_rank
         self.global_rank = distributed_context.global_rank
 
-        # Organize configurations into logical groups
         self.model_config = {
             "prot_emb_model": config.prot_emb_model,
-            "n_layer": config.n_layer,
-            "n_head": config.n_head,
-            "n_emb": config.n_emb,
+            "protein_model_id": config.protein_model_id,
+            "decoder_model_id": config.decoder_model_id,
+            "conditioning_dropout": config.conditioning_dropout,
             "max_mol_len": config.max_mol_len,
             "prot_max_length": config.prot_max_length,
             "train_encoder_model": config.train_encoder_model,
+            "train_projection_model": config.train_projection_model,
             "train_decoder_model": config.train_decoder_model,
-            "train_pchembl_head": config.train_pchembl_head,
-            "training_stage": config.training_stage,
-            "pchembl_huber_delta": config.pchembl_huber_delta,
-            "stop_pchembl_gradients": config.stop_pchembl_gradients,
-            "pchembl_tf_hidden_dim": config.pchembl_tf_hidden_dim,
-            "pchembl_tf_num_heads": config.pchembl_tf_num_heads,
-            "pchembl_tf_group_size": config.pchembl_tf_group_size,
-            "pchembl_tf_agg_mode": config.pchembl_tf_agg_mode,
-            "pchembl_tf_dropout": config.pchembl_tf_dropout,
         }
         self.training_config = {
             "train_batch_size": config.train_batch_size,
@@ -93,746 +78,333 @@ class TrainingScript:
             "dataloader_num_workers": config.dataloader_num_workers,
             "resume_from_checkpoint": config.resume_from_checkpoint,
             "load_pretrained_model": config.load_pretrained_model,
-            "ignore_mismatched_optimizer": config.ignore_mismatched_optimizer,
-            "training_mode": config.training_mode,
-            "eval_split": config.eval_split,
-            "eval_split_ratio": config.eval_split_ratio,
+            "precision": config.precision,
+            "max_grad_norm": config.max_grad_norm,
+            "logging_steps": config.logging_steps,
             "split_seed": config.split_seed,
-            "pchembl_huber_delta": config.pchembl_huber_delta,
+            "generation_eval_proteins": config.generation_eval_proteins,
+            "generation_samples_per_protein": config.generation_samples_per_protein,
+            "generation_train_reference_limit": config.generation_train_reference_limit,
         }
-        self._validate_training_stage()
 
-        self.selfies_path = selfies_path
-        self.pretrain_save_to = pretrain_save_to
-        self.dataset_name = dataset_name
-        self.run_name = run_name
-        self.train_smiles_list = []
+        self.mol_tokenizer = load_molgen_tokenizer(
+            padding_side="right",
+            model_id=config.decoder_model_id,
+        )
+        self.prot_tokenizer = get_protein_tokenizer(
+            config.prot_emb_model,
+            model_id=config.protein_model_id,
+        )
+        self.prot_tokenizer.padding_side = "right"
+        model_config = {**self.model_config, "mol_tokenizer": self.mol_tokenizer}
+        self.model = create_prot2mol_model(model_config)
+        self.training_runner = TrainingRunner(self.local_rank, self.global_rank, self.logger)
+        self.train_data = None
+        self.validation_data = None
+        self.generation_sequences = []
         self.eval_reference_smiles = []
-        self.dataset_stats: Dict[str, object] = {}
-        self.prepared_split_metadata: Dict[str, object] = {}
-        self.trainer = None
+        self.eval_reference_smiles_by_sequence = {}
+        self.train_reference_smiles = []
         self.training_vec = None
-        self.pchembl_mean = 0.0
-        self.pchembl_std = 1.0
-        self.pchembl_threshold = 6.0
+        self.trainer = None
 
-        if self.training_config["resume_from_checkpoint"]:
-            self.logger.info(
-                "Checkpoint resume mode enabled: %s",
-                self.training_config["resume_from_checkpoint"],
+    def _load_and_validate_preprocessing_manifest(self) -> dict:
+        manifest_path = Path(self.dataset_path) / "preprocessing_manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError(
+                f"Missing preprocessing contract: {manifest_path}. "
+                "Re-run data_processing/preprocess_dataset.py."
             )
-
-        if self.training_config["load_pretrained_model"]:
-            self.logger.info(
-                "Will load pretrained model weights from: %s",
-                self.training_config["load_pretrained_model"],
-            )
-            if self.training_config["resume_from_checkpoint"]:
-                raise ValueError(
-                    "Cannot use both --resume_from_checkpoint and --load_pretrained_model. "
-                    "Use --resume_from_checkpoint to continue training with same dataset, "
-                    "or --load_pretrained_model to fine-tune on a new dataset."
-                )
-
-        self._init_tokenizers()
-        self._init_models()
-        self.training_runner = TrainingRunner(
-            local_rank=self.local_rank,
-            global_rank=self.global_rank,
-            logger=self.logger,
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        preprocessed = manifest.get("config", {})
+        expected_protein_id = resolve_protein_model_id(
+            self.model_config["prot_emb_model"],
+            self.model_config["protein_model_id"],
         )
-
-        self.logger.info("Model parameter count: %s", f"{self.model.num_parameters():,}")
-
-    def _extract_smiles_list(self, data_source, drop_invalid=False):
-        """Extract canonical SMILES using shared data-pipeline helpers."""
-        return extract_smiles_list(data_source, drop_invalid=drop_invalid, logger=self.logger)
-
-    def _validate_training_stage(self):
-        stage = self.training_config["training_stage"]
-        if stage in {"pchembl_only", "multitask"} and not self.model_config["train_pchembl_head"]:
-            raise ValueError(
-                f"training_stage={stage} requires --train_pchembl_head to be enabled."
-            )
-        if stage in {"lm_only", "multitask"} and not (
-            self.model_config["train_encoder_model"] or self.model_config["train_decoder_model"]
+        expected = {
+            "prot_emb_model": self.model_config["prot_emb_model"],
+            "protein_model_id_resolved": expected_protein_id,
+            "decoder_model_id_resolved": self.model_config["decoder_model_id"],
+            "max_mol_len": int(self.model_config["max_mol_len"]),
+            "prot_max_length": int(self.model_config["prot_max_length"]),
+            "molecule_padding_side": "right",
+            "protein_padding_side": "right",
+        }
+        actual = {
+            "prot_emb_model": preprocessed.get("prot_emb_model"),
+            "protein_model_id_resolved": manifest.get("protein_model_id_resolved"),
+            "decoder_model_id_resolved": manifest.get("decoder_model_id_resolved"),
+            "max_mol_len": preprocessed.get("max_mol_len"),
+            "prot_max_length": preprocessed.get("prot_max_length"),
+            "molecule_padding_side": manifest.get("molecule_padding_side"),
+            "protein_padding_side": manifest.get("protein_padding_side"),
+        }
+        mismatches = {
+            key: {"expected": value, "actual": actual[key]}
+            for key, value in expected.items()
+            if actual[key] != value
+        }
+        for coverage_name in (
+            "molecule_tokenizer_coverage",
+            "protein_tokenizer_coverage",
         ):
+            coverage = manifest.get(coverage_name, {}).get("splits", {})
+            for split in ("train", "validation"):
+                if coverage.get(split, {}).get("unknown_tokens") != 0:
+                    mismatches[f"{coverage_name}.{split}.unknown_tokens"] = {
+                        "expected": 0,
+                        "actual": coverage.get(split, {}).get("unknown_tokens"),
+                    }
+        if mismatches:
             raise ValueError(
-                f"training_stage={stage} requires at least one of encoder/decoder to be trainable."
+                "Preprocessed dataset does not match the training tokenization contract: "
+                f"{mismatches}"
             )
-
-    def _stage_has_lm(self) -> bool:
-        return self.training_config["training_stage"] in {"lm_only", "multitask"}
-
-    def _stage_has_pchembl(self) -> bool:
-        return self.training_config["training_stage"] in {"pchembl_only", "multitask"}
-
-    def _needs_generation_metrics(self) -> bool:
-        return self._stage_has_lm()
-
-    def _distributed_barrier(self, label: str):
-        if (
-            self.distributed_context.is_distributed
-            and torch.distributed.is_available()
-            and torch.distributed.is_initialized()
-        ):
-            self.logger.info("Rank %s waiting at barrier: %s", self.global_rank, label)
-            torch.distributed.barrier()
-
-    def _processed_dataset_fingerprint(self, processed_data_path: str) -> Dict[str, object]:
-        entries = []
-        for root, dirs, files in os.walk(processed_data_path):
-            dirs.sort()
-            for filename in sorted(files):
-                path = os.path.join(root, filename)
-                if not os.path.isfile(path):
-                    continue
-                rel_path = os.path.relpath(path, processed_data_path)
-                stat = os.stat(path)
-                entry = {
-                    "path": rel_path,
-                    "size": int(stat.st_size),
-                    "mtime_ns": int(stat.st_mtime_ns),
-                }
-                if filename.endswith(".json") or stat.st_size <= 1024 * 1024:
-                    with open(path, "rb") as handle:
-                        entry["sha256"] = hashlib.sha256(handle.read()).hexdigest()
-                entries.append(entry)
-
-        digest = hashlib.sha256(
-            json.dumps(entries, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        return {
-            "digest": digest,
-            "file_count": len(entries),
-        }
-
-    def _prepared_split_cache_payload(self, processed_data_path: str) -> Dict[str, object]:
-        return {
-            "cache_version": 1,
-            "selfies_path": os.path.abspath(self.selfies_path),
-            "processed_dataset_path": os.path.abspath(processed_data_path),
-            "processed_dataset_fingerprint": self._processed_dataset_fingerprint(
-                processed_data_path
-            ),
-            "eval_split": self.training_config["eval_split"],
-            "eval_split_ratio": float(self.training_config["eval_split_ratio"]),
-            "split_seed": int(self.training_config["split_seed"]),
-            "training_stage": self.training_config["training_stage"],
-            "train_pchembl_head": bool(self.model_config["train_pchembl_head"]),
-            "pchembl_huber_delta": float(self.training_config["pchembl_huber_delta"]),
-        }
-
-    def _prepared_split_cache_dir(self, processed_data_path: str) -> str:
-        payload = self._prepared_split_cache_payload(processed_data_path)
-        payload_json = json.dumps(payload, sort_keys=True)
-        cache_key = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-        return os.path.join(f"{processed_data_path}_prepared_splits", cache_key)
-
-    def _prepared_split_cache_paths(self, cache_dir: str) -> Dict[str, str]:
-        return {
-            "train": os.path.join(cache_dir, "train"),
-            "eval": os.path.join(cache_dir, "eval"),
-            "metadata": os.path.join(cache_dir, "metadata.json"),
-        }
-
-    def _prepared_split_cache_ready(
-        self,
-        cache_dir: str,
-        processed_data_path: Optional[str] = None,
-    ) -> bool:
-        paths = self._prepared_split_cache_paths(cache_dir)
-        ready = (
-            os.path.isdir(paths["train"])
-            and os.path.isdir(paths["eval"])
-            and os.path.exists(paths["metadata"])
-        )
-        if not ready or processed_data_path is None:
-            return ready
-        try:
-            with open(paths["metadata"], "r", encoding="utf-8") as handle:
-                metadata = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            return False
-        return metadata.get("payload") == self._prepared_split_cache_payload(
-            processed_data_path
-        )
-
-    def _split_metadata(self, total_samples: int, processed_data_path: str) -> Dict[str, object]:
-        return {
-            "payload": self._prepared_split_cache_payload(processed_data_path),
-            "dataset_total_samples": int(total_samples),
-            "train_samples": int(len(self.train_data)),
-            "eval_samples": int(len(self.test_data)),
-            "pchembl_mean": float(self.pchembl_mean),
-            "pchembl_std": float(self.pchembl_std),
-            "pchembl_threshold": float(self.pchembl_threshold),
-            "pchembl_huber_delta": float(self.model_config["pchembl_huber_delta"]),
-        }
-
-    def _apply_split_metadata(self, metadata: Dict[str, object]):
-        self.pchembl_mean = float(metadata.get("pchembl_mean", 0.0))
-        self.pchembl_std = float(metadata.get("pchembl_std", 1.0))
-        self.pchembl_threshold = float(metadata.get("pchembl_threshold", 6.0))
-        normalized_delta = float(
-            metadata.get(
-                "pchembl_huber_delta",
-                self.training_config["pchembl_huber_delta"],
-            )
-        )
-
-        self.model._config["pchembl_huber_delta"] = normalized_delta
-        self.model._config["pchembl_mean"] = self.pchembl_mean
-        self.model._config["pchembl_std"] = self.pchembl_std
-        self.model._config["pchembl_threshold"] = self.pchembl_threshold
-        self.model_config["pchembl_huber_delta"] = normalized_delta
-
-    def _save_prepared_splits(self, cache_dir: str, total_samples: int, processed_data_path: str):
-        tmp_dir = f"{cache_dir}.tmp"
-        if os.path.isdir(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_paths = self._prepared_split_cache_paths(tmp_dir)
-
-        self.train_data.save_to_disk(tmp_paths["train"])
-        self.test_data.save_to_disk(tmp_paths["eval"])
-        metadata = self._split_metadata(total_samples, processed_data_path)
-        with open(tmp_paths["metadata"], "w", encoding="utf-8") as handle:
-            json.dump(metadata, handle, indent=2, sort_keys=True)
-
-        if os.path.isdir(cache_dir):
-            shutil.rmtree(cache_dir)
-        os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
-        os.replace(tmp_dir, cache_dir)
-        self.prepared_split_metadata = metadata
-
-    def _build_prepared_splits(self, full_data, cache_dir: str, processed_data_path: str):
-        split_ratio = self.training_config.get("eval_split_ratio", 0.01)
-        split_mode = self.training_config.get("eval_split", "random")
-        self.train_data, self.test_data = split_train_eval_dataset(
-            full_data=full_data,
-            split_mode=split_mode,
-            split_ratio=split_ratio,
-            split_seed=self.training_config.get("split_seed", 42),
-            num_proc=self.training_config.get("dataloader_num_workers"),
-            logger=self.logger,
-        )
-        self._compute_split_normalization()
-        self.train_data = self._apply_split_targets(self.train_data)
-        self.test_data = self._apply_split_targets(self.test_data)
-        self._save_prepared_splits(
-            cache_dir,
-            total_samples=len(full_data),
-            processed_data_path=processed_data_path,
-        )
-
-    def _load_prepared_splits(self, cache_dir: str):
-        paths = self._prepared_split_cache_paths(cache_dir)
-        self.train_data = load_from_disk(paths["train"])
-        self.test_data = load_from_disk(paths["eval"])
-        with open(paths["metadata"], "r", encoding="utf-8") as handle:
-            metadata = json.load(handle)
-        self.prepared_split_metadata = metadata
-        self._apply_split_metadata(metadata)
-
-    def _apply_split_targets(self, dataset_split):
-        if not self._stage_has_pchembl():
-            def _neutralize(batch):
-                size = len(batch["pchembl_value_Median"])
-                return {
-                    "pchembl_values": [0.0] * size,
-                    "train_lm": [True] * size,
-                }
-
-            return dataset_split.map(
-                _neutralize,
-                batched=True,
-                num_proc=self.training_config.get("dataloader_num_workers"),
-                desc="Applying neutral LM-only targets",
-            )
-
-        def _normalize(batch):
-            raw_values = batch["pchembl_value_Median"]
-            normalized = [
-                (float(val) - self.pchembl_mean) / (self.pchembl_std + 1e-8)
-                for val in raw_values
-            ]
-            if self.training_config["training_stage"] == "multitask":
-                train_lm = [float(val) >= self.pchembl_threshold for val in raw_values]
-            else:
-                train_lm = [False] * len(raw_values)
-            return {
-                "pchembl_values": normalized,
-                "train_lm": train_lm,
-            }
-
-        return dataset_split.map(
-            _normalize,
-            batched=True,
-            num_proc=self.training_config.get("dataloader_num_workers"),
-            desc="Applying split-specific pChEMBL normalization",
-        )
-
-    def _compute_split_normalization(self):
-        if not self._stage_has_pchembl():
-            self.pchembl_mean = 0.0
-            self.pchembl_std = 1.0
-            self.pchembl_threshold = 6.0
-            self.model_config["pchembl_huber_delta"] = self.model._config["pchembl_huber_delta"]
-            self.model._config["pchembl_mean"] = self.pchembl_mean
-            self.model._config["pchembl_std"] = self.pchembl_std
-            self.model._config["pchembl_threshold"] = self.pchembl_threshold
-            return
-
-        values = np.asarray(self.train_data["pchembl_value_Median"], dtype=np.float32)
-        values = values[~np.isnan(values)]
-        if values.size == 0:
-            raise ValueError("Training split does not contain valid pChEMBL values.")
-
-        self.pchembl_mean = float(values.mean())
-        self.pchembl_std = float(values.std(ddof=0))
-        self.pchembl_threshold = 6.0
-        normalized_delta = (
-            self.training_config["pchembl_huber_delta"] / self.pchembl_std
-            if self.pchembl_std > 0
-            else self.training_config["pchembl_huber_delta"]
-        )
-        self.model._config["pchembl_huber_delta"] = normalized_delta
-        self.model._config["pchembl_mean"] = self.pchembl_mean
-        self.model._config["pchembl_std"] = self.pchembl_std
-        self.model._config["pchembl_threshold"] = self.pchembl_threshold
-        self.model_config["pchembl_huber_delta"] = normalized_delta
-
-        self.logger.info(
-            "Train-split pChEMBL stats: mean=%.4f std=%.4f threshold=%.1f delta_norm=%.4f",
-            self.pchembl_mean,
-            self.pchembl_std,
-            self.pchembl_threshold,
-            normalized_delta,
-        )
-
-    def _build_train_vectors(self):
-        if not self.train_smiles_list:
-            self.training_vec = None
-            return
-        self.logger.info(
-            "Generating train-split Morgan fingerprints for %s molecules",
-            len(self.train_smiles_list),
-        )
-        self.training_vec = generate_morgan_fingerprints_parallel(
-            smiles=self.train_smiles_list,
-            radius=2,
-            nBits=1024,
-            n_jobs=None,
-        )
-
-    def _count_unique_proteins(self, dataset_split) -> int:
-        if hasattr(dataset_split, "column_names"):
-            if "Target_CHEMBL_ID" in dataset_split.column_names:
-                return len(set(str(v) for v in dataset_split["Target_CHEMBL_ID"]))
-            if "Target_FASTA" in dataset_split.column_names:
-                return len(set(str(v) for v in dataset_split["Target_FASTA"]))
-        return 0
-
-    def _update_dataset_stats(self, total_samples: int):
-        train_lm_flags = self.train_data["train_lm"] if "train_lm" in self.train_data.column_names else []
-        train_lm_positive = int(sum(bool(flag) for flag in train_lm_flags))
-        self.dataset_stats = {
-            "dataset_name": self.dataset_name,
-            "dataset_source_path": os.path.abspath(self.selfies_path),
-            "dataset_total_samples": int(total_samples),
-            "train_samples": int(len(self.train_data)),
-            "eval_samples": int(len(self.test_data)),
-            "train_lm_positive_samples": train_lm_positive,
-            "train_unique_proteins": self._count_unique_proteins(self.train_data),
-            "eval_unique_proteins": self._count_unique_proteins(self.test_data),
-            "train_unique_molecules": len(set(self.train_smiles_list)),
-            "eval_unique_molecules": len(set(self.eval_reference_smiles)),
-            "eval_split": self.training_config["eval_split"],
-            "eval_split_ratio": float(self.training_config["eval_split_ratio"]),
-            "split_seed": int(self.training_config["split_seed"]),
-            "pchembl_mean": float(self.pchembl_mean),
-            "pchembl_std": float(self.pchembl_std),
-            "pchembl_threshold": float(self.pchembl_threshold),
-        }
-        self.model._config.update(self.dataset_stats)
-        self.model_config.update(self.dataset_stats)
-
-        self.logger.info(
-            "Dataset stats: total=%s train=%s eval=%s train_unique_proteins=%s eval_unique_proteins=%s "
-            "train_unique_molecules=%s eval_unique_molecules=%s train_lm_positive=%s",
-            self.dataset_stats["dataset_total_samples"],
-            self.dataset_stats["train_samples"],
-            self.dataset_stats["eval_samples"],
-            self.dataset_stats["train_unique_proteins"],
-            self.dataset_stats["eval_unique_proteins"],
-            self.dataset_stats["train_unique_molecules"],
-            self.dataset_stats["eval_unique_molecules"],
-            self.dataset_stats["train_lm_positive_samples"],
-        )
-
-    def _init_tokenizers(self):
-        """Initialize tokenizers for proteins and molecules."""
-        self.logger.info("Initializing tokenizers...")
-        self.mol_tokenizer = load_molgen_tokenizer(padding_side="left")
-        self.prot_tokenizer = get_protein_tokenizer(self.model_config["prot_emb_model"])
-
-    def _init_models(self):
-        """Initialize the unified Prot2Mol model."""
-        self.logger.info("Initializing unified Prot2Mol model...")
-        model_config_with_tokenizer = self.model_config.copy()
-        model_config_with_tokenizer["mol_tokenizer"] = self.mol_tokenizer
-        self.model = create_prot2mol_model(model_config_with_tokenizer)
-
-    def _load_pretrained_weights(self, pretrained_model_path):
-        """Load pretrained model weights for fine-tuning only."""
-        import glob
-
-        self.logger.info("Loading pretrained weights from: %s", pretrained_model_path)
-
-        if os.path.exists(os.path.join(pretrained_model_path, "pytorch_model.bin")):
-            model_file = os.path.join(pretrained_model_path, "pytorch_model.bin")
-        elif os.path.exists(os.path.join(pretrained_model_path, "model.safetensors")):
-            model_file = os.path.join(pretrained_model_path, "model.safetensors")
-        else:
-            checkpoint_pattern = os.path.join(pretrained_model_path, "checkpoint-*", "pytorch_model.bin")
-            checkpoints = glob.glob(checkpoint_pattern)
-            if not checkpoints:
-                checkpoint_pattern = os.path.join(pretrained_model_path, "checkpoint-*", "model.safetensors")
-                checkpoints = glob.glob(checkpoint_pattern)
-
-            if not checkpoints:
-                if os.path.exists(os.path.join(pretrained_model_path, "pytorch_model.bin")):
-                    model_file = os.path.join(pretrained_model_path, "pytorch_model.bin")
-                else:
-                    raise FileNotFoundError(
-                        f"Could not find model weights in {pretrained_model_path}. "
-                        "Expected pytorch_model.bin or model.safetensors"
-                    )
-            else:
-                model_file = sorted(checkpoints)[-1]
-
-        self.logger.info("Loading model weights from: %s", model_file)
-
-        if model_file.endswith(".safetensors"):
-            from safetensors.torch import load_file
-
-            state_dict = load_file(model_file)
-        else:
-            state_dict = torch.load(model_file, map_location="cpu")
-
-        saved_model_config = load_saved_model_config(pretrained_model_path, logger=self.logger)
-        state_dict = filter_legacy_pchembl_head_state(state_dict, saved_model_config, logger=self.logger)
-
-        missing_keys, unexpected_keys = self.model.load_state_dict(state_dict, strict=False)
-        if missing_keys:
-            self.logger.warning("Missing keys when loading pretrained weights: %s", missing_keys)
-        if unexpected_keys:
-            self.logger.warning("Unexpected keys when loading pretrained weights: %s", unexpected_keys)
-
-        self.logger.info("Successfully loaded pretrained weights!")
-        self.logger.info("Training will start from epoch 0 with fresh optimizer state.")
-
-    def _prepare_datasets(self):
-        cache_dir = os.environ.get("DATASETS_CACHE_DIR", "/gpfs/projects/etur29/atabey/datasets")
-        processed_data_path = get_processed_data_path(self.selfies_path, cache_dir=cache_dir)
-
-        if not os.path.exists(processed_data_path):
-            error_msg = (
-                f"\n{'=' * 80}\n"
-                "ERROR: Preprocessed dataset not found!\n"
-                f"{'=' * 80}\n"
-                f"Expected location: {processed_data_path}\n\n"
-                "Please run preprocessing BEFORE training:\n\n"
-                "  sbatch preprocess_job.sh\n\n"
-                "Or manually:\n\n"
-                "  python preprocess_dataset.py \\\n"
-                f"    --selfies_path {self.selfies_path} \\\n"
-                f"    --prot_emb_model {self.model_config['prot_emb_model']} \\\n"
-                f"    --max_mol_len {self.model_config['max_mol_len']} \\\n"
-                f"    --prot_max_length {self.model_config['prot_max_length']}\n\n"
-                "After preprocessing completes, rerun training.\n"
-                f"{'=' * 80}\n"
-            )
-            self.logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-
-        prepared_cache_dir = self._prepared_split_cache_dir(processed_data_path)
-
-        if self.distributed_context.is_distributed and self.global_rank != 0:
-            self._distributed_barrier("prepared split cache")
-        else:
-            if self._prepared_split_cache_ready(prepared_cache_dir, processed_data_path=processed_data_path):
-                self.logger.info("Loading prepared split cache from %s", prepared_cache_dir)
-            else:
-                self.logger.info(
-                    "Rank %s: Loading pre-processed dataset from %s",
-                    self.global_rank,
-                    processed_data_path,
-                )
-                dataset, _ = load_processed_dataset(self.selfies_path, cache_dir=cache_dir)
-                full_data = dataset["train"]
-                self.logger.info("Building prepared split cache at %s", prepared_cache_dir)
-                self._build_prepared_splits(full_data, prepared_cache_dir, processed_data_path=processed_data_path)
-            self._distributed_barrier("prepared split cache")
-
-        if not self._prepared_split_cache_ready(prepared_cache_dir, processed_data_path=processed_data_path):
-            raise FileNotFoundError(f"Prepared split cache was not created at: {prepared_cache_dir}")
-        self._load_prepared_splits(prepared_cache_dir)
-        total_samples = int(
-            self.prepared_split_metadata.get(
-                "dataset_total_samples",
-                len(self.train_data) + len(self.test_data),
-            )
-        )
-
-        self.logger.info(
-            "Dataset split: %s train, %s test samples",
-            len(self.train_data),
-            len(self.test_data),
-        )
-
-        if self._needs_generation_metrics() and self.global_rank == 0:
-            self.logger.info("Caching canonical SMILES for generation metrics...")
-            self.train_smiles_list = self._extract_smiles_list(self.train_data, drop_invalid=True)
-            self.eval_reference_smiles = self._extract_smiles_list(self.test_data, drop_invalid=True)
-
-            if not self.train_smiles_list:
-                self.logger.warning("Training data does not contain valid SMILES entries")
-            if not self.eval_reference_smiles:
-                self.logger.warning("Evaluation data does not contain valid SMILES entries")
-            self._build_train_vectors()
-        else:
-            self.train_smiles_list = []
-            self.eval_reference_smiles = []
-            self.training_vec = None
-            if not self._needs_generation_metrics():
-                self.logger.info("Skipping generation-metric SMILES/fingerprint prep for stage=%s", self.training_config["training_stage"])
-            else:
-                self.logger.info("Skipping generation-metric prep on rank %s", self.global_rank)
-        self._update_dataset_stats(total_samples=total_samples)
+        return manifest
 
     def ddp_setup(self):
-        """Initialize DDP with proper error handling and device setup."""
         self.training_runner.ddp_setup()
 
-    def preprocess_logits_for_metrics(self, logits, labels):
-        return preprocess_logits_for_metrics_fn(logits, labels, logger=self.logger)
+    @staticmethod
+    def _is_right_padded(mask) -> bool:
+        seen_padding = False
+        for value in mask:
+            if int(value) == 0:
+                seen_padding = True
+            elif seen_padding:
+                return False
+        return True
 
-    def compute_generation_eval_metrics(self, eval_dataset=None):
-        """Compute real generation metrics on the evaluation proteins."""
-        if not self._stage_has_lm():
-            return {}
-        if self.global_rank != 0:
-            return {}
+    def _validate_tokenized_contract(self) -> None:
+        train_clusters = set(self.train_data.unique("protein_cluster_50"))
+        validation_clusters = set(self.validation_data.unique("protein_cluster_50"))
+        overlap = train_clusters & validation_clusters
+        if overlap:
+            raise ValueError(f"MMseqs50 leakage in tokenized data: {len(overlap)} clusters")
 
-        target_dataset = eval_dataset or self.test_data
-        if target_dataset is None or len(target_dataset) == 0:
-            return {}
-        if "Target_FASTA" not in target_dataset.column_names:
-            self.logger.warning("Evaluation dataset missing Target_FASTA; skipping generation metrics.")
-            return {}
-
-        model = getattr(self.trainer.model, "module", self.trainer.model)
-        model_device = next(model.parameters()).device
-        sequences = list(target_dataset["Target_FASTA"])
-        sequence_counts = Counter(str(sequence) for sequence in sequences)
-        generated_batches = []
-        batch_size = self.training_config["valid_batch_size"]
-        generation_kwargs = {
-            "max_length": self.model_config["max_mol_len"],
-            "do_sample": True,
-            "temperature": 1.0,
-            "top_p": 0.9,
-            "pad_token_id": 1,
-            "bos_token_id": 1,
-            "eos_token_id": self.mol_tokenizer.eos_token_id,
+        expected = {
+            "prot_input_ids",
+            "prot_attention_mask",
+            "labels",
         }
+        for name, split in (("train", self.train_data), ("validation", self.validation_data)):
+            missing = sorted(expected.difference(split.column_names))
+            if missing:
+                raise ValueError(f"{name} split lacks tokenized fields: {missing}")
+            sample = split.select(range(min(128, len(split))))
+            if not all(self._is_right_padded(row) for row in sample["prot_attention_mask"]):
+                raise ValueError(f"{name}.prot_attention_mask is not right padded")
+            if not all(
+                self._is_right_padded([0 if value == -100 else 1 for value in row])
+                for row in sample["labels"]
+            ):
+                raise ValueError(f"{name}.labels is not right padded")
+            max_token_id = max(
+                value
+                for row in sample["labels"]
+                for value in row
+                if value != -100
+            )
+            if max_token_id >= len(self.mol_tokenizer):
+                raise ValueError(
+                    f"{name} contains molecule token {max_token_id}, outside vocabulary {len(self.mol_tokenizer)}"
+                )
 
-        cuda_devices = [model_device.index] if model_device.type == "cuda" and model_device.index is not None else []
-        with torch.no_grad():
-            with torch.random.fork_rng(devices=cuda_devices):
-                torch.manual_seed(self.training_config["split_seed"])
-                for sequence, count in sequence_counts.items():
-                    prot_input_ids, prot_attention_mask = tokenize_protein_sequences_for_inference(
-                        sequences=[sequence],
-                        prot_tokenizer=self.prot_tokenizer,
-                        prot_emb_model=self.model_config["prot_emb_model"],
-                        prot_max_length=self.model_config["prot_max_length"],
-                        device=model_device,
-                    )
-                    protein_embeddings = model.encode_protein(prot_input_ids, prot_attention_mask)
-                    remaining = count
-                    while remaining > 0:
-                        current_batch = min(batch_size, remaining)
-                        generated = model.generate_from_protein_embeddings(
-                            protein_embeddings=protein_embeddings.repeat(current_batch, 1, 1),
-                            prot_attention_mask=prot_attention_mask.repeat(current_batch, 1),
-                            **generation_kwargs,
-                        )
-                        generated_batches.append(generated.detach().cpu())
-                        remaining -= current_batch
+    def _select_generation_panel(self) -> None:
+        limit = max(0, int(self.training_config["generation_eval_proteins"]))
+        if limit == 0:
+            return
+        sequences = set(str(value) for value in self.validation_data["protein_sequence"])
+        seed = self.training_config["split_seed"]
+        ordered = sorted(
+            sequences,
+            key=lambda sequence: hashlib.sha256(f"{seed}:{sequence}".encode()).hexdigest(),
+        )
+        self.generation_sequences = ordered[:limit]
+        selected = set(self.generation_sequences)
+        panel_indices = [
+            index
+            for index, sequence in enumerate(self.validation_data["protein_sequence"])
+            if str(sequence) in selected
+        ]
+        panel = self.validation_data.select(panel_indices)
+        self.eval_reference_smiles = extract_smiles_list(panel, drop_invalid=True, logger=self.logger)
+        for sequence in self.generation_sequences:
+            sequence_indices = [
+                index
+                for index, value in enumerate(panel["protein_sequence"])
+                if str(value) == sequence
+            ]
+            self.eval_reference_smiles_by_sequence[sequence] = extract_smiles_list(
+                panel.select(sequence_indices),
+                drop_invalid=True,
+                logger=self.logger,
+            )
 
-        if not generated_batches:
+        train_limit = max(0, int(self.training_config["generation_train_reference_limit"]))
+        if train_limit:
+            count = min(train_limit, len(self.train_data))
+            indices = np.linspace(0, len(self.train_data) - 1, num=count, dtype=int)
+            train_sample = self.train_data.select(indices.tolist())
+            self.train_reference_smiles = extract_smiles_list(
+                train_sample,
+                drop_invalid=True,
+                logger=self.logger,
+            )
+            if self.train_reference_smiles:
+                self.training_vec = generate_morgan_fingerprints_parallel(
+                    smiles=self.train_reference_smiles,
+                    radius=2,
+                    nBits=1024,
+                    n_jobs=None,
+                )
+
+    def _prepare_datasets(self) -> None:
+        preprocessing_manifest = self._load_and_validate_preprocessing_manifest()
+        dataset = load_processed_dataset(self.dataset_path)
+        self.train_data = dataset["train"]
+        self.validation_data = dataset["validation"]
+        self._validate_tokenized_contract()
+        expected_split_sizes = preprocessing_manifest.get("splits", {})
+        actual_split_sizes = {
+            "train": len(self.train_data),
+            "validation": len(self.validation_data),
+        }
+        if expected_split_sizes != actual_split_sizes:
+            raise ValueError(
+                "Tokenized dataset sizes differ from preprocessing manifest: "
+                f"expected={expected_split_sizes}, actual={actual_split_sizes}"
+            )
+        if self.global_rank == 0:
+            self._select_generation_panel()
+
+        dataset_stats = {
+            "dataset_name": self.dataset_name,
+            "dataset_source_path": str(Path(self.dataset_path).resolve()),
+            "dataset_total_samples": len(self.train_data) + len(self.validation_data),
+            "train_samples": len(self.train_data),
+            "eval_samples": len(self.validation_data),
+            "train_unique_proteins": len(self.train_data.unique("protein_sequence")),
+            "eval_unique_proteins": len(self.validation_data.unique("protein_sequence")),
+            "generation_eval_proteins": len(self.generation_sequences),
+            "generation_samples_per_protein": self.training_config[
+                "generation_samples_per_protein"
+            ],
+            "split_seed": self.training_config["split_seed"],
+        }
+        self.model._config.update(dataset_stats)
+        self.logger.info("Dataset stats: %s", dataset_stats)
+
+    def _load_pretrained_weights(self, model_path: str) -> None:
+        path = Path(model_path)
+        if path.is_dir():
+            candidates = [path / "pytorch_model.bin", path / "model.safetensors"]
+            checkpoint = next((candidate for candidate in candidates if candidate.exists()), None)
+        else:
+            checkpoint = path
+        if checkpoint is None or not checkpoint.exists():
+            raise FileNotFoundError(f"No model weights found at {model_path}")
+        if checkpoint.suffix == ".safetensors":
+            from safetensors.torch import load_file
+
+            state = load_file(str(checkpoint))
+        else:
+            state = torch.load(str(checkpoint), map_location="cpu")
+        self.model.load_state_dict(state, strict=True)
+
+    def compute_generation_eval_metrics(self):
+        if self.global_rank != 0 or not self.generation_sequences:
             return {}
-
-        generated_token_ids = torch.cat(generated_batches, dim=0).numpy()
+        model = getattr(self.trainer.model, "module", self.trainer.model)
+        device = next(model.parameters()).device
+        samples_per_protein = self.training_config["generation_samples_per_protein"]
+        batches = {}
+        cuda_devices = [device.index] if device.type == "cuda" and device.index is not None else []
+        with torch.no_grad(), torch.random.fork_rng(devices=cuda_devices):
+            torch.manual_seed(self.training_config["split_seed"])
+            for sequence in self.generation_sequences:
+                prot_ids, prot_mask = tokenize_protein_sequences_for_inference(
+                    [sequence],
+                    prot_tokenizer=self.prot_tokenizer,
+                    prot_emb_model=self.model_config["prot_emb_model"],
+                    prot_max_length=self.model_config["prot_max_length"],
+                    device=device,
+                )
+                embeddings = model.encode_protein(prot_ids, prot_mask)
+                generated = model.generate_from_protein_embeddings(
+                    embeddings.repeat(samples_per_protein, 1, 1),
+                    prot_mask.repeat(samples_per_protein, 1),
+                    max_length=self.model_config["max_mol_len"],
+                    do_sample=True,
+                    temperature=1.0,
+                    top_p=0.9,
+                )
+                batches[sequence] = generated.cpu().numpy()
+        token_ids = np.concatenate(list(batches.values()), axis=0)
         metrics = compute_generation_metrics(
-            generated_token_ids=generated_token_ids,
+            generated_token_ids=token_ids,
             mol_tokenizer=self.mol_tokenizer,
             eval_reference_smiles=self.eval_reference_smiles,
-            train_smiles_list=self.train_smiles_list,
+            train_smiles_list=self.train_reference_smiles,
             training_vec=self.training_vec,
-            logger=self.logger,
         )
-        metrics["gen_count"] = int(generated_token_ids.shape[0])
-        return metrics
-
-    def _compute_pchembl_metrics(self, pchembl_predictions, pchembl_targets, group_ids=None):
-        return compute_pchembl_metrics(
-            pchembl_predictions=pchembl_predictions,
-            pchembl_targets=pchembl_targets,
-            pchembl_mean=self.pchembl_mean,
-            pchembl_std=self.pchembl_std,
-            group_ids=group_ids,
-            inputs_are_normalized=True,
-            logger=self.logger,
+        metrics.update(
+            compute_conditional_generation_metrics(
+                generated_token_ids_by_protein=batches,
+                mol_tokenizer=self.mol_tokenizer,
+                reference_smiles_by_protein=self.eval_reference_smiles_by_sequence,
+            )
         )
-
-    def compute_metrics(self, eval_pred):
-        """Compute evaluation metrics for pChEMBL prediction."""
-        try:
-            metrics = {}
-
-            if self.trainer is not None:
-                pchembl_preds, pchembl_targets, group_ids = self.trainer.get_pchembl_predictions()
-                if pchembl_preds is not None and pchembl_targets is not None:
-                    pchembl_metrics = self._compute_pchembl_metrics(pchembl_preds, pchembl_targets, group_ids)
-                    metrics.update(pchembl_metrics)
-                    self.trainer.clear_pchembl_predictions()
-
-        except Exception as exc:
-            self.logger.error("Rank %s: Error computing metrics: %s", self.global_rank, str(exc))
-            import traceback
-
-            self.logger.error("Traceback: %s", traceback.format_exc())
-            metrics = {}
-
+        metrics["gen_count"] = int(len(token_ids))
+        metrics["gen_protein_count"] = int(len(self.generation_sequences))
         return metrics
 
     def model_training(self):
-        """Execute the model training process."""
-        self.logger.info("Starting training process for run: %s", self.run_name)
+        if self.training_config["load_pretrained_model"]:
+            self._load_pretrained_weights(self.training_config["load_pretrained_model"])
+        self._prepare_datasets()
 
-        try:
-            self.model.update_trainable_components(
-                trainable_encoder=self.model_config["train_encoder_model"],
-                trainable_decoder=self.model_config["train_decoder_model"],
-                trainable_pchembl_head=self.model_config["train_pchembl_head"],
+        if self.global_rank == 0:
+            wandb.init(
+                project=os.environ.get("WANDB_PROJECT", "prot2mol"),
+                name=self.run_name,
+                config={**self.model_config, **self.training_config},
             )
-
-            if self.training_config["load_pretrained_model"]:
-                self._load_pretrained_weights(self.training_config["load_pretrained_model"])
-
-            self._prepare_datasets()
-
-            if self.global_rank == 0:
-                try:
-                    wandb.init(
-                        project="prot2mol",
-                        name=self.run_name,
-                        config={
-                            **self.model_config,
-                            **self.training_config,
-                            "dataset_name": self.run_name.split("_")[0],
-                            "global_rank": self.global_rank,
-                            "local_rank": self.local_rank,
-                            "world_size": self.distributed_context.world_size,
-                            "effective_training_mode": self.distributed_context.effective_mode,
-                        },
-                    )
-                    self.logger.info("Wandb initialized successfully on rank 0")
-                except Exception as exc:
-                    self.logger.warning("Failed to initialize wandb on rank 0: %s", exc)
-
-            self.model.train()
+        try:
             self.trainer = self.training_runner.create_trainer(
                 model=self.model,
                 train_dataset=self.train_data,
-                eval_dataset=self.test_data,
-                compute_metrics=self.compute_metrics,
+                eval_dataset=self.validation_data,
                 compute_generation_metrics=self.compute_generation_eval_metrics,
-                preprocess_logits_for_metrics=self.preprocess_logits_for_metrics,
                 run_name=self.run_name,
                 output_dir=self.pretrain_save_to,
                 training_config=self.training_config,
-                model_config=self.model_config,
             )
-            eval_results = self.training_runner.run(
-                trainer=self.trainer,
-                training_config=self.training_config,
-                output_dir=self.pretrain_save_to,
+            return self.training_runner.run(
+                self.trainer,
+                self.training_config,
+                self.pretrain_save_to,
             )
-
-            if self.global_rank == 0:
-                try:
-                    wandb.finish()
-                    self.logger.info("Wandb session finished successfully")
-                except Exception as exc:
-                    self.logger.warning("Failed to finish wandb session: %s", exc)
-
-            return eval_results
-
-        except Exception as exc:
-            self.logger.error("Error during model training: %s", str(exc), exc_info=True)
-            if self.global_rank == 0:
-                try:
-                    wandb.finish()
-                    self.logger.info("Wandb session finished due to error")
-                except Exception as wandb_error:
-                    self.logger.warning(
-                        "Failed to finish wandb session during error cleanup: %s",
-                        wandb_error,
-                    )
-            raise
+        finally:
+            if self.global_rank == 0 and wandb.run is not None:
+                wandb.finish()
 
 
 def main():
-    """Main entry point for training."""
     config = parse_arguments()
-
-    setup_logging(config.log_level)
-    logger = logging.getLogger(__name__)
-    logger.info("Starting Prot2Mol training")
-    distributed_context = resolve_distributed_context(config.training_mode)
-    logger.info("Distributed context: %s", distributed_context.to_log_fields())
-
+    context = resolve_distributed_context(config.training_mode)
+    setup_logging(config.log_level, rank=context.global_rank)
     dataset_name = validate_and_process_paths(config)
     run_name = create_run_name(config, dataset_name)
-
     save_dir = os.path.join(config.save_dir, run_name)
     os.makedirs(save_dir, exist_ok=True)
-
-    trainer = TrainingScript(
-        config=config,
-        selfies_path=config.selfies_path,
-        pretrain_save_to=save_dir,
-        dataset_name=dataset_name,
-        run_name=run_name,
-        distributed_context=distributed_context,
-    )
+    script = TrainingScript(config, save_dir, dataset_name, run_name, context)
     try:
-        if distributed_context.is_distributed:
-            trainer.ddp_setup()
-        else:
-            logger.info("Running non-distributed training mode: %s", distributed_context.effective_mode)
-        trainer.model_training()
+        if context.is_distributed:
+            script.ddp_setup()
+        script.model_training()
     finally:
-        if (
-            distributed_context.is_distributed
-            and torch.distributed.is_available()
-            and torch.distributed.is_initialized()
-        ):
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
             destroy_process_group()
 
 

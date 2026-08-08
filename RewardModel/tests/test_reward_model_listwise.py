@@ -636,6 +636,51 @@ def test_classification_only_batch_has_zero_ranking_loss_and_valid_backpropagati
     assert ranking_grad is None or ranking_grad.abs().sum() == 0
 
 
+def test_evaluation_protein_shuffle_is_deterministic_and_keeps_original_ligands():
+    examples = _tokenized_rows(group_sizes=(3, 3, 3))
+    first = RewardEvaluationDataset(examples, ranking_partition_seed=17)
+    second = RewardEvaluationDataset(examples, ranking_partition_seed=17)
+
+    for index in range(len(examples)):
+        first_item = first[index]
+        second_item = second[index]
+        original = first_item["rows"][0]
+        shuffled = first_item["protein_shuffled_rows"][0]
+        assert shuffled["target_chembl_id"] != original["target_chembl_id"]
+        assert (
+            first_item["protein_shuffled_rows"][0]["protein_input_ids"]
+            == second_item["protein_shuffled_rows"][0]["protein_input_ids"]
+        )
+
+    batch = RewardAssayListCollator()([first[index] for index in range(len(first))])
+    assert torch.equal(
+        batch["molecule_input_ids"],
+        torch.tensor(examples["molecule_input_ids"])[:, :2],
+    )
+    assert not torch.equal(
+        batch["protein_input_ids"],
+        batch["protein_shuffled_input_ids"],
+    )
+
+
+def test_single_target_evaluation_omits_protein_shuffle_pass():
+    examples = _tokenized_rows(group_sizes=(3,))
+    dataset = RewardEvaluationDataset(examples)
+    assert "protein_shuffled_rows" not in dataset[0]
+    batch = RewardAssayListCollator()([dataset[index] for index in range(len(dataset))])
+    assert "protein_shuffled_input_ids" not in batch
+
+
+def test_protein_shuffle_sensitivity_can_be_disabled_without_extra_tokens():
+    examples = _tokenized_rows(group_sizes=(3, 3))
+    dataset = RewardEvaluationDataset(
+        examples,
+        protein_shuffle_sensitivity=False,
+    )
+    batch = RewardAssayListCollator()([dataset[index] for index in range(len(dataset))])
+    assert "protein_shuffled_input_ids" not in batch
+
+
 def test_two_ligand_assay_is_classification_only():
     dataset = RewardAssayListDataset(_tokenized_rows(group_sizes=(2,)))
     batch = RewardAssayListCollator()([dataset[index] for index in range(len(dataset))])
@@ -924,13 +969,18 @@ def test_cpu_validation_is_deterministic_and_scores_each_row_once(tmp_path, monk
     second = trainer.evaluate()
     hook.remove()
 
-    assert len(forward_calls) == 2 * math.ceil(len(examples) / 4)
+    # Each evaluation scores the real protein and a deterministically shuffled
+    # protein for every molecule.
+    assert len(forward_calls) == 4 * math.ceil(len(examples) / 4)
     assert len(autocast_context_calls) == len(forward_calls)
     for key in (
         "eval_loss",
         "eval_classification_loss",
         "eval_ranking_loss",
         "eval_spearman",
+        "eval_macro_spearman",
+        "eval_weighted_spearman",
+        "eval_protein_shuffle_macro_rank_stability",
     ):
         assert first[key] == pytest.approx(second[key])
     assert first["eval_num_examples"] == len(examples)

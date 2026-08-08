@@ -18,21 +18,21 @@ def parse_arguments(argv=None):
 
     data_group = parser.add_argument_group("Data Configuration")
     data_group.add_argument(
-        "--selfies_path",
-        default="./data/papyrus/prot_comp_set_pchembl_6_protlen_1000_human_False.csv",
-        help="Path to the SELFIES dataset",
+        "--dataset_path",
+        default="./dataset/cache/prot2mol/chembl_37_mmseqs50_generation_esm2",
+        help="Path to the preprocessed ChEMBL train/validation DatasetDict",
     )
 
     model_group = parser.add_argument_group("Model Architecture")
     model_group.add_argument(
         "--prot_emb_model",
-        default="saprot",
-        choices=["prot_t5", "esm2", "saprot"],
+        default="esm2",
+        choices=["prot_t5", "esm2"],
         help="Protein embedding model to use",
     )
-    model_group.add_argument("--n_layer", type=int, default=1, help="Number of transformer layers")
-    model_group.add_argument("--n_head", type=int, default=16, help="Number of attention heads")
-    model_group.add_argument("--n_emb", type=int, default=1024, help="Embedding dimension")
+    model_group.add_argument("--protein_model_id", default=None)
+    model_group.add_argument("--decoder_model_id", default="zjunlp/MolGen-large")
+    model_group.add_argument("--conditioning_dropout", type=float, default=0.1)
     model_group.add_argument("--max_mol_len", type=int, default=256, help="Maximum molecule sequence length")
     model_group.add_argument("--prot_max_length", type=int, default=1024, help="Maximum protein sequence length")
 
@@ -59,33 +59,7 @@ def parse_arguments(argv=None):
             "'multi_node' expects multi-node torchrun."
         ),
     )
-    training_group.add_argument(
-        "--training_stage",
-        type=str,
-        default="pchembl_only",
-        choices=["lm_only", "pchembl_only", "multitask"],
-        help="Objective family to optimize during training.",
-    )
-    training_group.add_argument(
-        "--eval_split",
-        type=str,
-        default="random",
-        choices=["random", "aid"],
-        help="Validation split strategy: random or AID hold-out",
-    )
-    training_group.add_argument(
-        "--eval_split_ratio",
-        type=float,
-        default=0.01,
-        help="Fraction of data (or AIDs) held out for validation",
-    )
     training_group.add_argument("--split_seed", type=int, default=42, help="Random seed for data split reproducibility")
-    training_group.add_argument(
-        "--pchembl_huber_delta",
-        type=float,
-        default=1.0,
-        help="Huber delta for pChEMBL loss (raw pChEMBL units)",
-    )
     training_group.add_argument(
         "--train_encoder_model",
         action=argparse.BooleanOptionalAction,
@@ -93,59 +67,32 @@ def parse_arguments(argv=None):
         help="Whether to train the protein encoder model.",
     )
     training_group.add_argument(
+        "--train_projection_model",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to train the protein-to-MolGen conditioning projection.",
+    )
+    training_group.add_argument(
         "--train_decoder_model",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Whether to train the molecule decoder model.",
     )
     training_group.add_argument(
-        "--train_pchembl_head",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Whether to train the pChEMBL prediction head.",
+        "--precision",
+        choices=["auto", "bf16", "fp16", "fp32"],
+        default="auto",
     )
-    training_group.add_argument(
-        "--stop_pchembl_gradients",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="If True, pChEMBL loss will not backpropagate into encoder/decoder.",
-    )
-    training_group.add_argument(
-        "--pchembl_tf_hidden_dim",
-        type=int,
-        default=768,
-        help="Hidden dimension used by the FusionDTI-style token-fusion pChEMBL head.",
-    )
-    training_group.add_argument(
-        "--pchembl_tf_num_heads",
-        type=int,
-        default=8,
-        help="Number of attention heads in the token-fusion pChEMBL head.",
-    )
-    training_group.add_argument(
-        "--pchembl_tf_group_size",
-        type=int,
-        default=1,
-        help="Token grouping size used before token fusion in the pChEMBL head.",
-    )
-    training_group.add_argument(
-        "--pchembl_tf_agg_mode",
-        type=str,
-        default="mean",
-        choices=["cls", "mean", "mean_all_tok"],
-        help="Aggregation mode for fused protein and molecule tokens.",
-    )
-    training_group.add_argument(
-        "--pchembl_tf_dropout",
-        type=float,
-        default=0.1,
-        help="Dropout applied in the FusionDTI-style pChEMBL regression MLP.",
-    )
+    training_group.add_argument("--max_grad_norm", type=float, default=1.0)
+    training_group.add_argument("--logging_steps", type=int, default=50)
+    training_group.add_argument("--generation_eval_proteins", type=int, default=32)
+    training_group.add_argument("--generation_samples_per_protein", type=int, default=4)
+    training_group.add_argument("--generation_train_reference_limit", type=int, default=10_000)
 
     output_group = parser.add_argument_group("Output Options")
     output_group.add_argument(
         "--save_dir",
-        default="/gpfs/projects/etur29/atabey/saved_models",
+        default="./outputs/prot2mol",
         help="Directory to save trained models",
     )
     output_group.add_argument(
@@ -172,14 +119,34 @@ def parse_arguments(argv=None):
         default=None,
         help="Path to pretrained model to load weights from (for fine-tuning, resets training state)",
     )
-    output_group.add_argument(
-        "--ignore_mismatched_optimizer",
-        action="store_true",
-        default=False,
-        help="Skip loading optimizer state if it doesn't match the model (useful when architecture changed)",
-    )
-
-    return parse_args_with_config(parser, section="train", argv=argv)
+    config = parse_args_with_config(parser, section="train", argv=argv)
+    positive_values = {
+        "epoch": config.epoch,
+        "learning_rate": config.learning_rate,
+        "train_batch_size": config.train_batch_size,
+        "valid_batch_size": config.valid_batch_size,
+        "gradient_accumulation_steps": config.gradient_accumulation_steps,
+        "max_grad_norm": config.max_grad_norm,
+        "logging_steps": config.logging_steps,
+    }
+    invalid = {name: value for name, value in positive_values.items() if value <= 0}
+    if invalid:
+        raise ValueError(f"Training values must be positive: {invalid}")
+    if config.dataloader_num_workers < 0:
+        raise ValueError("dataloader_num_workers cannot be negative")
+    if config.max_mol_len < 3 or config.prot_max_length < 3:
+        raise ValueError("Token contexts must leave room for content and special tokens")
+    if config.generation_eval_proteins < 0 or config.generation_samples_per_protein < 1:
+        raise ValueError("Generation evaluation counts are invalid")
+    if not any(
+        (
+            config.train_encoder_model,
+            config.train_projection_model,
+            config.train_decoder_model,
+        )
+    ):
+        raise ValueError("At least one model component must be trainable")
+    return config
 
 
 def _resolve_run_suffix(config) -> str:
@@ -212,8 +179,8 @@ def _resolve_run_suffix(config) -> str:
 
 def validate_and_process_paths(config):
     """Validate input paths and create output directories."""
-    if not os.path.exists(config.selfies_path):
-        raise FileNotFoundError(f"SELFIES dataset not found at: {config.selfies_path}")
+    if not os.path.exists(config.dataset_path):
+        raise FileNotFoundError(f"Preprocessed dataset not found at: {config.dataset_path}")
 
     if config.resume_from_checkpoint:
         if not os.path.exists(config.resume_from_checkpoint):
@@ -227,7 +194,7 @@ def validate_and_process_paths(config):
     if config.load_pretrained_model and not os.path.exists(config.load_pretrained_model):
         raise FileNotFoundError(f"Pretrained model directory not found at: {config.load_pretrained_model}")
 
-    dataset_name = os.path.splitext(os.path.basename(config.selfies_path))[0]
+    dataset_name = os.path.basename(os.path.normpath(config.dataset_path))
     os.makedirs(config.save_dir, exist_ok=True)
     return dataset_name
 
@@ -251,18 +218,9 @@ def create_run_name(config, dataset_name):
         [
             dataset_name,
             str(config.prot_emb_model),
-            str(config.training_stage),
             str(config.train_encoder_model),
             str(config.train_decoder_model),
-            str(config.train_pchembl_head),
-            str(config.stop_pchembl_gradients),
-            str(config.pchembl_tf_hidden_dim),
-            str(config.pchembl_tf_num_heads),
-            str(config.pchembl_tf_group_size),
-            str(config.pchembl_tf_agg_mode),
-            str(config.n_layer),
-            str(config.n_head),
-            str(config.n_emb),
+            str(config.decoder_model_id),
             str(config.max_mol_len),
             str(config.prot_max_length),
             str(config.learning_rate),
@@ -276,15 +234,9 @@ def create_run_name(config, dataset_name):
     run_components = [
         _slugify_run_component(dataset_name, max_length=40),
         f"emb-{_slugify_run_component(config.prot_emb_model, max_length=12)}",
-        f"stg-{_slugify_run_component(config.training_stage, max_length=16)}",
         f"enc{int(bool(config.train_encoder_model))}",
         f"dec{int(bool(config.train_decoder_model))}",
-        f"pc{int(bool(config.train_pchembl_head))}",
-        f"spg{int(bool(config.stop_pchembl_gradients))}",
-        f"tf{config.pchembl_tf_hidden_dim}h{config.pchembl_tf_num_heads}g{config.pchembl_tf_group_size}-{_slugify_run_component(config.pchembl_tf_agg_mode, max_length=10)}",
-        f"L{config.n_layer}",
-        f"H{config.n_head}",
-        f"E{config.n_emb}",
+        f"dec-{_slugify_run_component(config.decoder_model_id, max_length=20)}",
         f"ml{config.max_mol_len}",
         f"pl{config.prot_max_length}",
         f"lr{_slugify_run_component(config.learning_rate, max_length=12)}",
@@ -300,11 +252,8 @@ def create_run_name(config, dataset_name):
     fallback_components = [
         _slugify_run_component(dataset_name, max_length=24),
         f"emb-{_slugify_run_component(config.prot_emb_model, max_length=10)}",
-        f"stg-{_slugify_run_component(config.training_stage, max_length=12)}",
         f"enc{int(bool(config.train_encoder_model))}",
         f"dec{int(bool(config.train_decoder_model))}",
-        f"pc{int(bool(config.train_pchembl_head))}",
-        f"tf{config.pchembl_tf_hidden_dim}h{config.pchembl_tf_num_heads}",
         f"lr{_slugify_run_component(config.learning_rate, max_length=10)}",
         f"bs{config.train_batch_size}",
         _slugify_run_component(run_suffix, max_length=20),
@@ -313,12 +262,14 @@ def create_run_name(config, dataset_name):
     return "_".join(fallback_components)
 
 
-def setup_logging(log_level):
+def setup_logging(log_level, rank: int = 0):
     """Configure logging for the training process."""
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    rank_suffix = f"_rank{rank}" if rank else ""
     handlers = [
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f"training_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
+        logging.FileHandler(f"training_{timestamp}{rank_suffix}.log"),
     ]
     logging.basicConfig(
         level=numeric_level,

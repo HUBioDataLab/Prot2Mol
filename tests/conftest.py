@@ -10,12 +10,17 @@ if ROOT not in sys.path:
 
 
 class DummyBatchTokenizer:
-    def __init__(self, pad_token_id=0, bos_token_id=1, eos_token_id=2):
+    def __init__(self, pad_token_id=0, bos_token_id=1, eos_token_id=2, vocab_size=16):
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
         self.added_tokens_decoder = {0: "<pad>", 1: "<bos>", 2: "<eos>", 3: "C"}
         self.calls = []
+        self.padding_side = "right"
+        self.vocab_size = vocab_size
+
+    def __len__(self):
+        return self.vocab_size
 
     def batch_encode_plus(
         self,
@@ -45,6 +50,9 @@ class DummyBatchTokenizer:
             "attention_mask": torch.tensor(mask, dtype=torch.long),
         }
 
+    def __call__(self, *args, **kwargs):
+        return self.batch_encode_plus(*args, **kwargs)
+
     def add_tokens(self, tokens):
         start = len(self.added_tokens_decoder)
         for i, tok in enumerate(tokens):
@@ -52,6 +60,9 @@ class DummyBatchTokenizer:
 
     def decode(self, token_ids, skip_special_tokens=True):
         return "[C]"
+
+    def batch_decode(self, token_ids, skip_special_tokens=True, **kwargs):
+        return ["[C]" for _ in token_ids]
 
 
 class DummyEncoderModel(torch.nn.Module):
@@ -71,6 +82,20 @@ class DummyEncoderModel(torch.nn.Module):
 class DummyEncoderObj:
     def __init__(self, hidden_size=8):
         self.model = DummyEncoderModel(hidden_size=hidden_size)
+
+
+class DummyProteinEncoder(torch.nn.Module):
+    def __init__(self, hidden_size=8):
+        super().__init__()
+        self.model = torch.nn.Embedding(32, hidden_size)
+        self._hidden_size = hidden_size
+
+    @property
+    def hidden_size(self):
+        return self._hidden_size
+
+    def forward(self, input_ids, attention_mask):
+        return self.model(input_ids)
 
 
 class DummyDecoder(torch.nn.Module):

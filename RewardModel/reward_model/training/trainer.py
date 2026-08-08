@@ -453,6 +453,7 @@ class RewardModelTrainer(Trainer):
         gathered_groups: list[torch.Tensor] = []
         gathered_example_indices: list[torch.Tensor] = []
         gathered_cosines: list[torch.Tensor] = []
+        gathered_protein_shuffled_scores: list[torch.Tensor] = []
         for batch in dataloader:
             batch = self._prepare_inputs(batch)
             with torch.no_grad(), self.compute_loss_context_manager():
@@ -477,6 +478,30 @@ class RewardModelTrainer(Trainer):
             gathered_example_indices.append(example_indices.cpu())
             if len(gathered) == 7:
                 gathered_cosines.append(gathered[6].cpu())
+            if (
+                bool(
+                    getattr(
+                        self.args,
+                        "reward_protein_shuffle_sensitivity",
+                        True,
+                    )
+                )
+                and "protein_shuffled_input_ids" in batch
+            ):
+                with torch.no_grad(), self.compute_loss_context_manager():
+                    shuffled_outputs = model(
+                        protein_input_ids=batch["protein_shuffled_input_ids"],
+                        protein_attention_mask=batch[
+                            "protein_shuffled_attention_mask"
+                        ],
+                        molecule_input_ids=batch["molecule_input_ids"],
+                        molecule_attention_mask=batch["molecule_attention_mask"],
+                        return_dict=True,
+                    )
+                shuffled_scores = self.accelerator.gather_for_metrics(
+                    shuffled_outputs.ranking_score.detach()
+                )
+                gathered_protein_shuffled_scores.append(shuffled_scores.cpu())
 
         if was_training:
             model.train()
@@ -490,6 +515,11 @@ class RewardModelTrainer(Trainer):
         evaluation_example_indices = torch.cat(gathered_example_indices)
         cosine_similarities = (
             torch.cat(gathered_cosines) if gathered_cosines else None
+        )
+        protein_shuffled_scores = (
+            torch.cat(gathered_protein_shuffled_scores)
+            if gathered_protein_shuffled_scores
+            else None
         )
         if (ranking_group_ids < 0).any():
             raise RuntimeError("Evaluation observations must have stable assay group ids")
@@ -509,6 +539,10 @@ class RewardModelTrainer(Trainer):
         ranking_group_ids = ranking_group_ids.index_select(0, stable_order)
         if cosine_similarities is not None:
             cosine_similarities = cosine_similarities.index_select(0, stable_order)
+        if protein_shuffled_scores is not None:
+            protein_shuffled_scores = protein_shuffled_scores.index_select(
+                0, stable_order
+            )
 
         model_config = self.model.config
         metrics, assay_records = compute_joint_evaluation_metrics(
@@ -518,6 +552,13 @@ class RewardModelTrainer(Trainer):
             pchembl_values=pchembl_values,
             ranking_group_ids=ranking_group_ids,
             group_id_names=active_eval_dataset.group_ids,
+            activity_types=(
+                list(active_eval_dataset.example_dataset["activity_type"])
+                if "activity_type"
+                in active_eval_dataset.example_dataset.column_names
+                else ["Unknown"] * len(active_eval_dataset)
+            ),
+            protein_shuffled_scores=protein_shuffled_scores,
             classification_loss_weight=model_config.classification_loss_weight,
             ranking_loss_weight=model_config.ranking_loss_weight,
             bce_pos_weight=model_config.bce_pos_weight,
@@ -697,6 +738,9 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         training_args.length_bucket_size_multiplier = config.length_bucket_size_multiplier
         training_args.reward_ranking_score_diagnostics = (
             config.ranking_score_diagnostics
+        )
+        training_args.reward_protein_shuffle_sensitivity = (
+            config.protein_shuffle_sensitivity
         )
         return training_args
     except ImportError as exc:

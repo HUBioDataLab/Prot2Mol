@@ -1,9 +1,5 @@
-"""Inference pipelines for generation and pChEMBL prediction."""
+"""Inference pipelines for protein-conditioned molecule generation."""
 
-from .predict_pchembl import PChemblPredictor
 from .produce_molecules import MoleculeGenerator
 
-__all__ = [
-    "PChemblPredictor",
-    "MoleculeGenerator",
-]
+__all__ = ["MoleculeGenerator"]

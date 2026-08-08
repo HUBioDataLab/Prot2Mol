@@ -20,9 +20,11 @@ from reward_model.training import (
     RewardModelTrainer,
     RewardTrainerConfig,
     build_pair_records,
+    compute_activity_type_metrics,
     compute_classification_metrics,
     compute_groupwise_spearman,
     compute_pairwise_accuracy,
+    compute_protein_shuffle_sensitivity,
     compute_ranking_score_diagnostics,
     create_training_arguments,
     get_saved_pair_dataset_paths,
@@ -237,7 +239,42 @@ def test_metric_helpers_compute_expected_values():
         min_group_size=3,
     )
     assert spearman_metrics["eval_spearman"] == pytest.approx((3.0 * 1.0 + 4.0 * 0.8) / 7.0)
+    assert spearman_metrics["eval_weighted_spearman"] == pytest.approx(
+        spearman_metrics["eval_spearman"]
+    )
+    assert spearman_metrics["eval_macro_spearman"] == pytest.approx(0.9)
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
+
+
+def test_activity_type_metrics_separate_potency_and_non_potency_assays():
+    metrics = compute_activity_type_metrics(
+        probabilities=[0.1, 0.8, 0.9, 0.8, 0.4, 0.2],
+        labels=[0, 1, 1, 1, 0, 0],
+        activity_types=["Potency", "Potency", "Potency", "Binding", "Binding", "Binding"],
+        group_ids=["T1__A1"] * 3 + ["T2__A2"] * 3,
+        ranking_scores=[1.0, 2.0, 3.0, 3.0, 2.0, 1.0],
+        pchembl_values=[4.0, 5.0, 6.0, 4.0, 5.0, 6.0],
+        min_pchembl_span=0.5,
+    )
+
+    assert metrics["eval_potency_qhts_num_examples"] == 3
+    assert metrics["eval_non_potency_num_examples"] == 3
+    assert metrics["eval_potency_qhts_macro_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_non_potency_macro_spearman"] == pytest.approx(-1.0)
+
+
+def test_protein_shuffle_sensitivity_reports_rank_collapse():
+    metrics = compute_protein_shuffle_sensitivity(
+        group_ids=["T1__A1"] * 3 + ["T2__A2"] * 4,
+        baseline_scores=[1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0],
+        shuffled_scores=[3.0, 2.0, 1.0, 4.0, 3.0, 2.0, 1.0],
+        pchembl_values=[4.0, 5.0, 6.0, 4.0, 5.0, 6.0, 7.0],
+        min_pchembl_span=0.5,
+    )
+
+    assert metrics["eval_protein_shuffled_macro_spearman"] == pytest.approx(-1.0)
+    assert metrics["eval_protein_shuffle_macro_spearman_drop"] == pytest.approx(2.0)
+    assert metrics["eval_protein_shuffle_macro_rank_stability"] == pytest.approx(-1.0)
 
 
 def test_ranking_score_diagnostics_measure_cosine_margin_and_entropy():
@@ -827,7 +864,7 @@ def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pair
     assert summary["test_ranking_lists"] == 0
 
 
-def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path, monkeypatch):
+def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_and_test(tmp_path, monkeypatch):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
 
     train_examples = Dataset.from_list(
@@ -916,6 +953,9 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
             },
         ]
     )
+    val_examples = val_examples.add_column(
+        "activity_type", ["Binding"] * len(val_examples)
+    )
     test_examples = Dataset.from_list(
         [
             {
@@ -932,6 +972,9 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
                 "molecule_attention_mask": [1, 1, 0, 0],
             }
         ]
+    )
+    test_examples = test_examples.add_column(
+        "activity_type", ["Potency"] * len(test_examples)
     )
 
     train_examples.save_to_disk(split_paths["train"])
@@ -994,9 +1037,11 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
         def save_model(self, output_dir):
             captured["save_model_output_dir"] = output_dir
 
-        def evaluate(self):
-            captured["evaluate_called"] = True
-            return {"eval_loss": 0.5}
+        def evaluate(self, eval_dataset=None, metric_key_prefix="eval"):
+            captured.setdefault("evaluate_calls", []).append(
+                (eval_dataset, metric_key_prefix)
+            )
+            return {f"{metric_key_prefix}_loss": 0.5}
 
     monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
 
@@ -1017,7 +1062,11 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     )
 
     assert captured["train_called"] is True
-    assert captured["evaluate_called"] is True
+    assert len(captured["evaluate_calls"]) == 2
+    assert captured["evaluate_calls"][0] == (None, "eval")
+    test_eval_dataset, test_prefix = captured["evaluate_calls"][1]
+    assert len(test_eval_dataset) == 1
+    assert test_prefix == "test"
     assert captured["train_dataset_len"] == 1
     assert captured["eval_dataset_len"] == 3
     assert captured["eval_dataset"].ranking_max_ligands == 16
@@ -1034,6 +1083,7 @@ def test_train_reward_model_from_config_uses_train_and_val_splits_only(tmp_path,
     assert summary["train_classification_examples"] == 3
     assert summary["init_from_checkpoint"] == str(warm_start.resolve())
     assert summary["optimizer_state_restored"] is False
+    assert summary["test_metrics"]["test_loss"] == pytest.approx(0.5)
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):
@@ -1042,6 +1092,12 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
     train_examples = _pair_ready_examples().select([0, 1])
     val_examples = _pair_ready_examples().select([2, 3])
     test_examples = _pair_ready_examples().select([0])
+    val_examples = val_examples.add_column(
+        "activity_type", ["Binding"] * len(val_examples)
+    )
+    test_examples = test_examples.add_column(
+        "activity_type", ["Potency"] * len(test_examples)
+    )
     val2_examples = Dataset.from_list(
         [
             {
@@ -1127,7 +1183,9 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
         def save_model(self, output_dir):
             captured["save_model_output_dir"] = output_dir
 
-        def evaluate(self):
+        def evaluate(self, eval_dataset=None, metric_key_prefix="eval"):
+            if metric_key_prefix == "test":
+                return {"test_loss": 0.6}
             return {"eval_loss": 0.5, "eval_val2_loss": 0.4}
 
     monkeypatch.setattr("reward_model.training.entry.RewardModelTrainer", _FakeTrainer)
@@ -1139,3 +1197,4 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
     assert captured["val2_eval_dataset_len"] == 2
     assert summary["val2_examples"] == 2
     assert summary["eval_metrics"]["eval_val2_loss"] == pytest.approx(0.4)
+    assert summary["test_metrics"]["test_loss"] == pytest.approx(0.6)

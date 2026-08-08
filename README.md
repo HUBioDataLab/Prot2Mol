@@ -1,14 +1,16 @@
 # Prot2Mol
 
-Prot2Mol is a protein-conditioned molecular design framework based on an encoder-decoder architecture with an auxiliary affinity head. The model maps protein sequences to molecular SELFIES and supports pChEMBL prediction for generated or external compounds.
+Prot2Mol is a protein-conditioned molecular design framework based on an encoder-decoder architecture. The generator maps protein sequences to molecular SELFIES. Protein-ligand scoring and ranking are handled separately by the standalone `RewardModel`.
 
 ## Scientific Scope
 
-- Protein encoder: `ProtT5`, `ESM2`, or `SaProt`.
-- Molecule decoder: GPT-2 with cross-attention over protein representations.
+- Protein encoder: `ESM2` (default) or `ProtT5`, using the same checkpoint for
+  model and tokenizer.
+- Molecule decoder: the pretrained MolGen-large BART decoder with cross-attention
+  over projected, normalized per-residue protein representations.
 - Molecule representation: SELFIES.
-- Auxiliary task: pChEMBL regression head built with FusionDTI-style token fusion plus an MLP regressor.
-- Multi-task training: language-model objective + pChEMBL objective, with optional blocking of pChEMBL gradients into encoder/decoder.
+- Training objective: molecule language modeling conditioned on protein token representations.
+- Reward objective: standalone listwise ranking and activity classification in `RewardModel/`.
 
 ## Installation
 
@@ -23,15 +25,16 @@ pip install -r requirements.txt
 ```text
 prot2mol/
   main.py                 # Single meta-entrypoint
-  configs/                # YAML templates (train/generate/predict)
+  configs/                # YAML templates (train/generate)
   core/                   # Core model and protein encoders
   training/               # Training pipeline, trainer, metrics, services
-  inference/              # Generation and pChEMBL prediction pipelines
+  inference/              # Molecule generation pipeline
   data/                   # Shared data/tokenization pipeline
   io/                     # HF/model/config I/O utilities
   chem/                   # Cheminformatics utilities and fingerprints
 data_processing/
-  preprocess_dataset.py   # One-time preprocessing into HF disk cache
+  build_chembl_generation_dataset.py # Strict-positive MMseqs50 train/validation split
+  preprocess_dataset.py              # One-time tokenization into HF disk cache
 ```
 
 ## Unified Command Interface
@@ -46,14 +49,12 @@ Available commands:
 
 - `train`
 - `generate`
-- `predict`
 
 Examples:
 
 ```bash
 python prot2mol/main.py train --help
 python prot2mol/main.py generate --help
-python prot2mol/main.py predict --help
 ```
 
 ## YAML-Based Configuration
@@ -63,11 +64,9 @@ Each command supports `--config` to load arguments from YAML.
 - Supported template files:
   - `prot2mol/configs/train.yaml`
   - `prot2mol/configs/generate.yaml`
-  - `prot2mol/configs/predict.yaml`
 - Expected top-level sections in YAML:
   - `train` for `train`
   - `generate` for `generate`
-  - `predict` for `predict`
 
 Argument precedence is:
 
@@ -79,19 +78,33 @@ This allows concise runs with selective CLI overrides.
 
 ## Recommended Workflow
 
-### 1. Preprocess Dataset (one-time per dataset)
+### 1. Build the ChEMBL37 generation split
 
 ```bash
-python data_processing/preprocess_dataset.py \
-  --selfies_path /path/to/dataset.csv \
-  --prot_emb_model saprot \
-  --max_mol_len 256 \
-  --prot_max_length 1024
+python data_processing/build_chembl_generation_dataset.py
 ```
 
-This builds tokenized data in the HF disk cache and stores pChEMBL normalization statistics used during training/evaluation.
+This reads the canonical ChEMBL37 binding table, retains only rows with
+`pchembl_value > 6.0`, and assigns complete MMseqs50 clusters to a 95% train / 5%
+validation split. Duplicate protein-canonical-SMILES pairs are collapsed before
+splitting, while their source-row and assay counts are preserved as provenance.
+Examples that exceed the ESM2 or MolGen context are filtered explicitly; the
+pipeline deliberately writes no test split and never silently truncates targets.
 
-### 2. Train
+### 2. Preprocess once
+
+```bash
+python data_processing/preprocess_dataset.py
+```
+
+The matched MolGen tokenizer uses right padding and is checked for unknown-token
+coverage and encoded length across both splits; the protein tokenizer also uses
+right padding. Raw provenance columns remain available for bounded generation
+evaluation, while the training collator passes only tensors to the model.
+Training verifies this preprocessing manifest against the configured encoder,
+decoder, tokenizer contexts, and split sizes before loading any weights.
+
+### 3. Train
 
 ```bash
 python prot2mol/main.py train \
@@ -106,21 +119,19 @@ python prot2mol/main.py train \
   --epoch 20 --learning_rate 5e-6
 ```
 
-Frozen encoder-decoder fine-tuning for pChEMBL only:
+Warm the learned protein projection and molecular decoder with a frozen protein
+encoder:
 
 ```bash
 python prot2mol/main.py train \
   --config prot2mol/configs/train.yaml \
-  --train_encoder_model false \
-  --train_decoder_model false \
-  --train_pchembl_head true \
-  --stop_pchembl_gradients true \
+  --no-train_encoder_model \
+  --train_projection_model \
+  --train_decoder_model \
   --load_pretrained_model /path/to/encoder_decoder_checkpoint
 ```
 
-The pChEMBL head uses protein token embeddings from the frozen encoder and decoder last hidden states from the frozen molecule decoder, then applies FusionDTI-style token fusion followed by an MLP regressor. The trained checkpoint writes a `config.json` with the full head architecture so `predict` and generation-time pChEMBL scoring can reload the same setup automatically.
-
-### 2.1 Selectable Training Execution Mode
+### 3.1 Selectable Training Execution Mode
 
 `train` supports explicit execution mode control through `--training_mode` (or `train.training_mode` in YAML):
 
@@ -162,98 +173,33 @@ torchrun \
   --training_mode multi_node
 ```
 
-### 3. Generate Molecules
+### 4. Generate Molecules
 
 ```bash
 python prot2mol/main.py generate \
   --config prot2mol/configs/generate.yaml
 ```
 
-Generation-time pChEMBL scoring and `generate --mode prediction` now support the same
-target-resolution inputs as `predict`:
-- `Target_FASTA`
-- `UniProt_ID`
-- `Target_CHEMBL_ID`
-- or `--prot_id` as a single-target fallback
-
-Both generation-time scoring and `generate --mode prediction` can also save the same
-predicted pChEMBL distribution plot, plus an optional comparison plot against the real
-training-set pChEMBL distribution for the target protein.
-
-### 4. Predict pChEMBL
-
-```bash
-python prot2mol/main.py predict \
-  --config prot2mol/configs/predict.yaml
-```
-
-Reproduce validation-split predictions (same split strategies used in training):
-
-```bash
-python prot2mol/main.py predict \
-  --config prot2mol/configs/predict.yaml \
-  --reproduce auto
-```
-
-Use `--reproduce random` or `--reproduce aid` to override the saved split mode manually.
-When `--reproduce auto` is used, the checkpoint `config.json` provides
-`eval_split`, `eval_split_ratio`, and `split_seed`.
-
-Score an arbitrary batch of protein-ligand pairs and save the predicted pChEMBL
-distribution plot:
-
-```bash
-python prot2mol/main.py predict \
-  --config prot2mol/configs/predict.yaml
-```
-
-Compare the scored batch against the real training-set pChEMBL distribution for a
-specific protein target:
-
-```bash
-python prot2mol/main.py predict \
-  --config prot2mol/configs/predict.yaml \
-  --compare_protein_id CHEMBL4282
-```
-
-If `predict.reference_dataset` is omitted, the script falls back to the checkpoint
-`dataset_source_path` when available.
-If local model caches are not under the default path, set `predict.models_base` in YAML
-or export `MODELS_BASE_PATH` to the directory that contains `models--zjunlp--MolGen-large`.
-For ID-based target resolution, set:
-- `predict.chembl_uniprot_mapping_path` (CHEMBL -> UniProt mapping file)
-- `predict.protein_targets_path` (Papyrus protein targets TSV with `target_id` and `Sequence`)
-Output CSVs automatically exclude internal columns used only for preprocessing/inference
-(e.g., `Target_FASTA`, token IDs/masks, labels, and train flags).
+Generation accepts an explicit `generate.protein_sequence`, or selects a target from
+the raw ChEMBL generation Parquets using `generate.protein_id`. Use `RewardModel/`
+to score generated protein-ligand pairs. Final generator evaluation reports
+reference similarity and exact recovery within each protein's own validation set,
+then macro-averages across proteins; references are never pooled across targets.
 
 ## Minimal Data Requirements
 
-### Training dataset CSV
+### Raw generation Parquets
 
 Required columns:
 
-- `Target_FASTA`
-- `Compound_SELFIES`
-- `pchembl_value_Median`
+- `protein_sequence`
+- `compound_selfies`
+- `smiles`
+- `protein_cluster_50`
+- `pchembl_value` (strictly greater than 6.0)
 
-Optional columns (used for advanced split/ranking metrics):
-
-- `AID`
-- `Target_ID`
-
-### Prediction input CSV (`predict`)
-
-Required:
-
-- molecule column (`smiles`/`Compound_SMILES`/`selfies`/`Compound_SELFIES`, etc.)
-
-Target specification:
-
-- either `Target_FASTA`
-- or `UniProt_ID` (resolved as `<UniProt>_WT` in protein target TSV)
-- or `Target_CHEMBL_ID` (resolved via CHEMBL->UniProt mapping, then `<UniProt>_WT`)
-
-For `--reproduce aid`, include `AID` in the input CSV.
+The generator uses pChEMBL only to select positive training examples; affinity is
+not a model target.
 
 ## Citation
 

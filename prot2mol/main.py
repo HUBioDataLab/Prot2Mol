@@ -3,7 +3,6 @@
 Usage:
   python prot2mol/main.py train [args...]
   python prot2mol/main.py generate [args...]
-  python prot2mol/main.py predict [args...]
 """
 
 import importlib
@@ -17,7 +16,6 @@ if PROJECT_ROOT not in sys.path:
 COMMANDS = {
     "train": "prot2mol.training.pretrain",
     "generate": "prot2mol.inference.produce_molecules",
-    "predict": "prot2mol.inference.predict_pchembl",
 }
 
 
@@ -27,15 +25,12 @@ def _print_help() -> None:
     print("Commands:")
     print("  train     Run training pipeline")
     print("  generate  Run molecule generation pipeline")
-    print("  predict   Run pChEMBL prediction pipeline")
     print("")
     print("Examples:")
     print("  python prot2mol/main.py train --help")
     print("  python prot2mol/main.py train --config prot2mol/configs/train.yaml")
     print("  python prot2mol/main.py generate --help")
     print("  python prot2mol/main.py generate --config prot2mol/configs/generate.yaml")
-    print("  python prot2mol/main.py predict --help")
-    print("  python prot2mol/main.py predict --config prot2mol/configs/predict.yaml")
 
 
 def _dispatch(command: str, args):

@@ -1,191 +1,120 @@
-import logging
+"""Protein encoder loading and sequence tokenization contracts."""
+
+from __future__ import annotations
+
 import re
+from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
-import numpy as np
 import torch
-from transformers import AutoTokenizer, EsmForMaskedLM, EsmModel, T5EncoderModel, T5Tokenizer
+import torch.nn as nn
+from transformers import AutoModel, AutoTokenizer, T5EncoderModel, T5Tokenizer
 
 from ..io.hf_utils import resolve_model_path
 
-logger = logging.getLogger(__name__)
-_NON_STD_AA = re.compile(r"[UZOB]")
-def count_trainable_parameters(model):
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-    params = sum([np.prod(p.size()) for p in model_parameters])
-    return params
 
-class ProteinEncoder:
-    """Base class for protein encoders"""
-    def __init__(self, max_length: int = 1000, active: bool = False):
-        self.model = None
-        self.max_length = max_length
-        
-        # Set model training mode based on freeze parameter
-        if self.model is not None:
-            self.model.train(mode=active)
-            if not active:
-                for param in self.model.parameters():
-                    param.requires_grad = False
-
-    def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        raise NotImplementedError
-
-class ProtT5Encoder(ProteinEncoder):
-    def __init__(self, model_name: str = "Rostlab/prot_t5_xl_uniref50", max_length: int = 1000,
-                 active: bool = True):
-        super().__init__(max_length, active)
-        # Use local path if it contains our local models directory structure
-        if "Rostlab" in model_name and not model_name.startswith("/"):
-            model_path = resolve_model_path("Rostlab--prot_t5_xl_uniref50")
-        else:
-            model_path = model_name
-        self.model = T5EncoderModel.from_pretrained(model_path)
-        if active is True:
-            self.model.train()
-            logger.info("ProtT5 encoder set to training mode")
-        elif active is False:
-            self.model.eval()
-            for param in self.model.parameters():
-                param.requires_grad = False
-            logger.info("ProtT5 encoder frozen (eval mode)")
-        self.check_model_trainability()
-    def check_model_trainability(self):
-        """Check trainability status of both encoder and main model"""
-        # Check encoder model
-        encoder_trainable_params = count_trainable_parameters(self.model)
-        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
-
-    def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        
-        outputs = self.model(input_ids=sequences, attention_mask=attention_mask)
-
-        return outputs.last_hidden_state
-
-class ESM2Encoder(ProteinEncoder):
-    def __init__(self, model_name: str = "facebook/esm2_t33_650M_UR50D", max_length: int = 1000,
-                 device: str = "cuda" if torch.cuda.is_available() else "cpu",
-                 active: bool = True):
-        super().__init__(max_length, active)
-        # Use local path if it contains our local models directory structure
-        if "facebook" in model_name and not model_name.startswith("/"):
-            model_path = resolve_model_path("facebook--esm2_t33_650M_UR50D")
-        else:
-            model_path = model_name
-        self.model = EsmModel.from_pretrained(model_path)
+_NON_STANDARD_AMINO_ACIDS = re.compile(r"[UZOB]")
 
 
-        # Set model training mode and freeze parameters after initialization
-        if active is False:
-            self.model.eval()
-            for param in self.model.parameters():
-                param.requires_grad = False
-            logger.info("ESM2 encoder frozen (eval mode)")
-        elif active is True:
-            self.model.train()
-            logger.info("ESM2 encoder set to training mode")
-        self.check_model_trainability()  
-    def check_model_trainability(self):
-        """Check trainability status of both encoder and main model"""
-        # Check encoder model
-        encoder_trainable_params = count_trainable_parameters(self.model)
-        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
+@dataclass(frozen=True)
+class ProteinEncoderSpec:
+    model_id: str
+    family: str
 
-    def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
-        input_ids = sequences
+PROTEIN_ENCODERS = {
+    "esm2": ProteinEncoderSpec(
+        model_id="facebook/esm2_t33_650M_UR50D",
+        family="esm",
+    ),
+    "prot_t5": ProteinEncoderSpec(
+        model_id="Rostlab/prot_t5_xl_uniref50",
+        family="t5",
+    ),
+}
 
-        
 
+class ProteinEncoder(nn.Module):
+    """Thin registered wrapper around a Hugging Face protein encoder."""
+
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.model = model
+
+    @property
+    def hidden_size(self) -> int:
+        config = self.model.config
+        hidden_size = getattr(config, "hidden_size", None)
+        if hidden_size is None:
+            hidden_size = getattr(config, "d_model", None)
+        if hidden_size is None:
+            raise ValueError(f"Cannot infer hidden size from {type(config).__name__}")
+        return int(hidden_size)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        if hasattr(outputs, "last_hidden_state"):
+            return outputs.last_hidden_state
+        hidden_states = getattr(outputs, "hidden_states", None)
+        if hidden_states:
+            return hidden_states[-1]
+        raise ValueError(f"Unsupported encoder output type: {type(outputs).__name__}")
 
-        return outputs.last_hidden_state
 
-class SaProtEncoder(ProteinEncoder):
-    def __init__(self, model_name: str = "westlake-repl/SaProt_650M_AF2", max_length: int = 1000,
-                 active: bool = True):
-        super().__init__(max_length, active)
-        # Use local path if it contains our local models directory structure
-        if "westlake-repl" in model_name and not model_name.startswith("/"):
-            model_path = resolve_model_path("westlake-repl--SaProt_1.3B_AF2")
-        else:
-            model_path = model_name
-        self.model = EsmForMaskedLM.from_pretrained(model_path)
-        
-        # Set model training mode and freeze parameters after initialization
+def resolve_protein_model_id(model_name: str, model_id: Optional[str] = None) -> str:
+    if model_name not in PROTEIN_ENCODERS:
+        choices = ", ".join(sorted(PROTEIN_ENCODERS))
+        raise ValueError(f"Unsupported protein encoder '{model_name}'. Choose one of: {choices}")
+    return model_id or PROTEIN_ENCODERS[model_name].model_id
 
-        if active is False:
-            self.model.eval()
-            for param in self.model.parameters():
-                param.requires_grad = False
-        elif active is True:
-            self.model.train()
-        self.check_model_trainability() 
-    def check_model_trainability(self):
-        """Check trainability status of both encoder and main model"""
-        # Check encoder model
-        encoder_trainable_params = count_trainable_parameters(self.model)
-        logger.info("Encoder trainable parameters: %s", f"{encoder_trainable_params:,}")
 
-    def encode(self, sequences: list, attention_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def get_protein_encoder(
+    model_name: str,
+    model_id: Optional[str] = None,
+    active: bool = True,
+) -> ProteinEncoder:
+    """Load the selected encoder; tokenizer and model always share one checkpoint."""
 
-        input_ids = sequences
-        
-        
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+    resolved_id = resolve_protein_model_id(model_name, model_id)
+    model_path = resolve_model_path(resolved_id)
+    if PROTEIN_ENCODERS[model_name].family == "t5":
+        model = T5EncoderModel.from_pretrained(model_path)
+    else:
+        model = AutoModel.from_pretrained(model_path)
+    encoder = ProteinEncoder(model)
+    for parameter in encoder.parameters():
+        parameter.requires_grad = bool(active)
+    encoder.train(bool(active))
+    return encoder
 
-        # Return the last hidden state for consistency with other encoders
-        return outputs.hidden_states[-1]
 
-def get_protein_encoder(model_name: str, max_length: int = 1000, 
-                       active: bool = True) -> ProteinEncoder:
-    """Factory function to get the appropriate protein encoder
-    
-    Args:
-        model_name: Name of the encoder model to use
-        max_length: Maximum sequence length
-        active: Whether to activate model parameters (also sets training mode accordingly)
-    """
-    encoders = {
-        "prot_t5": ProtT5Encoder,
-        "esm2": ESM2Encoder,
-        "saprot": SaProtEncoder,
-    }
-    
-    if model_name not in encoders:
-        raise ValueError(f"Unsupported protein encoder model: {model_name}. Available models: {list(encoders.keys())}")
-    
-    return encoders[model_name](max_length=max_length, active=active)
+def get_protein_tokenizer(model_name: str, model_id: Optional[str] = None):
+    """Lazily load only the tokenizer matching the selected encoder."""
+
+    resolved_id = resolve_protein_model_id(model_name, model_id)
+    model_path = resolve_model_path(resolved_id)
+    if PROTEIN_ENCODERS[model_name].family == "t5":
+        tokenizer = T5Tokenizer.from_pretrained(
+            model_path,
+            do_lower_case=False,
+            legacy=True,
+            clean_up_tokenization_spaces=True,
+        )
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.padding_side = "right"
+    return tokenizer
+
 
 def format_protein_sequence(sequence: str, model_name: str) -> str:
-    """Normalize non-standard amino acids and format for tokenizer."""
-    cleaned = _NON_STD_AA.sub("X", sequence)
+    """Normalize plain FASTA for the selected sequence encoder."""
+
+    sequence = str(sequence).strip().upper()
+    cleaned = _NON_STANDARD_AMINO_ACIDS.sub("X", sequence)
     if model_name == "prot_t5":
-        return " ".join(list(cleaned))
+        return " ".join(cleaned)
     return cleaned
 
 
 def format_protein_sequences(sequences: Iterable[str], model_name: str) -> List[str]:
-    """Vectorized wrapper for format_protein_sequence."""
-    return [format_protein_sequence(seq, model_name) for seq in sequences]
-
-def get_protein_tokenizer(model_name: str):
-    tokenizers = {
-        "prot_t5": T5Tokenizer.from_pretrained(
-            resolve_model_path("Rostlab--prot_t5_xl_uniref50"),
-            do_lower_case=False, 
-            legacy=True, 
-            clean_up_tokenization_spaces=True
-        ),
-        "esm2": AutoTokenizer.from_pretrained(resolve_model_path("facebook--esm2_t36_3B_UR50D")),
-        "saprot": AutoTokenizer.from_pretrained(resolve_model_path("westlake-repl--SaProt_1.3B_AF2")),
-    }
-    return tokenizers[model_name]
-
-def get_encoder_size(model_name: str):
-    ENCODER_DIMS = {
-    "prot_t5": 1024,
-    "esm2": 1280,
-    "saprot": 1280
-    }
-    return ENCODER_DIMS[model_name]
+    return [format_protein_sequence(sequence, model_name) for sequence in sequences]

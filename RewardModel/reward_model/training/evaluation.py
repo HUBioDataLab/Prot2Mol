@@ -253,6 +253,8 @@ def compute_joint_evaluation_metrics(
     pchembl_values: torch.Tensor,
     ranking_group_ids: torch.Tensor,
     group_id_names: Sequence[str],
+    activity_types: Sequence[str] | None = None,
+    protein_shuffled_scores: torch.Tensor | None = None,
     classification_loss_weight: float,
     ranking_loss_weight: float,
     bce_pos_weight: float,
@@ -279,6 +281,17 @@ def compute_joint_evaluation_metrics(
         == group_indices.numel()
     ):
         raise ValueError("evaluation tensors must contain the same number of observations")
+    if activity_types is not None and len(activity_types) != logits.numel():
+        raise ValueError("activity_types must align with evaluation observations")
+    shuffled_scores = None
+    if protein_shuffled_scores is not None:
+        shuffled_scores = protein_shuffled_scores.reshape(-1).detach().cpu().float()
+        if shuffled_scores.shape != scores.shape:
+            raise ValueError(
+                "protein_shuffled_scores must have the same shape as ranking_scores"
+            )
+        if not torch.isfinite(shuffled_scores).all():
+            raise ValueError("protein_shuffled_scores must contain only finite values")
 
     pos_weight = torch.tensor(float(bce_pos_weight), dtype=logits.dtype)
     classification_loss = F.binary_cross_entropy_with_logits(
@@ -324,6 +337,28 @@ def compute_joint_evaluation_metrics(
         min_pchembl_span=ranking_min_pchembl_span,
     )
     metrics.update(spearman_metrics)
+    if activity_types is not None:
+        metrics.update(
+            compute_activity_type_metrics(
+                probabilities=probabilities,
+                labels=labels.numpy(),
+                activity_types=activity_types,
+                group_ids=string_group_ids,
+                ranking_scores=scores.tolist(),
+                pchembl_values=pchembl.tolist(),
+                min_pchembl_span=ranking_min_pchembl_span,
+            )
+        )
+    if shuffled_scores is not None:
+        metrics.update(
+            compute_protein_shuffle_sensitivity(
+                group_ids=string_group_ids,
+                baseline_scores=scores.tolist(),
+                shuffled_scores=shuffled_scores.tolist(),
+                pchembl_values=pchembl.tolist(),
+                min_pchembl_span=ranking_min_pchembl_span,
+            )
+        )
     metrics.update(
         {
             "eval_loss": float(total_loss.item()),
@@ -385,6 +420,158 @@ def compute_groupwise_spearman(
     return metrics
 
 
+def compute_activity_type_metrics(
+    *,
+    probabilities: Sequence[float],
+    labels: Sequence[float],
+    activity_types: Sequence[str],
+    group_ids: Sequence[str],
+    ranking_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_pchembl_span: float = 0.5,
+) -> Dict[str, float]:
+    """Report Potency/qHTS and non-Potency performance separately."""
+    probabilities_array = np.asarray(probabilities, dtype=np.float64)
+    labels_array = np.asarray(labels, dtype=np.int64)
+    activity_array = np.asarray([str(value) for value in activity_types], dtype=object)
+    group_array = np.asarray(group_ids, dtype=object)
+    score_array = np.asarray(ranking_scores, dtype=np.float64)
+    pchembl_array = np.asarray(pchembl_values, dtype=np.float64)
+    expected_size = probabilities_array.size
+    if not all(
+        values.size == expected_size
+        for values in (
+            labels_array,
+            activity_array,
+            group_array,
+            score_array,
+            pchembl_array,
+        )
+    ):
+        raise ValueError("activity-type metric inputs must have the same length")
+
+    potency_mask = np.asarray(
+        [
+            any(
+                token.strip().casefold() == "potency"
+                or "qhts" in token.strip().casefold()
+                for token in value.split("|")
+            )
+            for value in activity_array
+        ],
+        dtype=bool,
+    )
+    metrics: Dict[str, float] = {}
+    for name, mask in (
+        ("potency_qhts", potency_mask),
+        ("non_potency", ~potency_mask),
+    ):
+        count = int(mask.sum())
+        metrics[f"eval_{name}_num_examples"] = float(count)
+        if count == 0:
+            continue
+        metrics[f"eval_{name}_positive_fraction"] = float(labels_array[mask].mean())
+        classification = compute_classification_metrics(
+            probabilities_array[mask],
+            labels_array[mask],
+        )
+        metrics.update(
+            {
+                key.replace("eval_", f"eval_{name}_", 1): value
+                for key, value in classification.items()
+            }
+        )
+        ranking, _ = _compute_groupwise_spearman_with_records(
+            group_ids=group_array[mask].tolist(),
+            ranking_scores=score_array[mask].tolist(),
+            pchembl_values=pchembl_array[mask].tolist(),
+            min_group_size=MIN_LISTWISE_LIGANDS,
+            min_pchembl_span=min_pchembl_span,
+        )
+        metrics.update(
+            {
+                key.replace("eval_", f"eval_{name}_", 1): value
+                for key, value in ranking.items()
+            }
+        )
+    return metrics
+
+
+def compute_protein_shuffle_sensitivity(
+    *,
+    group_ids: Sequence[str],
+    baseline_scores: Sequence[float],
+    shuffled_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_pchembl_span: float = 0.5,
+) -> Dict[str, float]:
+    """Measure whether changing the protein changes within-assay rankings."""
+    baseline_metrics, baseline_records = _compute_groupwise_spearman_with_records(
+        group_ids=group_ids,
+        ranking_scores=baseline_scores,
+        pchembl_values=pchembl_values,
+        min_group_size=MIN_LISTWISE_LIGANDS,
+        min_pchembl_span=min_pchembl_span,
+    )
+    shuffled_metrics, _ = _compute_groupwise_spearman_with_records(
+        group_ids=group_ids,
+        ranking_scores=shuffled_scores,
+        pchembl_values=pchembl_values,
+        min_group_size=MIN_LISTWISE_LIGANDS,
+        min_pchembl_span=min_pchembl_span,
+    )
+
+    metrics = {
+        "eval_protein_shuffled_macro_spearman": shuffled_metrics[
+            "eval_macro_spearman"
+        ],
+        "eval_protein_shuffled_weighted_spearman": shuffled_metrics[
+            "eval_weighted_spearman"
+        ],
+        "eval_protein_shuffle_macro_spearman_drop": baseline_metrics[
+            "eval_macro_spearman"
+        ]
+        - shuffled_metrics["eval_macro_spearman"],
+        "eval_protein_shuffle_weighted_spearman_drop": baseline_metrics[
+            "eval_weighted_spearman"
+        ]
+        - shuffled_metrics["eval_weighted_spearman"],
+    }
+
+    grouped_baseline: Dict[str, list[float]] = defaultdict(list)
+    grouped_shuffled: Dict[str, list[float]] = defaultdict(list)
+    for group_id, baseline, shuffled in zip(
+        group_ids, baseline_scores, shuffled_scores
+    ):
+        grouped_baseline[str(group_id)].append(float(baseline))
+        grouped_shuffled[str(group_id)].append(float(shuffled))
+    eligible_groups = {str(record["group_id"]) for record in baseline_records}
+    stability_records: list[tuple[float, int]] = []
+    for group_id in sorted(eligible_groups):
+        baseline = grouped_baseline[group_id]
+        shuffled = grouped_shuffled[group_id]
+        if len(set(baseline)) < 2 or len(set(shuffled)) < 2:
+            stability = 0.0
+        else:
+            result = spearmanr(baseline, shuffled)
+            stability = float(getattr(result, "statistic", result[0]))
+            if not math.isfinite(stability):
+                stability = 0.0
+        stability_records.append((stability, len(baseline)))
+    if stability_records:
+        metrics["eval_protein_shuffle_macro_rank_stability"] = float(
+            np.mean([value for value, _ in stability_records])
+        )
+        metrics["eval_protein_shuffle_weighted_rank_stability"] = float(
+            sum(value * size for value, size in stability_records)
+            / sum(size for _, size in stability_records)
+        )
+    else:
+        metrics["eval_protein_shuffle_macro_rank_stability"] = float("nan")
+        metrics["eval_protein_shuffle_weighted_rank_stability"] = float("nan")
+    return metrics
+
+
 def _split_group_id(group_id: str) -> tuple[str, str]:
     target_chembl_id, assay_id = group_id.split("__", 1)
     return target_chembl_id, assay_id
@@ -430,6 +617,8 @@ def _compute_groupwise_spearman_with_records(
         return (
             {
                 "eval_spearman": float("nan"),
+                "eval_weighted_spearman": float("nan"),
+                "eval_macro_spearman": float("nan"),
                 "eval_spearman_num_groups": 0.0,
             },
             assay_records,
@@ -440,9 +629,16 @@ def _compute_groupwise_spearman_with_records(
         for record in assay_records
     )
     total_weight = sum(int(record["num_examples"]) for record in assay_records)
+    weighted_spearman = float(weighted_sum / total_weight)
+    macro_spearman = float(
+        np.mean([float(record["spearman"]) for record in assay_records])
+    )
     return (
         {
-            "eval_spearman": float(weighted_sum / total_weight),
+            # Backward-compatible alias; explicit names remove ambiguity.
+            "eval_spearman": weighted_spearman,
+            "eval_weighted_spearman": weighted_spearman,
+            "eval_macro_spearman": macro_spearman,
             "eval_spearman_num_groups": float(len(assay_records)),
         },
         assay_records,
@@ -470,6 +666,7 @@ def _append_assay_spearman_log(
         "global_step": int(trainer.state.global_step),
         "epoch": trainer.state.epoch,
         "weighted_spearman": metrics[f"{metric_key_prefix}_spearman"],
+        "macro_spearman": metrics[f"{metric_key_prefix}_macro_spearman"],
         "num_eligible_groups": metrics[f"{metric_key_prefix}_spearman_num_groups"],
         "assays": list(assay_records),
     }
