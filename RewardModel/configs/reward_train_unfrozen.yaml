@@ -15,7 +15,7 @@ model:
   cosine_classification_bias_init: 0.0
   activity_threshold: 6.0
   ranking_loss_weight: 1.0
-  classification_loss_weight: 1.0
+  classification_loss_weight: 0.0
   ranking_temperature: 1.0
   ranking_affinity_margin: 0.47712125472
   ranking_min_pchembl_span: 0.5
@@ -35,10 +35,10 @@ data:
   ranking_opportunity_divisor: 32
   evaluation_ranking_partitions: 3
   ranking_min_pchembl_span: 0.5
-  max_classification_only_per_item: 16
+  max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_unfrozen_10000_steps
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_scaled_cosine_ranking_only_unfrozen_10000_steps
   num_train_epochs: 10
   max_steps: 10000
   per_device_train_batch_size: 12
@@ -49,7 +49,7 @@ training:
   weight_decay: 0.01
   max_grad_norm: 1.0
   logging_steps: 10
-  dataloader_num_workers: 0
+  dataloader_num_workers: 4
   dynamic_padding: true
   length_bucketing: true
   length_bucket_size_multiplier: 50

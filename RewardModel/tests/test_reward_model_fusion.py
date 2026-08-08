@@ -115,6 +115,44 @@ def test_sdpa_fusion_never_sends_a_fully_masked_query(monkeypatch):
     )
 
 
+def test_sdpa_fusion_uses_dropout_only_while_training(monkeypatch):
+    dropout_values = []
+    original_sdpa = F.scaled_dot_product_attention
+
+    def _recording_sdpa(query, key, value, *, dropout_p, **kwargs):
+        dropout_values.append(dropout_p)
+        return original_sdpa(
+            query,
+            key,
+            value,
+            dropout_p=dropout_p,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", _recording_sdpa)
+    fusion = TokenFusion(
+        hidden_dim=8,
+        num_heads=2,
+        attention_backend="sdpa",
+        dropout=0.1,
+    )
+    inputs = (
+        torch.randn(1, 3, 8),
+        torch.randn(1, 2, 8),
+        torch.ones((1, 3), dtype=torch.long),
+        torch.ones((1, 2), dtype=torch.long),
+    )
+
+    fusion.train()
+    fusion(*inputs)
+    assert dropout_values == [0.1] * 4
+
+    dropout_values.clear()
+    fusion.eval()
+    fusion(*inputs)
+    assert dropout_values == [0.0] * 4
+
+
 def test_fusion_rejects_unknown_attention_backend():
     try:
         TokenFusion(hidden_dim=8, num_heads=2, attention_backend="unknown")
@@ -172,3 +210,9 @@ def test_fusion_residual_can_be_enabled_and_disabled():
 def test_fusion_rejects_non_boolean_residual_flag():
     with pytest.raises(ValueError, match="residual must be a boolean"):
         TokenFusion(hidden_dim=8, num_heads=2, residual="true")
+
+
+@pytest.mark.parametrize("dropout", [-0.1, 1.0, float("nan")])
+def test_fusion_rejects_invalid_dropout(dropout):
+    with pytest.raises(ValueError, match="dropout"):
+        TokenFusion(hidden_dim=8, num_heads=2, dropout=dropout)

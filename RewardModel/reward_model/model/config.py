@@ -95,8 +95,8 @@ class RewardModelConfig:
             raise ValueError("protein_max_length must be > 0")
         if self.molecule_max_length <= 0:
             raise ValueError("molecule_max_length must be > 0")
-        if self.dropout < 0.0 or self.dropout >= 1.0:
-            raise ValueError("dropout must be in [0.0, 1.0)")
+        if not math.isfinite(float(self.dropout)) or not 0.0 <= self.dropout < 1.0:
+            raise ValueError("dropout must be finite and in [0.0, 1.0)")
         if self.bce_pos_weight <= 0.0:
             raise ValueError("bce_pos_weight must be > 0")
         if self.ranking_loss_weight < 0.0:

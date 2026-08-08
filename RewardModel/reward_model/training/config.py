@@ -55,8 +55,8 @@ class RewardTrainingDataConfig:
             raise ValueError("evaluation_ranking_partitions must be > 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
-        if self.max_classification_only_per_item <= 0:
-            raise ValueError("max_classification_only_per_item must be > 0")
+        if self.max_classification_only_per_item < 0:
+            raise ValueError("max_classification_only_per_item must be >= 0")
 
 
 @dataclass(eq=True)

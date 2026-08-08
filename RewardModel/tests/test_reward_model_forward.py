@@ -18,12 +18,13 @@ def _build_model(**config_overrides):
         model=DummyEncoder(hidden_size=8),
         hidden_size=8,
     )
+    dropout = config_overrides.pop("dropout", 0.0)
     config = RewardModelConfig(
         protein_model_name_or_path="protein/dummy",
         molecule_model_name_or_path="molecule/dummy",
         fusion_hidden_dim=10,
         fusion_num_heads=2,
-        dropout=0.0,
+        dropout=dropout,
         pooling_type="mean",
         **config_overrides,
     )
@@ -79,6 +80,13 @@ def test_reward_model_passes_fusion_residual_config_to_fusion():
     assert residual.fusion.molecule_residual_norm is not None
 
 
+def test_reward_model_applies_configured_dropout_outside_encoders():
+    model = _build_model(dropout=0.1, pair_scoring_mode="scaled_cosine")
+
+    assert model.projection_dropout.p == pytest.approx(0.1)
+    assert model.fusion.dropout == pytest.approx(0.1)
+
+
 def test_scaled_cosine_mode_shares_one_geometry_and_scale_between_objectives():
     model = _build_model(
         pair_scoring_mode="scaled_cosine",
@@ -124,6 +132,35 @@ def test_scaled_cosine_mode_shares_one_geometry_and_scale_between_objectives():
         outputs.activity_logits,
         outputs.ranking_score - 0.75,
     )
+
+
+def test_zero_classification_weight_removes_classification_loss_and_gradient():
+    model = _build_model(
+        pair_scoring_mode="scaled_cosine",
+        classification_loss_weight=0.0,
+        fusion_residual=True,
+    )
+    outputs = model(
+        protein_input_ids=torch.tensor(
+            [[1, 2, 3], [1, 2, 3], [1, 2, 3]], dtype=torch.long
+        ),
+        protein_attention_mask=torch.ones((3, 3), dtype=torch.long),
+        molecule_input_ids=torch.tensor(
+            [[7, 8, 9], [1, 2, 3], [4, 5, 6]], dtype=torch.long
+        ),
+        molecule_attention_mask=torch.ones((3, 3), dtype=torch.long),
+        activity_labels=torch.tensor([1.0, 0.0, 1.0]),
+        pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+
+    assert outputs.classification_loss is None
+    assert outputs.ranking_loss is not None
+    assert torch.allclose(outputs.loss, outputs.ranking_loss)
+    outputs.loss.backward()
+    assert model.classification_logit_bias.grad is None
+    assert model.logit_scale.grad is not None
+    assert torch.isfinite(model.logit_scale.grad)
 
 
 @pytest.mark.parametrize("objective", ["ranking", "classification"])

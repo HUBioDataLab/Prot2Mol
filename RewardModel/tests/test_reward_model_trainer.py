@@ -796,12 +796,16 @@ def test_unfrozen_phase_two_config_preserves_architecture_and_reduces_memory_bat
     assert config.model.fusion_residual is True
     assert config.model.freeze_protein_encoder is False
     assert config.model.freeze_molecule_encoder is False
+    assert config.model.ranking_loss_weight == pytest.approx(1.0)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.data.max_classification_only_per_item == 0
     assert config.training.per_device_train_batch_size == 12
     assert config.training.gradient_accumulation_steps == 4
     assert config.training.max_steps == 10_000
     assert config.training.eval_steps == 500
     assert config.training.learning_rate == pytest.approx(1.0e-5)
-    assert "unfrozen_10000_steps" in config.training.output_dir
+    assert config.training.dataloader_num_workers == 4
+    assert "ranking_only_unfrozen_10000_steps" in config.training.output_dir
 
 
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):

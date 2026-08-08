@@ -408,11 +408,14 @@ def load_tokenized_example_dataset(dataset_path: str) -> Dataset:
 class RewardAssayListDataset(TorchDataset):
     """Epoch-aware joint classification and assay-list ranking dataset.
 
-    Every source observation appears exactly once as a classification example
-    per epoch. Assays with at least three ligands and sufficient affinity span
-    contribute ``ceil(n / opportunity_divisor)`` non-overlapping lists of at
-    most ``ranking_max_ligands`` observations. The selected ranking observations
-    change deterministically with ``seed + epoch``.
+    With a positive ``max_classification_only_per_item``, every source
+    observation appears exactly once as a classification example per epoch.
+    Set it to zero for ranking-only training; observations not selected for a
+    ranking list are then omitted. Assays with at least three ligands and
+    sufficient affinity span contribute ``ceil(n / opportunity_divisor)``
+    non-overlapping lists of at most ``ranking_max_ligands`` observations. The
+    selected ranking observations change deterministically with ``seed +
+    epoch``.
     """
 
     def __init__(
@@ -434,8 +437,8 @@ class RewardAssayListDataset(TorchDataset):
             )
         if ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
-        if max_classification_only_per_item <= 0:
-            raise ValueError("max_classification_only_per_item must be > 0")
+        if max_classification_only_per_item < 0:
+            raise ValueError("max_classification_only_per_item must be >= 0")
         if item_count_multiple <= 0:
             raise ValueError("item_count_multiple must be > 0")
 
@@ -487,15 +490,27 @@ class RewardAssayListDataset(TorchDataset):
             )
             for group_id in self._eligible_group_ids
         )
-        num_classification_only = len(example_dataset) - num_ranked_examples
-        desired_items = max(
-            1,
-            num_ranking_lists,
-            math.ceil(
-                num_classification_only / self.max_classification_only_per_item
-            ),
+        num_unranked_examples = len(example_dataset) - num_ranked_examples
+        include_classification_only = self.max_classification_only_per_item > 0
+        num_classification_only = (
+            num_unranked_examples if include_classification_only else 0
         )
-        max_nonempty_items = num_ranking_lists + num_classification_only
+        if include_classification_only:
+            desired_items = max(
+                1,
+                num_ranking_lists,
+                math.ceil(
+                    num_classification_only / self.max_classification_only_per_item
+                ),
+            )
+            max_nonempty_items = num_ranking_lists + num_classification_only
+        else:
+            if num_ranking_lists == 0:
+                raise ValueError(
+                    "ranking-only training requires at least one eligible ranking list"
+                )
+            desired_items = num_ranking_lists
+            max_nonempty_items = num_ranking_lists
         if self.item_count_multiple > 1 and max_nonempty_items < self.item_count_multiple:
             raise ValueError(
                 "Training dataset is too small for duplicate-free distributed sharding: "
@@ -572,7 +587,8 @@ class RewardAssayListDataset(TorchDataset):
         classification_only: list[int] = []
         for group_id, members in self._group_members.items():
             if group_id not in self._eligible_group_ids:
-                classification_only.extend(members)
+                if self.max_classification_only_per_item > 0:
+                    classification_only.extend(members)
                 continue
             shuffled = self._permuted(members, generator)
             list_count = math.ceil(len(members) / self.ranking_opportunity_divisor)
@@ -581,7 +597,8 @@ class RewardAssayListDataset(TorchDataset):
                 list_count * self.ranking_max_ligands,
             )
             selected = shuffled[:ranked_count]
-            classification_only.extend(shuffled[ranked_count:])
+            if self.max_classification_only_per_item > 0:
+                classification_only.extend(shuffled[ranked_count:])
             for start in range(0, ranked_count, self.ranking_max_ligands):
                 ranking_lists.append(
                     (

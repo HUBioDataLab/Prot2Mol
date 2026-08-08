@@ -539,6 +539,32 @@ def test_assay_list_dataset_has_exact_coverage_and_dynamic_nonoverlapping_lists(
     assert replica.epoch_ranking_indices() == dataset.epoch_ranking_indices()
 
 
+def test_ranking_only_dataset_omits_classification_only_examples():
+    examples = _tokenized_rows()
+    dataset = RewardAssayListDataset(
+        examples,
+        seed=42,
+        ranking_max_ligands=16,
+        ranking_opportunity_divisor=32,
+        ranking_min_pchembl_span=0.5,
+        max_classification_only_per_item=0,
+    )
+
+    assert dataset.stats.num_ranking_lists == 3
+    assert dataset.stats.num_ranked_examples == 48
+    assert dataset.stats.num_classification_only_examples == 0
+    assert len(dataset) == dataset.stats.num_ranking_lists
+    assert sorted(dataset.epoch_example_indices()) == sorted(
+        dataset.epoch_ranking_indices()
+    )
+    assert len(dataset.epoch_example_indices()) == 48
+
+    batch = RewardAssayListCollator()(
+        [dataset[index] for index in range(len(dataset))]
+    )
+    assert (batch["ranking_group_ids"] >= 0).all()
+
+
 def test_assay_metadata_scan_selects_only_the_two_required_columns():
     examples = _tokenized_rows(group_sizes=(4,))
     selected_columns = []

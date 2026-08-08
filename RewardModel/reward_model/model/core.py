@@ -56,12 +56,14 @@ class RewardModel(nn.Module):
         self.molecule_projection = nn.Linear(self._config.molecule_hidden_size, self._config.fusion_hidden_dim)
         self.protein_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
         self.molecule_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
+        self.projection_dropout = nn.Dropout(self._config.dropout)
 
         self.fusion = TokenFusion(
             hidden_dim=self._config.fusion_hidden_dim,
             num_heads=self._config.fusion_num_heads,
             attention_backend=self._config.fusion_attention_backend,
             residual=self._config.fusion_residual,
+            dropout=self._config.dropout,
         )
         if self._config.pair_scoring_mode == "mlp":
             head_input_dim = self._config.fusion_hidden_dim * 2
@@ -197,8 +199,12 @@ class RewardModel(nn.Module):
         protein_tokens: torch.Tensor,
         molecule_tokens: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        protein_tokens = self.protein_norm(self.protein_projection(protein_tokens))
-        molecule_tokens = self.molecule_norm(self.molecule_projection(molecule_tokens))
+        protein_tokens = self.projection_dropout(
+            self.protein_norm(self.protein_projection(protein_tokens))
+        )
+        molecule_tokens = self.projection_dropout(
+            self.molecule_norm(self.molecule_projection(molecule_tokens))
+        )
         return protein_tokens, molecule_tokens
 
     def _compute_ranking_loss(
@@ -379,7 +385,10 @@ class RewardModel(nn.Module):
         classification_loss = None
         total_loss = None
 
-        if activity_labels is not None:
+        if (
+            activity_labels is not None
+            and self._config.classification_loss_weight > 0.0
+        ):
             classification_loss = self._compute_classification_loss(activity_logits, activity_labels)
             total_loss = classification_loss * self._config.classification_loss_weight
 

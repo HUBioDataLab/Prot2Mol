@@ -13,6 +13,11 @@ ranking_score = exp(logit_scale) * cosine
 activity_logit = ranking_score + classification_logit_bias
 ```
 
+The configured model dropout is applied after the protein and molecule
+projections and to fusion attention probabilities. It remains disabled during
+evaluation and does not override either pretrained encoder's native dropout
+configuration.
+
 `logit_scale` starts at `log(13)`, following LigUnity, and is capped at a
 configured positive scale of 100. Unlike LigUnity's released ranking-loss code,
 which detaches its scale, this implementation lets both listwise ranking and
@@ -50,7 +55,12 @@ python train_reward_model.py \
 This is deliberately a weight-only warm start, not a full Trainer resume. It
 strictly loads the model weights, applies the phase-two freeze settings, and
 starts a fresh optimizer, learning-rate schedule, and global step in a separate
-output directory. The phase-two batch size is 12 with four-step gradient
+output directory. The current phase-two config sets
+`classification_loss_weight: 0.0`, so optimization and best-checkpoint
+selection are ranking-only; classification metrics remain diagnostic. It also
+sets `max_classification_only_per_item: 0`, so rows outside the sampled ranking
+lists do not consume encoder work or create zero-gradient batches. The phase-two
+batch size is 12 with four-step gradient
 accumulation, preserving an effective batch size of 48 while retaining encoder
 activations for backpropagation.
 

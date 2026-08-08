@@ -33,6 +33,7 @@ class TokenFusion(nn.Module):
         num_heads: int,
         attention_backend: str = "manual",
         residual: bool = False,
+        dropout: float = 0.0,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -45,10 +46,13 @@ class TokenFusion(nn.Module):
         self.head_size = hidden_dim // num_heads
         self.attention_backend = attention_backend
         self.residual = residual
+        self.dropout = float(dropout)
         if self.attention_backend not in {"manual", "sdpa"}:
             raise ValueError("attention_backend must be 'manual' or 'sdpa'")
         if not isinstance(self.residual, bool):
             raise ValueError("residual must be a boolean")
+        if not math.isfinite(self.dropout) or not 0.0 <= self.dropout < 1.0:
+            raise ValueError("dropout must be finite and in [0.0, 1.0)")
 
         self.query_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.key_p = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -75,7 +79,8 @@ class TokenFusion(nn.Module):
         mask_value = torch.finfo(logits.dtype).min
         masked_logits = torch.where(valid_pairs, logits, torch.full_like(logits, mask_value))
         alpha = torch.softmax(masked_logits, dim=2)
-        return torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
+        alpha = torch.where(valid_pairs, alpha, torch.zeros_like(alpha))
+        return F.dropout(alpha, p=self.dropout, training=self.training)
 
     def _sdpa(
         self,
@@ -99,7 +104,7 @@ class TokenFusion(nn.Module):
             key,
             value,
             attn_mask=valid_pairs,
-            dropout_p=0.0,
+            dropout_p=self.dropout if self.training else 0.0,
             is_causal=False,
         )
         return attended.transpose(1, 2).flatten(-2)
