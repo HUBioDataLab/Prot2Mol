@@ -3,10 +3,189 @@ from __future__ import annotations
 import math
 
 import torch
+import torch.nn.functional as F
 
 
 MIN_LISTWISE_LIGANDS = 3
 DEFAULT_RANKING_AFFINITY_MARGIN = math.log10(3.0)
+DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD = 5.0
+CONTRASTIVE_MASK_VALUE = -1e9
+
+
+def _validate_contrastive_inputs(
+    contrastive_scores: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ligand_group_ids: torch.Tensor,
+    group_target_ids: torch.Tensor,
+    molecule_identity_ids: torch.Tensor,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    if contrastive_scores.ndim != 2:
+        raise ValueError("contrastive_scores must have shape [num_groups, num_ligands]")
+    if not contrastive_scores.is_floating_point():
+        raise ValueError("contrastive_scores must be floating point")
+    if not torch.isfinite(contrastive_scores).all():
+        raise ValueError("contrastive_scores must contain only finite values")
+
+    num_groups, num_ligands = contrastive_scores.shape
+    if num_groups <= 0 or num_ligands <= 0:
+        raise ValueError("contrastive_scores must contain at least one group and ligand")
+
+    device = contrastive_scores.device
+    targets = pchembl_values.reshape(-1).to(device=device)
+    owners = ligand_group_ids.reshape(-1).to(device=device, dtype=torch.long)
+    target_ids = group_target_ids.reshape(-1).to(device=device, dtype=torch.long)
+    molecule_ids = molecule_identity_ids.reshape(-1).to(
+        device=device,
+        dtype=torch.long,
+    )
+    if targets.numel() != num_ligands:
+        raise ValueError("pchembl_values must contain one value per ligand")
+    if owners.numel() != num_ligands:
+        raise ValueError("ligand_group_ids must contain one value per ligand")
+    if target_ids.numel() != num_groups:
+        raise ValueError("group_target_ids must contain one value per group")
+    if molecule_ids.numel() != num_ligands:
+        raise ValueError("molecule_identity_ids must contain one value per ligand")
+    if not torch.isfinite(targets).all():
+        raise ValueError("pchembl_values must contain only finite values")
+    if (owners < 0).any() or (owners >= num_groups).any():
+        raise ValueError("ligand_group_ids must be in [0, num_groups)")
+    present_groups = torch.unique(owners, sorted=True)
+    expected_groups = torch.arange(num_groups, device=device, dtype=torch.long)
+    if not torch.equal(present_groups, expected_groups):
+        raise ValueError("every contrastive group must own at least one ligand")
+
+    computation_dtype = (
+        torch.float32
+        if contrastive_scores.dtype in (torch.float16, torch.bfloat16)
+        else contrastive_scores.dtype
+    )
+    return (
+        contrastive_scores.to(dtype=computation_dtype),
+        targets.to(dtype=computation_dtype),
+        owners,
+        target_ids,
+        molecule_ids,
+    )
+
+
+def ligunity_bidirectional_contrastive_loss(
+    contrastive_scores: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ligand_group_ids: torch.Tensor,
+    group_target_ids: torch.Tensor,
+    molecule_identity_ids: torch.Tensor,
+    *,
+    active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Mirror LigUnity's masked bidirectional in-batch retrieval objective.
+
+    ``contrastive_scores`` is the shared, already-scaled cosine matrix with one
+    protein/assay row and one column per sampled ligand. For protein-to-molecule
+    retrieval, each measured active ligand competes against ligands from other
+    targets while the other ligands from its own assay are hidden. Following
+    LigUnity's released code, multi-ligand assay observations below pActivity 5
+    are skipped only in this direction. Molecule-to-protein retrieval uses every
+    sampled ligand.
+
+    Cross-assay entries are masked when they have the same target identity or
+    duplicate a molecule measured in the query assay. Directional losses use
+    LigUnity's ``1 / sqrt(num_assay_ligands)`` weighting and are averaged over
+    assay rows, matching its trainer-level sample-size normalization.
+
+    Returns ``(total, protein_to_molecule, molecule_to_protein)`` where total is
+    the sum of the two directional losses before the external objective weight.
+    """
+    if not math.isfinite(float(active_threshold)):
+        raise ValueError("active_threshold must be finite")
+
+    (
+        scores,
+        targets,
+        owners,
+        target_ids,
+        molecule_ids,
+    ) = _validate_contrastive_inputs(
+        contrastive_scores,
+        pchembl_values,
+        ligand_group_ids,
+        group_target_ids,
+        molecule_identity_ids,
+    )
+    num_groups, num_ligands = scores.shape
+
+    # LigUnity masks false negatives before applying either retrieval direction.
+    group_membership = F.one_hot(
+        owners,
+        num_classes=num_groups,
+    ).transpose(0, 1).bool()
+    ligand_target_ids = target_ids.index_select(0, owners)
+    same_target = target_ids[:, None] == ligand_target_ids[None, :]
+    same_molecule = molecule_ids[:, None] == molecule_ids[None, :]
+    duplicate_molecule = (
+        group_membership.to(dtype=scores.dtype)
+        @ same_molecule.to(dtype=scores.dtype)
+    ) > 0
+    false_negative_mask = (~group_membership) & (
+        same_target | duplicate_molecule
+    )
+    masked_scores = scores.masked_fill(
+        false_negative_mask,
+        CONTRASTIVE_MASK_VALUE,
+    )
+
+    ligand_positions = torch.arange(
+        num_ligands,
+        device=scores.device,
+        dtype=torch.long,
+    )
+    group_sizes = torch.bincount(
+        owners,
+        minlength=num_groups,
+    ).to(dtype=scores.dtype)
+    ligand_weights = group_sizes.rsqrt().index_select(0, owners)
+
+    # Select each ligand's owning protein row, then hide the other ligands from
+    # that same assay. This vectorizes LigUnity's per-positive retrieval loop.
+    protein_to_molecule_logits = masked_scores.index_select(0, owners)
+    same_owner = owners[:, None] == owners[None, :]
+    same_owner.fill_diagonal_(False)
+    protein_to_molecule_logits = protein_to_molecule_logits.masked_fill(
+        same_owner,
+        CONTRASTIVE_MASK_VALUE,
+    )
+    per_ligand_protein_to_molecule = F.cross_entropy(
+        protein_to_molecule_logits,
+        ligand_positions,
+        reduction="none",
+    )
+    eligible_protein_to_molecule = (
+        group_sizes.index_select(0, owners) == 1
+    ) | (targets >= float(active_threshold))
+    protein_to_molecule = (
+        per_ligand_protein_to_molecule[eligible_protein_to_molecule]
+        * ligand_weights[eligible_protein_to_molecule]
+    ).sum() / num_groups
+
+    per_ligand_molecule_to_protein = F.cross_entropy(
+        masked_scores.transpose(0, 1),
+        owners,
+        reduction="none",
+    )
+    molecule_to_protein = (
+        per_ligand_molecule_to_protein * ligand_weights
+    ).sum() / num_groups
+    return (
+        protein_to_molecule + molecule_to_protein,
+        protein_to_molecule,
+        molecule_to_protein,
+    )
 
 
 def _validate_listwise_inputs(

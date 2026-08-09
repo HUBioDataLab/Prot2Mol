@@ -3,7 +3,13 @@ import torch
 import torch.nn.functional as F
 
 from conftest import DummyEncoder, DummyTokenizer
-from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, RewardModelOutput
+from reward_model.model import (
+    LoadedEncoder,
+    RewardModel,
+    RewardModelConfig,
+    RewardModelOutput,
+    ligunity_bidirectional_contrastive_loss,
+)
 from reward_model.model.fusion import masked_pool
 
 
@@ -171,6 +177,106 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
     assert model.protein_projection.weight.grad.abs().sum() > 0.0
     assert model.molecule_projection.weight.grad is not None
     assert model.molecule_projection.weight.grad.abs().sum() > 0.0
+
+
+def test_simple_cosine_shares_one_scaled_matrix_between_ranking_and_contrastive():
+    torch.manual_seed(17)
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+        ranking_loss_weight=0.5,
+        contrastive_loss_weight=0.5,
+        ranking_temperature=0.1,
+    )
+    protein_input_ids = torch.tensor(
+        [
+            [1, 2, 0],
+            [1, 2, 0],
+            [1, 2, 0],
+            [3, 4, 0],
+            [3, 4, 0],
+            [3, 4, 0],
+        ],
+        dtype=torch.long,
+    )
+    molecule_input_ids = torch.tensor(
+        [[5, 1, 0], [6, 1, 0], [7, 1, 0], [8, 1, 0], [9, 1, 0], [2, 1, 0]],
+        dtype=torch.long,
+    )
+    pchembl = torch.tensor([8.0, 7.0, 4.5, 8.5, 6.5, 5.5])
+    group_ids = torch.tensor([0, 0, 0, 1, 1, 1])
+    target_ids = torch.tensor([0, 0, 0, 1, 1, 1])
+    molecule_ids = torch.arange(6)
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        protein_attention_mask=protein_input_ids.ne(0).long(),
+        molecule_input_ids=molecule_input_ids,
+        molecule_attention_mask=molecule_input_ids.ne(0).long(),
+        pchembl_values=pchembl,
+        ranking_group_ids=group_ids,
+        contrastive_target_ids=target_ids,
+        contrastive_molecule_ids=molecule_ids,
+    )
+
+    shared_score_matrix = torch.matmul(
+        outputs.normalized_protein_embedding[[0, 3]].float(),
+        outputs.normalized_molecule_embedding.float().transpose(0, 1),
+    ) / model.config.ranking_temperature
+    expected_contrastive = ligunity_bidirectional_contrastive_loss(
+        shared_score_matrix,
+        pchembl,
+        group_ids,
+        torch.tensor([0, 1]),
+        molecule_ids,
+    )
+
+    assert torch.allclose(
+        shared_score_matrix[group_ids, torch.arange(6)],
+        outputs.ranking_score / model.config.ranking_temperature,
+    )
+    assert outputs.classification_loss is None
+    assert torch.allclose(outputs.contrastive_loss, expected_contrastive[0])
+    assert torch.allclose(
+        outputs.contrastive_protein_to_molecule_loss,
+        expected_contrastive[1],
+    )
+    assert torch.allclose(
+        outputs.contrastive_molecule_to_protein_loss,
+        expected_contrastive[2],
+    )
+    assert torch.allclose(
+        outputs.loss,
+        0.5 * outputs.ranking_loss + 0.5 * outputs.contrastive_loss,
+    )
+
+    outputs.loss.backward()
+    for parameter in (
+        model.protein_encoder.proj.weight,
+        model.molecule_encoder.proj.weight,
+        model.protein_projection.weight,
+        model.molecule_projection.weight,
+    ):
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0.0
+
+
+def test_contrastive_objective_requires_identity_metadata():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+        contrastive_loss_weight=0.5,
+    )
+    with pytest.raises(ValueError, match="target and molecule identity ids"):
+        model(
+            protein_input_ids=torch.tensor([[1, 2], [1, 2], [1, 2]]),
+            protein_attention_mask=torch.ones((3, 2), dtype=torch.long),
+            molecule_input_ids=torch.tensor([[3, 4], [4, 5], [5, 6]]),
+            molecule_attention_mask=torch.ones((3, 2), dtype=torch.long),
+            pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+            ranking_group_ids=torch.tensor([0, 0, 0]),
+        )
 
 
 def test_scaled_cosine_mode_shares_one_geometry_and_scale_between_objectives():

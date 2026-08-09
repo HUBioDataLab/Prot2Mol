@@ -512,6 +512,83 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert reloaded.config.fusion_hidden_dim == 10
 
 
+def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
+    tmp_path,
+    monkeypatch,
+):
+    pytest.importorskip("accelerate")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    examples = _metric_ready_examples()
+    train_dataset = RewardAssayListDataset(
+        examples,
+        seed=42,
+        max_classification_only_per_item=0,
+    )
+    eval_dataset = RewardEvaluationDataset(
+        examples,
+        protein_shuffle_sensitivity=False,
+    )
+    model = RewardModel(
+        config=RewardModelConfig(
+            protein_model_name_or_path="protein/dummy",
+            molecule_model_name_or_path="molecule/dummy",
+            fusion_hidden_dim=10,
+            fusion_num_heads=2,
+            pair_scoring_mode="cosine",
+            ranking_temperature=0.1,
+            ranking_loss_weight=0.5,
+            contrastive_loss_weight=0.5,
+            classification_loss_weight=0.0,
+            dropout=0.0,
+        ),
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+    trainer = RewardModelTrainer(
+        model=model,
+        args=create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "contrastive_trainer_output"),
+                num_train_epochs=10,
+                max_steps=1,
+                per_device_train_batch_size=2,
+                per_device_eval_batch_size=2,
+                logging_steps=1,
+                fp16=False,
+                metrics_profile="ranking",
+                ranking_score_diagnostics=True,
+                protein_shuffle_sensitivity=False,
+            )
+        ),
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=RewardAssayListCollator(),
+    )
+
+    result = trainer.train()
+    eval_metrics = trainer.evaluate()
+
+    assert math.isfinite(result.training_loss)
+    assert trainer.state.global_step == 1
+    objective_logs = [
+        entry
+        for entry in trainer.state.log_history
+        if "contrastive_loss" in entry
+    ]
+    assert objective_logs
+    assert math.isfinite(objective_logs[-1]["ranking_loss"])
+    assert objective_logs[-1]["contrastive_loss"] > 0.0
+    assert set(eval_metrics) >= {
+        "eval_loss",
+        "eval_spearman",
+        "eval_pearson",
+        "eval_pair_accuracy",
+    }
+
+
 def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_set(tmp_path):
     args = create_training_arguments(
         RewardTrainerConfig(
@@ -767,6 +844,49 @@ def test_ranking_metrics_profile_keeps_training_logs_slim():
     assert logs["pair_accuracy"] == pytest.approx(3.0 / 13.0)
     assert logs["spearman"] == pytest.approx(-0.25)
     assert logs["pearson"] == pytest.approx(-0.25)
+
+
+def test_contrastive_ranking_profile_adds_only_objective_component_losses():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(
+        reward_metrics_profile="ranking",
+        reward_ranking_score_diagnostics=True,
+    )
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(
+        pair_scoring_mode="cosine",
+        ranking_loss_weight=0.5,
+        contrastive_loss_weight=0.5,
+        classification_loss_weight=0.0,
+    )
+    trainer._reset_train_component_accumulator()
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(1.25),
+        contrastive_loss=torch.tensor(2.75),
+        classification_loss=None,
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([-0.3, 0.0, 0.3]),
+        activity_labels=torch.tensor([0.0, 0.0, 1.0]),
+        ranking_score=torch.tensor([-0.3, 0.0, 0.3]),
+        pchembl_values=torch.tensor([5.0, 6.0, 7.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        cosine_similarity=torch.tensor([-0.3, 0.0, 0.3]),
+    )
+
+    logs = trainer._consume_train_component_logs()
+
+    assert set(logs) == {
+        "ranking_loss",
+        "contrastive_loss",
+        "cosine_std",
+        "pair_accuracy",
+        "spearman",
+        "pearson",
+    }
+    assert logs["ranking_loss"] == pytest.approx(1.25)
+    assert logs["contrastive_loss"] == pytest.approx(2.75)
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
@@ -1062,6 +1182,35 @@ def test_simple_cosine_scale10_config_uses_full_data_and_successful_overfit_sett
     assert config.training.training_mode == "single_gpu"
     assert config.training.metrics_profile == "ranking"
     assert "simple_cosine_scale10" in config.training.output_dir
+
+
+def test_scale10_contrastive_config_mirrors_ligunity_without_classification():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale10_contrastive.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.protein_model_name_or_path == (
+        "facebook/esm2_t12_35M_UR50D"
+    )
+    assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
+    assert config.model.pair_scoring_mode == "cosine"
+    assert config.model.ranking_temperature == pytest.approx(0.1)
+    assert config.model.ranking_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_active_threshold == pytest.approx(5.0)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.model.deduplicate_protein_inputs is True
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.data.max_classification_only_per_item == 0
+    assert config.training.per_device_train_batch_size == 12
+    assert config.training.gradient_accumulation_steps == 4
+    assert config.training.dataloader_num_workers == 8
+    assert config.training.metrics_profile == "ranking"
+    assert "scale10_contrastive_ranking" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():

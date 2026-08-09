@@ -92,6 +92,32 @@ def test_reward_model_config_validates_scaled_cosine_settings():
         RewardModelConfig(cosine_classification_bias_init=float("nan"))
 
 
+def test_reward_model_config_validates_ligunity_contrastive_settings():
+    config = RewardModelConfig(
+        pair_scoring_mode="cosine",
+        contrastive_loss_weight=0.5,
+        contrastive_active_threshold=5.0,
+    )
+    assert config.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.contrastive_active_threshold == pytest.approx(5.0)
+
+    with pytest.raises(ValueError, match="contrastive_loss_weight"):
+        RewardModelConfig(contrastive_loss_weight=-0.1)
+    with pytest.raises(ValueError, match="contrastive_active_threshold"):
+        RewardModelConfig(contrastive_active_threshold=float("nan"))
+    with pytest.raises(ValueError, match="pair_scoring_mode='cosine'"):
+        RewardModelConfig(
+            pair_scoring_mode="mlp",
+            contrastive_loss_weight=0.5,
+        )
+    with pytest.raises(ValueError, match="deduplicate_protein_inputs=true"):
+        RewardModelConfig(
+            pair_scoring_mode="cosine",
+            contrastive_loss_weight=0.5,
+            deduplicate_protein_inputs=False,
+        )
+
+
 def test_reward_model_config_validates_molecule_encoder_settings():
     with pytest.raises(ValueError, match="molecule_input_representation"):
         RewardModelConfig(molecule_input_representation="inchi")

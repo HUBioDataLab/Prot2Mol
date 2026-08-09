@@ -10,7 +10,10 @@ import torch.nn.functional as F
 from .config import RewardModelConfig
 from .encoders import LoadedEncoder, batch_encode_texts, encode_tokens, load_encoder_bundle
 from .fusion import RewardMLPHead, TokenFusion, masked_pool, normalize_mask
-from .losses import ligunity_listwise_loss
+from .losses import (
+    ligunity_bidirectional_contrastive_loss,
+    ligunity_listwise_loss,
+)
 from .outputs import RewardModelOutput
 
 
@@ -258,6 +261,100 @@ class RewardModel(nn.Module):
             affinity_margin=self._config.ranking_affinity_margin,
         )
 
+    def _compute_contrastive_loss(
+        self,
+        normalized_protein_embedding: torch.Tensor,
+        normalized_molecule_embedding: torch.Tensor,
+        pchembl_values: torch.Tensor,
+        ranking_group_ids: torch.Tensor,
+        contrastive_target_ids: torch.Tensor,
+        contrastive_molecule_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build LigUnity's shared assay-by-ligand score matrix from pair rows."""
+        group_ids = ranking_group_ids.reshape(-1).to(
+            device=normalized_protein_embedding.device,
+            dtype=torch.long,
+        )
+        pchembl = pchembl_values.reshape(-1).to(
+            device=normalized_protein_embedding.device,
+        )
+        target_ids = contrastive_target_ids.reshape(-1).to(
+            device=normalized_protein_embedding.device,
+            dtype=torch.long,
+        )
+        molecule_ids = contrastive_molecule_ids.reshape(-1).to(
+            device=normalized_protein_embedding.device,
+            dtype=torch.long,
+        )
+        num_pairs = normalized_protein_embedding.size(0)
+        if normalized_molecule_embedding.size(0) != num_pairs:
+            raise ValueError("normalized protein and molecule batches must align")
+        if not all(
+            values.numel() == num_pairs
+            for values in (group_ids, pchembl, target_ids, molecule_ids)
+        ):
+            raise ValueError(
+                "contrastive metadata and embeddings must contain the same number of pairs"
+            )
+
+        valid_indices = torch.nonzero(group_ids >= 0, as_tuple=False).flatten()
+        if valid_indices.numel() == 0:
+            zero = normalized_protein_embedding.sum() * 0.0
+            return zero, zero, zero
+
+        valid_group_ids = group_ids.index_select(0, valid_indices)
+        unique_group_ids, ligand_group_ids = torch.unique(
+            valid_group_ids,
+            sorted=True,
+            return_inverse=True,
+        )
+        num_groups = unique_group_ids.numel()
+        group_membership = F.one_hot(
+            ligand_group_ids,
+            num_classes=num_groups,
+        ).transpose(0, 1).bool()
+        representative_positions = group_membership.long().argmax(dim=1)
+        representative_indices = valid_indices.index_select(
+            0,
+            representative_positions,
+        )
+        valid_target_ids = target_ids.index_select(0, valid_indices)
+        group_target_ids = valid_target_ids.index_select(
+            0,
+            representative_positions,
+        )
+        if not torch.equal(
+            group_target_ids.index_select(0, ligand_group_ids),
+            valid_target_ids,
+        ):
+            raise ValueError(
+                "every contrastive assay group must contain exactly one target identity"
+            )
+
+        group_protein_embeddings = normalized_protein_embedding.index_select(
+            0,
+            representative_indices,
+        )
+        ligand_molecule_embeddings = normalized_molecule_embedding.index_select(
+            0,
+            valid_indices,
+        )
+        # Ranking divides its diagonal scores by this same temperature. The
+        # matrix therefore supplies identical scaled cosine scores to both
+        # objectives, matching LigUnity's shared-score construction.
+        contrastive_scores = torch.matmul(
+            group_protein_embeddings.float(),
+            ligand_molecule_embeddings.float().transpose(0, 1),
+        ) / float(self._config.ranking_temperature)
+        return ligunity_bidirectional_contrastive_loss(
+            contrastive_scores,
+            pchembl.index_select(0, valid_indices),
+            ligand_group_ids,
+            group_target_ids,
+            molecule_ids.index_select(0, valid_indices),
+            active_threshold=self._config.contrastive_active_threshold,
+        )
+
     def _compute_legacy_pair_ranking_loss(
         self,
         ranking_score: torch.Tensor,
@@ -381,6 +478,8 @@ class RewardModel(nn.Module):
         activity_labels: Optional[torch.Tensor] = None,
         pchembl_values: Optional[torch.Tensor] = None,
         ranking_group_ids: Optional[torch.Tensor] = None,
+        contrastive_target_ids: Optional[torch.Tensor] = None,
+        contrastive_molecule_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
         negative_indices: Optional[torch.Tensor] = None,
         return_token_embeddings: bool = False,
@@ -467,6 +566,9 @@ class RewardModel(nn.Module):
         activity_probability = torch.sigmoid(activity_logits)
 
         ranking_loss = None
+        contrastive_loss = None
+        contrastive_protein_to_molecule_loss = None
+        contrastive_molecule_to_protein_loss = None
         classification_loss = None
         total_loss = None
 
@@ -476,6 +578,43 @@ class RewardModel(nn.Module):
         ):
             classification_loss = self._compute_classification_loss(activity_logits, activity_labels)
             total_loss = classification_loss * self._config.classification_loss_weight
+
+        if self._config.contrastive_loss_weight > 0.0:
+            if pchembl_values is None or ranking_group_ids is None:
+                raise ValueError(
+                    "contrastive learning requires pchembl_values and ranking_group_ids"
+                )
+            if contrastive_target_ids is None or contrastive_molecule_ids is None:
+                raise ValueError(
+                    "contrastive learning requires target and molecule identity ids"
+                )
+            if (
+                normalized_protein_embedding is None
+                or normalized_molecule_embedding is None
+            ):
+                raise RuntimeError(
+                    "contrastive learning requires normalized protein and molecule embeddings"
+                )
+            (
+                contrastive_loss,
+                contrastive_protein_to_molecule_loss,
+                contrastive_molecule_to_protein_loss,
+            ) = self._compute_contrastive_loss(
+                normalized_protein_embedding,
+                normalized_molecule_embedding,
+                pchembl_values,
+                ranking_group_ids,
+                contrastive_target_ids,
+                contrastive_molecule_ids,
+            )
+            weighted_contrastive = (
+                contrastive_loss * self._config.contrastive_loss_weight
+            )
+            total_loss = (
+                weighted_contrastive
+                if total_loss is None
+                else total_loss + weighted_contrastive
+            )
 
         if pchembl_values is not None or ranking_group_ids is not None:
             if pchembl_values is None or ranking_group_ids is None:
@@ -508,6 +647,13 @@ class RewardModel(nn.Module):
             activity_probability=activity_probability,
             joint_embedding=joint_embedding,
             ranking_loss=ranking_loss,
+            contrastive_loss=contrastive_loss,
+            contrastive_protein_to_molecule_loss=(
+                contrastive_protein_to_molecule_loss
+            ),
+            contrastive_molecule_to_protein_loss=(
+                contrastive_molecule_to_protein_loss
+            ),
             classification_loss=classification_loss,
             loss=total_loss,
             protein_token_embeddings=protein_tokens if return_token_embeddings else None,
@@ -537,6 +683,8 @@ class RewardModel(nn.Module):
         activity_labels: Optional[torch.Tensor] = None,
         pchembl_values: Optional[torch.Tensor] = None,
         ranking_group_ids: Optional[torch.Tensor] = None,
+        contrastive_target_ids: Optional[torch.Tensor] = None,
+        contrastive_molecule_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
         negative_indices: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
@@ -556,6 +704,10 @@ class RewardModel(nn.Module):
             pchembl_values = pchembl_values.to(target_device)
         if ranking_group_ids is not None:
             ranking_group_ids = ranking_group_ids.to(target_device)
+        if contrastive_target_ids is not None:
+            contrastive_target_ids = contrastive_target_ids.to(target_device)
+        if contrastive_molecule_ids is not None:
+            contrastive_molecule_ids = contrastive_molecule_ids.to(target_device)
         if positive_indices is not None:
             positive_indices = positive_indices.to(target_device)
         if negative_indices is not None:
@@ -569,6 +721,8 @@ class RewardModel(nn.Module):
             activity_labels=activity_labels,
             pchembl_values=pchembl_values,
             ranking_group_ids=ranking_group_ids,
+            contrastive_target_ids=contrastive_target_ids,
+            contrastive_molecule_ids=contrastive_molecule_ids,
             positive_indices=positive_indices,
             negative_indices=negative_indices,
             return_token_embeddings=return_token_embeddings,

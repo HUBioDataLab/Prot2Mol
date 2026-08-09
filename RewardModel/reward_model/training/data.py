@@ -1203,6 +1203,26 @@ class RewardPairCollator:
 class RewardAssayListCollator(RewardPairCollator):
     """Flatten assay-list items while retaining list boundaries for ranking."""
 
+    @staticmethod
+    def _collate_identity_ids(
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        key: str,
+    ) -> torch.Tensor | None:
+        presence = [key in row and row[key] is not None for row in rows]
+        if not any(presence):
+            return None
+        if not all(presence):
+            raise ValueError(f"{key} must be present for every example row or none")
+        identity_to_id: Dict[str, int] = {}
+        ids: list[int] = []
+        for row in rows:
+            identity = str(row[key])
+            if identity not in identity_to_id:
+                identity_to_id[identity] = len(identity_to_id)
+            ids.append(identity_to_id[identity])
+        return torch.tensor(ids, dtype=torch.long)
+
     def __call__(self, features: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         if not features:
             raise ValueError("RewardAssayListCollator received an empty batch")
@@ -1304,6 +1324,18 @@ class RewardAssayListCollator(RewardPairCollator):
             "num_ranking_lists": torch.tensor(next_group_id, dtype=torch.long),
             "num_ranked_examples": torch.tensor(ranked_examples, dtype=torch.long),
         }
+        contrastive_target_ids = self._collate_identity_ids(
+            all_rows,
+            key="target_chembl_id",
+        )
+        contrastive_molecule_ids = self._collate_identity_ids(
+            all_rows,
+            key="compound_id",
+        )
+        if contrastive_target_ids is not None:
+            batch["contrastive_target_ids"] = contrastive_target_ids
+        if contrastive_molecule_ids is not None:
+            batch["contrastive_molecule_ids"] = contrastive_molecule_ids
         if all(protein_shuffle_presence):
             shuffled_tokens = self.collate_example_tokens(protein_shuffled_rows)
             batch["protein_shuffled_input_ids"] = shuffled_tokens[

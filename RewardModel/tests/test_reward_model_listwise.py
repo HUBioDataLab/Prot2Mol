@@ -10,10 +10,12 @@ from torch.utils.data import BatchSampler, DataLoader
 
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import (
+    DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
     DEFAULT_RANKING_AFFINITY_MARGIN,
     LoadedEncoder,
     RewardModel,
     RewardModelConfig,
+    ligunity_bidirectional_contrastive_loss,
     ligunity_listwise_loss,
 )
 from reward_model.training import (
@@ -105,6 +107,228 @@ def _reference_unique_ligunity_loss(
         candidates = torch.cat([ordered_scores[index : index + 1], weaker_scores])
         terms.append(weight * (torch.logsumexp(candidates, dim=0) - ordered_scores[index]))
     return torch.stack(terms).sum()
+
+
+def _reference_ligunity_contrastive_loss(
+    scores,
+    pchembl_values,
+    ligand_group_ids,
+    group_target_ids,
+    molecule_identity_ids,
+    active_threshold=DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
+):
+    """Literal CPU/device-neutral translation of LigUnity's released loops."""
+    scores = scores.float() if scores.dtype in (torch.float16, torch.bfloat16) else scores
+    num_groups = scores.shape[0]
+    masked_scores = scores.clone()
+    for group_index in range(num_groups):
+        own_molecules = molecule_identity_ids[ligand_group_ids == group_index]
+        for other_group_index in range(num_groups):
+            if other_group_index == group_index:
+                continue
+            other_indices = torch.nonzero(
+                ligand_group_ids == other_group_index,
+                as_tuple=False,
+            ).flatten()
+            if group_target_ids[group_index] == group_target_ids[other_group_index]:
+                masked_scores[group_index, other_indices] += -1e9
+            for ligand_index_tensor in other_indices:
+                ligand_index = int(ligand_index_tensor.item())
+                if (own_molecules == molecule_identity_ids[ligand_index]).any():
+                    masked_scores[group_index, ligand_index] += -1e9
+
+    protein_to_molecule_terms = []
+    molecule_to_protein_terms = []
+    for group_index in range(num_groups):
+        own_indices = torch.nonzero(
+            ligand_group_ids == group_index,
+            as_tuple=False,
+        ).flatten()
+        group_size = int(own_indices.numel())
+        for ligand_index_tensor in own_indices:
+            ligand_index = int(ligand_index_tensor.item())
+            mask = torch.zeros_like(masked_scores[group_index])
+            mask[own_indices] = -1e9
+            mask[ligand_index] = 0.0
+            loss = torch.nn.functional.nll_loss(
+                torch.nn.functional.log_softmax(
+                    mask + masked_scores[group_index],
+                    dim=-1,
+                ),
+                torch.tensor(ligand_index, device=scores.device),
+                reduction="sum",
+            )
+            if (
+                group_size > 1
+                and pchembl_values[ligand_index] < active_threshold
+            ):
+                continue
+            protein_to_molecule_terms.append(loss / math.sqrt(group_size))
+
+    ligand_to_group = ligand_group_ids.long()
+    molecule_to_protein_per_ligand = torch.nn.functional.nll_loss(
+        torch.nn.functional.log_softmax(masked_scores.transpose(0, 1), dim=-1),
+        ligand_to_group,
+        reduction="none",
+    )
+    for group_index in range(num_groups):
+        own = ligand_group_ids == group_index
+        molecule_to_protein_terms.append(
+            molecule_to_protein_per_ligand[own].sum()
+            / math.sqrt(int(own.sum().item()))
+        )
+
+    protein_to_molecule = torch.stack(protein_to_molecule_terms).sum() / num_groups
+    molecule_to_protein = torch.stack(molecule_to_protein_terms).sum() / num_groups
+    return (
+        protein_to_molecule + molecule_to_protein,
+        protein_to_molecule,
+        molecule_to_protein,
+    )
+
+
+def _contrastive_reference_inputs(*, requires_grad=False, dtype=torch.float64):
+    scores = torch.tensor(
+        [
+            [1.2, 0.7, -0.4, 2.5, 0.1, -0.3, 0.4],
+            [-0.2, 0.3, 1.1, 1.4, 0.8, 0.2, -0.5],
+            [0.4, -0.6, 0.2, -0.1, 0.7, 1.3, 0.9],
+        ],
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    return (
+        scores,
+        torch.tensor([7.0, 4.5, 8.0, 6.5, 4.0, 7.5, 5.5], dtype=dtype),
+        torch.tensor([0, 0, 1, 1, 1, 2, 2]),
+        torch.tensor([10, 10, 20]),
+        torch.tensor([100, 101, 102, 100, 103, 104, 105]),
+    )
+
+
+def test_ligunity_contrastive_loss_matches_released_reference_and_gradients():
+    inputs = _contrastive_reference_inputs(requires_grad=True)
+    actual = ligunity_bidirectional_contrastive_loss(*inputs)
+    expected = _reference_ligunity_contrastive_loss(*inputs)
+
+    actual_gradient = torch.autograd.grad(actual[0], inputs[0], retain_graph=True)[0]
+    expected_gradient = torch.autograd.grad(expected[0], inputs[0])[0]
+
+    for actual_value, expected_value in zip(actual, expected):
+        assert torch.allclose(actual_value, expected_value, rtol=1e-12, atol=1e-12)
+    assert torch.allclose(
+        actual_gradient,
+        expected_gradient,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("seed", [3, 7, 19, 31])
+def test_ligunity_contrastive_randomized_values_and_gradients_match_reference(seed):
+    generator = torch.Generator().manual_seed(seed)
+    scores = torch.randn(
+        (3, 7),
+        generator=generator,
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    pchembl = 4.0 + 4.0 * torch.rand(
+        7,
+        generator=generator,
+        dtype=torch.float64,
+    )
+    owners = torch.tensor([0, 1, 1, 2, 2, 2, 2])
+    target_ids = torch.tensor([10, 20, 10])
+    molecule_ids = torch.tensor([100, 101, 102, 100, 103, 104, 105])
+
+    actual = ligunity_bidirectional_contrastive_loss(
+        scores,
+        pchembl,
+        owners,
+        target_ids,
+        molecule_ids,
+    )
+    expected = _reference_ligunity_contrastive_loss(
+        scores,
+        pchembl,
+        owners,
+        target_ids,
+        molecule_ids,
+    )
+    actual_gradient = torch.autograd.grad(actual[0], scores, retain_graph=True)[0]
+    expected_gradient = torch.autograd.grad(expected[0], scores)[0]
+
+    for actual_value, expected_value in zip(actual, expected):
+        assert torch.allclose(actual_value, expected_value, rtol=1e-12, atol=1e-12)
+    assert torch.allclose(
+        actual_gradient,
+        expected_gradient,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
+def test_ligunity_contrastive_masks_same_target_and_duplicate_molecule_scores():
+    inputs = _contrastive_reference_inputs()
+    baseline = ligunity_bidirectional_contrastive_loss(*inputs)
+    changed_scores = inputs[0].clone()
+    # Groups 0 and 1 share a target, so every cross-assay entry is masked.
+    changed_scores[0, 2:5] = 1e6
+    changed_scores[1, 0:2] = -1e6
+    # Molecule 100 occurs in group 0 column 0 and group 1 column 3.
+    changed_scores[0, 3] = -1e6
+    changed_scores[1, 0] = 1e6
+    changed = ligunity_bidirectional_contrastive_loss(changed_scores, *inputs[1:])
+
+    for baseline_value, changed_value in zip(baseline, changed):
+        assert torch.allclose(baseline_value, changed_value, rtol=0.0, atol=1e-12)
+
+
+def test_ligunity_contrastive_active_filter_is_directionally_asymmetric():
+    scores = torch.tensor(
+        [[1.0, -0.5, 0.3, 0.2], [0.1, 0.4, 1.2, -0.7]],
+        dtype=torch.float64,
+    )
+    pchembl = torch.tensor([7.0, 4.0, 8.0, 6.0], dtype=torch.float64)
+    owners = torch.tensor([0, 0, 1, 1])
+    target_ids = torch.tensor([10, 20])
+    molecule_ids = torch.tensor([100, 101, 102, 103])
+    baseline = ligunity_bidirectional_contrastive_loss(
+        scores,
+        pchembl,
+        owners,
+        target_ids,
+        molecule_ids,
+    )
+    changed_scores = scores.clone()
+    changed_scores[0, 1] = 20.0
+    changed = ligunity_bidirectional_contrastive_loss(
+        changed_scores,
+        pchembl,
+        owners,
+        target_ids,
+        molecule_ids,
+    )
+
+    assert changed[1] == pytest.approx(baseline[1].item(), abs=1e-12)
+    assert changed[2] != pytest.approx(baseline[2].item(), abs=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_ligunity_contrastive_promotes_low_precision_math(dtype):
+    inputs = list(_contrastive_reference_inputs(requires_grad=True, dtype=dtype))
+    loss, protein_to_molecule, molecule_to_protein = (
+        ligunity_bidirectional_contrastive_loss(*inputs)
+    )
+    loss.backward()
+
+    assert loss.dtype == torch.float32
+    assert torch.isfinite(loss)
+    assert torch.isfinite(protein_to_molecule)
+    assert torch.isfinite(molecule_to_protein)
+    assert inputs[0].grad is not None
+    assert torch.isfinite(inputs[0].grad).all()
 
 
 def test_ligunity_loss_matches_equation_reference_for_unique_affinities():
@@ -597,6 +821,16 @@ def test_assay_list_collator_marks_only_ranked_rows_and_keeps_all_labels():
     assert (batch["ranking_group_ids"] >= 0).sum().item() == 16
     assert (batch["ranking_group_ids"] < 0).sum().item() == 5
     assert sorted(batch["evaluation_example_indices"].tolist()) == list(range(21))
+    assert batch["contrastive_target_ids"].shape == (21,)
+    assert batch["contrastive_molecule_ids"].shape == (21,)
+    assert torch.unique(batch["contrastive_molecule_ids"]).numel() == 21
+    for group_id in torch.unique(
+        batch["ranking_group_ids"][batch["ranking_group_ids"] >= 0]
+    ):
+        group_targets = batch["contrastive_target_ids"][
+            batch["ranking_group_ids"] == group_id
+        ]
+        assert torch.unique(group_targets).numel() == 1
 
 
 def test_joint_model_backward_reaches_both_heads_and_shared_trunk():

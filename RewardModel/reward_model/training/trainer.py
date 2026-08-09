@@ -201,6 +201,7 @@ class RewardModelTrainer(Trainer):
     def _reset_train_component_accumulator(self) -> None:
         self._train_component_sums = {
             "ranking_loss": 0.0,
+            "contrastive_loss": 0.0,
             "classification_loss": 0.0,
             "num_examples": 0.0,
             "num_ranking_lists": 0.0,
@@ -408,10 +409,14 @@ class RewardModelTrainer(Trainer):
         pchembl_values: Optional[torch.Tensor],
         ranking_group_ids: Optional[torch.Tensor],
         cosine_similarity: Optional[torch.Tensor] = None,
+        contrastive_loss: Optional[torch.Tensor] = None,
     ) -> None:
         ranking_loss_value = self._to_scalar(ranking_loss)
         num_ranking_lists_value = self._to_scalar(num_ranking_lists)
         self._train_component_sums["ranking_loss"] += ranking_loss_value
+        self._train_component_sums["contrastive_loss"] += self._to_scalar(
+            contrastive_loss
+        )
         if not self._ranking_metrics_profile_enabled():
             self._train_component_sums["classification_loss"] += self._to_scalar(
                 classification_loss
@@ -500,6 +505,17 @@ class RewardModelTrainer(Trainer):
         denom = float(self._train_component_count)
         if self._ranking_metrics_profile_enabled():
             logs = {}
+            if float(self.model.config.contrastive_loss_weight) > 0.0:
+                logs.update(
+                    {
+                        "ranking_loss": (
+                            self._train_component_sums["ranking_loss"] / denom
+                        ),
+                        "contrastive_loss": (
+                            self._train_component_sums["contrastive_loss"] / denom
+                        ),
+                    }
+                )
             if self._train_ranking_window_scores:
                 scores = torch.cat(self._train_ranking_window_scores)
                 targets = torch.cat(self._train_ranking_window_targets)
@@ -535,6 +551,7 @@ class RewardModelTrainer(Trainer):
 
         logs = {
             "ranking_loss": self._train_component_sums["ranking_loss"] / denom,
+            "contrastive_loss": self._train_component_sums["contrastive_loss"] / denom,
             "classification_loss": self._train_component_sums["classification_loss"] / denom,
             "num_examples": self._train_component_sums["num_examples"] / denom,
             "num_ranking_lists": self._train_component_sums["num_ranking_lists"] / denom,
@@ -579,6 +596,14 @@ class RewardModelTrainer(Trainer):
         if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
             model_inputs["pchembl_values"] = inputs["pchembl_values"]
             model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
+            if "contrastive_target_ids" in inputs:
+                model_inputs["contrastive_target_ids"] = inputs[
+                    "contrastive_target_ids"
+                ]
+            if "contrastive_molecule_ids" in inputs:
+                model_inputs["contrastive_molecule_ids"] = inputs[
+                    "contrastive_molecule_ids"
+                ]
         elif "positive_indices" in inputs and "negative_indices" in inputs:
             model_inputs["positive_indices"] = inputs["positive_indices"]
             model_inputs["negative_indices"] = inputs["negative_indices"]
@@ -603,6 +628,7 @@ class RewardModelTrainer(Trainer):
                 pchembl_values=inputs.get("pchembl_values"),
                 ranking_group_ids=inputs.get("ranking_group_ids"),
                 cosine_similarity=outputs.cosine_similarity,
+                contrastive_loss=outputs.contrastive_loss,
             )
 
         return (outputs.loss, outputs) if return_outputs else outputs.loss
@@ -836,6 +862,8 @@ class RewardModelTrainer(Trainer):
                     "pair_accuracy",
                     "spearman",
                     "pearson",
+                    "ranking_loss",
+                    "contrastive_loss",
                     "train_loss",
                 }
                 or (
@@ -868,7 +896,14 @@ class RewardModelTrainer(Trainer):
                 or "ranking_list_" in key
                 or key in {"cosine_std", "eval_cosine_std", "eval_pair_accuracy"}
                 or key in {"pair_accuracy", "spearman", "pearson"}
-                or key in {"loss", "grad_norm", "ranking_loss", "total_loss"}
+                or key
+                in {
+                    "loss",
+                    "grad_norm",
+                    "ranking_loss",
+                    "contrastive_loss",
+                    "total_loss",
+                }
                 or key.endswith("_ranking_loss")
                 or key.endswith("_spearman")
             )

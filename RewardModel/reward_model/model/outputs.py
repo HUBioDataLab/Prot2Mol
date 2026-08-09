@@ -13,6 +13,9 @@ class RewardModelOutput:
     activity_probability: torch.Tensor
     joint_embedding: torch.Tensor
     ranking_loss: Optional[torch.Tensor] = None
+    contrastive_loss: Optional[torch.Tensor] = None
+    contrastive_protein_to_molecule_loss: Optional[torch.Tensor] = None
+    contrastive_molecule_to_protein_loss: Optional[torch.Tensor] = None
     classification_loss: Optional[torch.Tensor] = None
     loss: Optional[torch.Tensor] = None
     protein_token_embeddings: Optional[torch.Tensor] = None

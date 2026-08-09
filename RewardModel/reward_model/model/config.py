@@ -5,7 +5,10 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional
 
-from .losses import DEFAULT_RANKING_AFFINITY_MARGIN
+from .losses import (
+    DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
+    DEFAULT_RANKING_AFFINITY_MARGIN,
+)
 
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
@@ -39,6 +42,8 @@ class RewardModelConfig:
     cosine_classification_bias_init: float = 0.0
     activity_threshold: float = 6.0
     ranking_loss_weight: float = 1.0
+    contrastive_loss_weight: float = 0.0
+    contrastive_active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD
     classification_loss_weight: float = 1.0
     ranking_temperature: float = 1.0
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
@@ -117,6 +122,28 @@ class RewardModelConfig:
             raise ValueError("bce_pos_weight must be > 0")
         if self.ranking_loss_weight < 0.0:
             raise ValueError("ranking_loss_weight must be >= 0")
+        if self.contrastive_loss_weight < 0.0 or not math.isfinite(
+            float(self.contrastive_loss_weight)
+        ):
+            raise ValueError("contrastive_loss_weight must be finite and >= 0")
+        if not math.isfinite(float(self.contrastive_active_threshold)):
+            raise ValueError("contrastive_active_threshold must be finite")
+        if (
+            self.contrastive_loss_weight > 0.0
+            and self.pair_scoring_mode != "cosine"
+        ):
+            raise ValueError(
+                "contrastive_loss_weight > 0 requires pair_scoring_mode='cosine' "
+                "so ranking and contrastive learning share one normalized score matrix"
+            )
+        if (
+            self.contrastive_loss_weight > 0.0
+            and not self.deduplicate_protein_inputs
+        ):
+            raise ValueError(
+                "contrastive_loss_weight > 0 requires deduplicate_protein_inputs=true "
+                "so each assay uses one protein embedding"
+            )
         if self.classification_loss_weight < 0.0:
             raise ValueError("classification_loss_weight must be >= 0")
         if self.ranking_temperature <= 0.0:
