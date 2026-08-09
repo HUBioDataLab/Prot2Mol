@@ -1238,7 +1238,7 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
     assert config.training.gradient_accumulation_steps == 1
     assert config.training.training_mode == "multi_gpu"
     assert config.training.bf16 is True
-    assert config.training.dataloader_num_workers == 8
+    assert config.training.dataloader_num_workers == 4
     assert "lr1e4_batch16_4gpu" in config.training.output_dir
 
 

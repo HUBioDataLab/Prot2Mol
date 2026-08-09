@@ -51,7 +51,7 @@ training:
   weight_decay: 0.01
   max_grad_norm: 10.0
   logging_steps: 10
-  dataloader_num_workers: 8
+  dataloader_num_workers: 4
   dynamic_padding: true
   length_bucketing: true
   length_bucket_size_multiplier: 50
