@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -266,6 +266,7 @@ def compute_joint_evaluation_metrics(
     ranking_partition_seed: int = 42,
     ranking_score_diagnostics: bool = False,
     cosine_similarities: torch.Tensor | None = None,
+    metrics_profile: str = "full",
 ) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     """Compute deterministic full-dataset losses and metrics from one scoring pass."""
     logits = activity_logits.reshape(-1).detach().cpu().float()
@@ -293,12 +294,19 @@ def compute_joint_evaluation_metrics(
         if not torch.isfinite(shuffled_scores).all():
             raise ValueError("protein_shuffled_scores must contain only finite values")
 
-    pos_weight = torch.tensor(float(bce_pos_weight), dtype=logits.dtype)
-    classification_loss = F.binary_cross_entropy_with_logits(
-        logits,
-        labels,
-        pos_weight=pos_weight,
-    )
+    if metrics_profile == "ranking":
+        if classification_loss_weight != 0.0:
+            raise ValueError(
+                "metrics_profile=ranking requires classification_loss_weight=0.0"
+            )
+        classification_loss = torch.zeros((), dtype=logits.dtype)
+    else:
+        pos_weight = torch.tensor(float(bce_pos_weight), dtype=logits.dtype)
+        classification_loss = F.binary_cross_entropy_with_logits(
+            logits,
+            labels,
+            pos_weight=pos_weight,
+        )
     ranking_partitions = build_complete_coverage_ranking_partitions(
         pchembl_values=pchembl,
         ranking_group_ids=group_indices,
@@ -326,8 +334,6 @@ def compute_joint_evaluation_metrics(
         + float(ranking_loss_weight) * ranking_loss
     )
 
-    probabilities = torch.sigmoid(logits).numpy()
-    metrics = compute_classification_metrics(probabilities, labels.numpy())
     string_group_ids = [group_id_names[int(index)] for index in group_indices.tolist()]
     spearman_metrics, assay_records = _compute_groupwise_spearman_with_records(
         group_ids=string_group_ids,
@@ -336,48 +342,66 @@ def compute_joint_evaluation_metrics(
         min_group_size=MIN_LISTWISE_LIGANDS,
         min_pchembl_span=ranking_min_pchembl_span,
     )
-    metrics.update(spearman_metrics)
-    if activity_types is not None:
-        metrics.update(
-            compute_activity_type_metrics(
-                probabilities=probabilities,
-                labels=labels.numpy(),
-                activity_types=activity_types,
+    if metrics_profile == "ranking":
+        metrics = {
+            "eval_loss": float(total_loss.item()),
+            "eval_spearman": spearman_metrics["eval_spearman"],
+            "eval_pearson": _compute_weighted_groupwise_pearson(
                 group_ids=string_group_ids,
                 ranking_scores=scores.tolist(),
                 pchembl_values=pchembl.tolist(),
+                min_group_size=MIN_LISTWISE_LIGANDS,
                 min_pchembl_span=ranking_min_pchembl_span,
-            )
-        )
-    if shuffled_scores is not None:
-        metrics.update(
-            compute_protein_shuffle_sensitivity(
-                group_ids=string_group_ids,
-                baseline_scores=scores.tolist(),
-                shuffled_scores=shuffled_scores.tolist(),
-                pchembl_values=pchembl.tolist(),
-                min_pchembl_span=ranking_min_pchembl_span,
-            )
-        )
-    metrics.update(
-        {
-            "eval_loss": float(total_loss.item()),
-            "eval_total_loss": float(total_loss.item()),
-            "eval_classification_loss": float(classification_loss.item()),
-            "eval_ranking_loss": float(ranking_loss.item()),
-            "eval_num_examples": float(logits.numel()),
-            "eval_num_ranking_groups": float(len(assay_records)),
-            "eval_num_ranking_lists": float(
-                int(ranking_partitions[0].max().item()) + 1
-                if (ranking_partitions[0] >= 0).any()
-                else 0
             ),
-            "eval_num_ranked_examples": float(
-                (ranking_partitions[0] >= 0).sum().item()
-            ),
-            "eval_ranking_partitions": float(len(ranking_partitions)),
         }
-    )
+    elif metrics_profile == "full":
+        probabilities = torch.sigmoid(logits).numpy()
+        metrics = compute_classification_metrics(probabilities, labels.numpy())
+        metrics.update(spearman_metrics)
+        if activity_types is not None:
+            metrics.update(
+                compute_activity_type_metrics(
+                    probabilities=probabilities,
+                    labels=labels.numpy(),
+                    activity_types=activity_types,
+                    group_ids=string_group_ids,
+                    ranking_scores=scores.tolist(),
+                    pchembl_values=pchembl.tolist(),
+                    min_pchembl_span=ranking_min_pchembl_span,
+                )
+            )
+        if shuffled_scores is not None:
+            metrics.update(
+                compute_protein_shuffle_sensitivity(
+                    group_ids=string_group_ids,
+                    baseline_scores=scores.tolist(),
+                    shuffled_scores=shuffled_scores.tolist(),
+                    pchembl_values=pchembl.tolist(),
+                    min_pchembl_span=ranking_min_pchembl_span,
+                )
+            )
+        metrics.update(
+            {
+                "eval_loss": float(total_loss.item()),
+                "eval_total_loss": float(total_loss.item()),
+                "eval_classification_loss": float(classification_loss.item()),
+                "eval_ranking_loss": float(ranking_loss.item()),
+                "eval_num_examples": float(logits.numel()),
+                "eval_num_ranking_groups": float(len(assay_records)),
+                "eval_num_ranking_lists": float(
+                    int(ranking_partitions[0].max().item()) + 1
+                    if (ranking_partitions[0] >= 0).any()
+                    else 0
+                ),
+                "eval_num_ranked_examples": float(
+                    (ranking_partitions[0] >= 0).sum().item()
+                ),
+                "eval_ranking_partitions": float(len(ranking_partitions)),
+            }
+        )
+    else:
+        raise ValueError("metrics_profile must be 'full' or 'ranking'")
+
     if ranking_score_diagnostics:
         diagnostic_metrics = compute_ranking_score_diagnostics(
             ranking_scores=scores,
@@ -389,9 +413,19 @@ def compute_joint_evaluation_metrics(
             temperature=ranking_temperature,
             affinity_margin=ranking_affinity_margin,
         )
-        metrics.update(
-            {f"eval_{key}": value for key, value in diagnostic_metrics.items()}
-        )
+        if metrics_profile == "ranking":
+            if "ranking_cosine_std" in diagnostic_metrics:
+                metrics["eval_cosine_std"] = diagnostic_metrics[
+                    "ranking_cosine_std"
+                ]
+            if "ranking_margin_pair_accuracy" in diagnostic_metrics:
+                metrics["eval_pair_accuracy"] = diagnostic_metrics[
+                    "ranking_margin_pair_accuracy"
+                ]
+        else:
+            metrics.update(
+                {f"eval_{key}": value for key, value in diagnostic_metrics.items()}
+            )
     return metrics, assay_records
 
 
@@ -577,6 +611,45 @@ def _split_group_id(group_id: str) -> tuple[str, str]:
     return target_chembl_id, assay_id
 
 
+def _compute_weighted_groupwise_pearson(
+    *,
+    group_ids: Sequence[str],
+    ranking_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_group_size: int = 3,
+    min_pchembl_span: float = 0.0,
+) -> float:
+    grouped_scores: Dict[str, list[float]] = defaultdict(list)
+    grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
+    for group_id, score, pchembl in zip(group_ids, ranking_scores, pchembl_values):
+        grouped_scores[str(group_id)].append(float(score))
+        grouped_pchembl[str(group_id)].append(float(pchembl))
+
+    correlations: list[tuple[float, int]] = []
+    for group_id in sorted(grouped_scores):
+        scores = grouped_scores[group_id]
+        pchembls = grouped_pchembl[group_id]
+        if len(scores) < min_group_size:
+            continue
+        if len(set(pchembls)) == 1:
+            continue
+        if max(pchembls) - min(pchembls) < min_pchembl_span:
+            continue
+        if len(set(scores)) == 1:
+            correlation = float("nan")
+        else:
+            result = pearsonr(scores, pchembls)
+            correlation = float(getattr(result, "statistic", result[0]))
+        correlations.append((correlation, len(scores)))
+
+    if not correlations:
+        return float("nan")
+    return float(
+        sum(correlation * size for correlation, size in correlations)
+        / sum(size for _, size in correlations)
+    )
+
+
 def _compute_groupwise_spearman_with_records(
     *,
     group_ids: Sequence[str],
@@ -662,12 +735,23 @@ def _append_assay_spearman_log(
         else f"{metric_key_prefix}_assay_spearman.jsonl"
     )
     path = os.path.join(trainer.args.output_dir, filename)
+    macro_spearman = metrics.get(f"{metric_key_prefix}_macro_spearman")
+    if macro_spearman is None:
+        macro_spearman = (
+            float(np.mean([float(record["spearman"]) for record in assay_records]))
+            if assay_records
+            else float("nan")
+        )
+    num_eligible_groups = metrics.get(
+        f"{metric_key_prefix}_spearman_num_groups",
+        float(len(assay_records)),
+    )
     record = {
         "global_step": int(trainer.state.global_step),
         "epoch": trainer.state.epoch,
         "weighted_spearman": metrics[f"{metric_key_prefix}_spearman"],
-        "macro_spearman": metrics[f"{metric_key_prefix}_macro_spearman"],
-        "num_eligible_groups": metrics[f"{metric_key_prefix}_spearman_num_groups"],
+        "macro_spearman": macro_spearman,
+        "num_eligible_groups": num_eligible_groups,
         "assays": list(assay_records),
     }
     with open(path, "a", encoding="utf-8") as handle:

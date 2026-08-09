@@ -1,8 +1,10 @@
 import pytest
 import torch
+import torch.nn.functional as F
 
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.model import LoadedEncoder, RewardModel, RewardModelConfig, RewardModelOutput
+from reward_model.model.fusion import masked_pool
 
 
 def _build_model(**config_overrides):
@@ -85,6 +87,90 @@ def test_reward_model_applies_configured_dropout_outside_encoders():
 
     assert model.projection_dropout.p == pytest.approx(0.1)
     assert model.fusion.dropout == pytest.approx(0.1)
+
+
+def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
+    torch.manual_seed(7)
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+        dropout=0.1,
+    )
+    model.eval()
+    protein_input_ids = torch.tensor(
+        [[1, 2, 0], [3, 4, 5], [1, 6, 7]], dtype=torch.long
+    )
+    protein_mask = torch.tensor(
+        [[1, 1, 0], [1, 1, 1], [1, 1, 1]], dtype=torch.long
+    )
+    molecule_input_ids = torch.tensor(
+        [[7, 8, 0], [1, 2, 3], [4, 5, 6]], dtype=torch.long
+    )
+    molecule_mask = torch.tensor(
+        [[1, 1, 0], [1, 1, 1], [1, 1, 1]], dtype=torch.long
+    )
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        protein_attention_mask=protein_mask,
+        molecule_input_ids=molecule_input_ids,
+        molecule_attention_mask=molecule_mask,
+        activity_labels=torch.tensor([1.0, 0.0, 1.0]),
+        pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        return_token_embeddings=True,
+    )
+
+    with torch.no_grad():
+        projected_protein = model.protein_projection(
+            model.encode_protein(protein_input_ids, protein_mask)
+        )
+        projected_molecule = model.molecule_projection(
+            model.encode_molecule(molecule_input_ids, molecule_mask)
+        )
+        expected_protein = F.normalize(
+            masked_pool(projected_protein, protein_mask.bool(), "mean"),
+            p=2,
+            dim=-1,
+            eps=1e-6,
+        )
+        expected_molecule = F.normalize(
+            masked_pool(projected_molecule, molecule_mask.bool(), "mean"),
+            p=2,
+            dim=-1,
+            eps=1e-6,
+        )
+        expected_score = (expected_protein * expected_molecule).sum(dim=-1)
+
+    assert model.protein_norm is None
+    assert model.molecule_norm is None
+    assert model.projection_dropout is None
+    assert model.fusion is None
+    assert model.ranking_head is None
+    assert model.classification_head is None
+    assert model.logit_scale is None
+    assert model.classification_logit_bias is None
+    assert outputs.fused_protein_tokens is None
+    assert outputs.fused_molecule_tokens is None
+    assert outputs.score_scale is None
+    assert outputs.classification_logit_bias is None
+    assert torch.allclose(outputs.protein_token_embeddings, projected_protein)
+    assert torch.allclose(outputs.molecule_token_embeddings, projected_molecule)
+    assert torch.allclose(outputs.normalized_protein_embedding, expected_protein)
+    assert torch.allclose(outputs.normalized_molecule_embedding, expected_molecule)
+    assert torch.allclose(outputs.ranking_score, expected_score)
+    assert torch.allclose(outputs.cosine_similarity, expected_score)
+    assert torch.all(outputs.ranking_score >= -1.0)
+    assert torch.all(outputs.ranking_score <= 1.0)
+    assert outputs.classification_loss is None
+    assert outputs.ranking_loss is not None
+    assert torch.allclose(outputs.loss, outputs.ranking_loss)
+
+    outputs.loss.backward()
+    assert model.protein_projection.weight.grad is not None
+    assert model.protein_projection.weight.grad.abs().sum() > 0.0
+    assert model.molecule_projection.weight.grad is not None
+    assert model.molecule_projection.weight.grad.abs().sum() > 0.0
 
 
 def test_scaled_cosine_mode_shares_one_geometry_and_scale_between_objectives():

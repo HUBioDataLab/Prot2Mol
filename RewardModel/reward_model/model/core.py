@@ -54,17 +54,27 @@ class RewardModel(nn.Module):
 
         self.protein_projection = nn.Linear(self._config.protein_hidden_size, self._config.fusion_hidden_dim)
         self.molecule_projection = nn.Linear(self._config.molecule_hidden_size, self._config.fusion_hidden_dim)
-        self.protein_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
-        self.molecule_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
-        self.projection_dropout = nn.Dropout(self._config.dropout)
+        if self._config.pair_scoring_mode == "cosine":
+            # The simple cosine ablation is intentionally only
+            # encoder -> projection -> pooling -> L2 normalization. Keep these
+            # attributes for a stable public interface, but do not instantiate
+            # any of the non-encoder processing used by the other modes.
+            self.protein_norm = None
+            self.molecule_norm = None
+            self.projection_dropout = None
+            self.fusion = None
+        else:
+            self.protein_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
+            self.molecule_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
+            self.projection_dropout = nn.Dropout(self._config.dropout)
+            self.fusion = TokenFusion(
+                hidden_dim=self._config.fusion_hidden_dim,
+                num_heads=self._config.fusion_num_heads,
+                attention_backend=self._config.fusion_attention_backend,
+                residual=self._config.fusion_residual,
+                dropout=self._config.dropout,
+            )
 
-        self.fusion = TokenFusion(
-            hidden_dim=self._config.fusion_hidden_dim,
-            num_heads=self._config.fusion_num_heads,
-            attention_backend=self._config.fusion_attention_backend,
-            residual=self._config.fusion_residual,
-            dropout=self._config.dropout,
-        )
         if self._config.pair_scoring_mode == "mlp":
             head_input_dim = self._config.fusion_hidden_dim * 2
             ranking_hidden_dims = (2048, 1024, 512, 256, 128)
@@ -81,7 +91,7 @@ class RewardModel(nn.Module):
             )
             self.logit_scale = None
             self.classification_logit_bias = None
-        else:
+        elif self._config.pair_scoring_mode == "scaled_cosine":
             # LigUnity initializes its log-space cosine scale at log(13). We
             # preserve that reference point, but allow both of our objectives
             # to optimize the shared positive scale instead of detaching it.
@@ -93,6 +103,11 @@ class RewardModel(nn.Module):
             self.classification_logit_bias = nn.Parameter(
                 torch.tensor(self._config.cosine_classification_bias_init)
             )
+        else:
+            self.ranking_head = None
+            self.classification_head = None
+            self.logit_scale = None
+            self.classification_logit_bias = None
 
     @property
     def config(self) -> RewardModelConfig:
@@ -199,6 +214,15 @@ class RewardModel(nn.Module):
         protein_tokens: torch.Tensor,
         molecule_tokens: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            self.protein_norm is None
+            or self.molecule_norm is None
+            or self.projection_dropout is None
+        ):
+            raise RuntimeError(
+                "Projection normalization and dropout are not initialized for "
+                f"pair_scoring_mode={self._config.pair_scoring_mode!r}"
+            )
         protein_tokens = self.projection_dropout(
             self.protein_norm(self.protein_projection(protein_tokens))
         )
@@ -302,8 +326,6 @@ class RewardModel(nn.Module):
                 None,
             )
 
-        if self.logit_scale is None or self.classification_logit_bias is None:
-            raise RuntimeError("Scaled-cosine parameters are not initialized")
         normalized_protein = F.normalize(
             pooled_protein, p=2, dim=-1, eps=1e-6
         )
@@ -311,6 +333,22 @@ class RewardModel(nn.Module):
             pooled_molecule, p=2, dim=-1, eps=1e-6
         )
         cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
+
+        if self._config.pair_scoring_mode == "cosine":
+            # activity_logits mirrors the score only to preserve the output
+            # contract used by evaluation. The ranking-only config assigns no
+            # classification loss to it.
+            return (
+                cosine_similarity,
+                cosine_similarity,
+                cosine_similarity,
+                None,
+                normalized_protein,
+                normalized_molecule,
+            )
+
+        if self.logit_scale is None or self.classification_logit_bias is None:
+            raise RuntimeError("Scaled-cosine parameters are not initialized")
         score_scale = self.logit_scale.clamp(
             max=math.log(self._config.cosine_scale_max)
         ).exp()
@@ -355,16 +393,44 @@ class RewardModel(nn.Module):
         protein_mask = normalize_mask(protein_attention_mask, protein_tokens)
         molecule_mask = normalize_mask(molecule_attention_mask, molecule_tokens)
 
-        protein_tokens, molecule_tokens = self._project_tokens(protein_tokens, molecule_tokens)
-        fused_protein, fused_molecule = self.fusion(
-            protein_tokens=protein_tokens,
-            molecule_tokens=molecule_tokens,
-            protein_mask=protein_mask,
-            molecule_mask=molecule_mask,
-        )
-
-        pooled_protein = masked_pool(fused_protein, protein_mask, self._config.pooling_type)
-        pooled_molecule = masked_pool(fused_molecule, molecule_mask, self._config.pooling_type)
+        if self._config.pair_scoring_mode == "cosine":
+            protein_tokens = self.protein_projection(protein_tokens)
+            molecule_tokens = self.molecule_projection(molecule_tokens)
+            fused_protein = None
+            fused_molecule = None
+            pooled_protein = masked_pool(
+                protein_tokens,
+                protein_mask,
+                self._config.pooling_type,
+            )
+            pooled_molecule = masked_pool(
+                molecule_tokens,
+                molecule_mask,
+                self._config.pooling_type,
+            )
+        else:
+            protein_tokens, molecule_tokens = self._project_tokens(
+                protein_tokens,
+                molecule_tokens,
+            )
+            if self.fusion is None:
+                raise RuntimeError("Token fusion is not initialized")
+            fused_protein, fused_molecule = self.fusion(
+                protein_tokens=protein_tokens,
+                molecule_tokens=molecule_tokens,
+                protein_mask=protein_mask,
+                molecule_mask=molecule_mask,
+            )
+            pooled_protein = masked_pool(
+                fused_protein,
+                protein_mask,
+                self._config.pooling_type,
+            )
+            pooled_molecule = masked_pool(
+                fused_molecule,
+                molecule_mask,
+                self._config.pooling_type,
+            )
         joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
 
         (
@@ -379,6 +445,16 @@ class RewardModel(nn.Module):
             pooled_molecule,
             joint_embedding,
         )
+        if self._config.pair_scoring_mode == "cosine":
+            if (
+                normalized_protein_embedding is None
+                or normalized_molecule_embedding is None
+            ):
+                raise RuntimeError("Cosine embeddings were not normalized")
+            joint_embedding = torch.cat(
+                [normalized_protein_embedding, normalized_molecule_embedding],
+                dim=-1,
+            )
         activity_probability = torch.sigmoid(activity_logits)
 
         ranking_loss = None

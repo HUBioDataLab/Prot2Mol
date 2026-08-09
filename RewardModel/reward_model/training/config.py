@@ -9,6 +9,7 @@ import yaml
 from ..model import RewardModelConfig
 
 VALID_TRAINING_MODES = ("auto", "single_gpu", "multi_gpu", "multi_node")
+VALID_METRICS_PROFILES = ("full", "ranking")
 
 
 def _resolve_path(path: str, base_dir: str) -> str:
@@ -83,6 +84,7 @@ class RewardTrainerConfig:
     save_total_limit: int = 2
     training_mode: str = "single_gpu"
     report_to: Optional[Any] = None
+    metrics_profile: str = "full"
     ranking_score_diagnostics: bool = False
     protein_shuffle_sensitivity: bool = True
 
@@ -133,6 +135,11 @@ class RewardTrainerConfig:
         if self.training_mode not in VALID_TRAINING_MODES:
             raise ValueError(
                 f"training_mode must be one of {', '.join(VALID_TRAINING_MODES)}"
+            )
+        if self.metrics_profile not in VALID_METRICS_PROFILES:
+            raise ValueError(
+                "metrics_profile must be one of "
+                f"{', '.join(VALID_METRICS_PROFILES)}"
             )
         if not isinstance(self.ranking_score_diagnostics, bool):
             raise ValueError("ranking_score_diagnostics must be a boolean")

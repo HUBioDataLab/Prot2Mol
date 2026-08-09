@@ -78,8 +78,9 @@ def test_reward_model_config_rejects_non_boolean_fusion_residual():
 
 
 def test_reward_model_config_validates_scaled_cosine_settings():
+    assert RewardModelConfig(pair_scoring_mode="cosine").pair_scoring_mode == "cosine"
     with pytest.raises(ValueError, match="pair_scoring_mode"):
-        RewardModelConfig(pair_scoring_mode="cosine")
+        RewardModelConfig(pair_scoring_mode="unknown")
     with pytest.raises(ValueError, match="cosine_scale_init"):
         RewardModelConfig(cosine_scale_init=0.0)
     with pytest.raises(ValueError, match="cosine_scale_init must be <="):

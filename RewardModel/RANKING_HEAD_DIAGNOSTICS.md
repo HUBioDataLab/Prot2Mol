@@ -40,6 +40,32 @@ The relevant LigUnity references are its
 [ranking model](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/models/pocket_ranking.py)
 and [released joint loss](https://github.com/IDEA-XL/LigUnity/blob/main/unimol/losses/contras_rank_loss.py).
 
+## Simple cosine ablation
+
+`configs/reward_train_simple_cosine.yaml` removes the fusion block and all
+non-encoder processing except one learned linear projection per encoder. Its
+complete scoring path is:
+
+```text
+protein = normalize(masked_mean(protein_projection(protein_encoder(tokens))))
+ligand = normalize(masked_mean(ligand_projection(ligand_encoder(tokens))))
+ranking_score = dot(protein, ligand)
+```
+
+There is no projection LayerNorm or dropout, cross-attention fusion, MLP head,
+learned cosine scale, classification bias, or classification loss in this
+mode. Its ranking metrics profile keeps the dashboard to `loss`, `grad_norm`,
+`learning_rate`, and `cosine_std` during training, and `eval_loss`,
+`eval_spearman`, `eval_pearson`, `eval_cosine_std`, and the margin-aware
+`eval_pair_accuracy` during evaluation. Protein-shuffle evaluation is disabled
+for this run. Start it directly from the pretrained encoders; a fusion checkpoint is
+architecturally incompatible and must not be supplied:
+
+```bash
+python train_reward_model.py \
+  --config configs/reward_train_simple_cosine.yaml
+```
+
 ## Two-stage training
 
 The primary config warms up the projection, fusion, residual, and cosine

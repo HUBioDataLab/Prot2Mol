@@ -10,7 +10,7 @@ from .losses import DEFAULT_RANKING_AFFINITY_MARGIN
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
 _VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
-_VALID_PAIR_SCORING_MODES = {"mlp", "scaled_cosine"}
+_VALID_PAIR_SCORING_MODES = {"cosine", "mlp", "scaled_cosine"}
 
 
 @dataclass(eq=True)

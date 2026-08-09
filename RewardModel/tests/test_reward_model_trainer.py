@@ -3,6 +3,7 @@ import math
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -23,6 +24,7 @@ from reward_model.training import (
     compute_activity_type_metrics,
     compute_classification_metrics,
     compute_groupwise_spearman,
+    compute_joint_evaluation_metrics,
     compute_pairwise_accuracy,
     compute_protein_shuffle_sensitivity,
     compute_ranking_score_diagnostics,
@@ -312,6 +314,38 @@ def test_ranking_score_diagnostics_exclude_pairs_inside_affinity_margin():
     assert metrics["ranking_margin_pair_accuracy"] == pytest.approx(0.5)
 
 
+def test_ranking_metrics_profile_returns_only_decision_metrics():
+    metrics, assay_records = compute_joint_evaluation_metrics(
+        activity_logits=torch.tensor([-0.4, -0.2, 0.0, 0.2, 0.4]),
+        ranking_scores=torch.tensor([-0.4, -0.2, 0.0, 0.2, 0.4]),
+        activity_labels=torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0]),
+        pchembl_values=torch.tensor([5.0, 6.0, 7.0, 8.0, 9.0]),
+        ranking_group_ids=torch.zeros(5, dtype=torch.long),
+        group_id_names=["T1__A1"],
+        classification_loss_weight=0.0,
+        ranking_loss_weight=1.0,
+        bce_pos_weight=1.0,
+        ranking_temperature=1.0,
+        ranking_affinity_margin=0.5,
+        ranking_min_pchembl_span=0.5,
+        ranking_score_diagnostics=True,
+        cosine_similarities=torch.tensor([-0.4, -0.2, 0.0, 0.2, 0.4]),
+        metrics_profile="ranking",
+    )
+
+    assert set(metrics) == {
+        "eval_loss",
+        "eval_spearman",
+        "eval_pearson",
+        "eval_cosine_std",
+        "eval_pair_accuracy",
+    }
+    assert metrics["eval_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_pearson"] == pytest.approx(1.0)
+    assert metrics["eval_pair_accuracy"] == pytest.approx(1.0)
+    assert assay_records
+
+
 def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     pytest.importorskip("accelerate")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
@@ -526,6 +560,42 @@ def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch
     assert captured == {"eval_loss": 0.25}
 
 
+def test_ranking_metrics_profile_filters_reporter_only_fields(monkeypatch):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(reward_metrics_profile="ranking")
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(pair_scoring_mode="cosine")
+    trainer._consume_train_component_logs = lambda: {"cosine_std": 0.12}
+    trainer._append_ranking_score_diagnostics_log = lambda logs: None
+
+    result = trainer.log(
+        {
+            "loss": 0.25,
+            "grad_norm": 1.5,
+            "learning_rate": 1.0e-5,
+            "epoch": 0.1,
+            "num_examples": 48,
+            "train_runtime": 20.0,
+        }
+    )
+
+    assert result == "logged"
+    assert captured == {
+        "loss": 0.25,
+        "grad_norm": 1.5,
+        "learning_rate": 1.0e-5,
+        "epoch": 0.1,
+        "cosine_std": 0.12,
+    }
+
+
 def test_reward_trainer_logs_scaled_cosine_parameters(monkeypatch):
     captured = {}
 
@@ -589,6 +659,40 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     assert "total_loss" not in logs
     assert "ranking_pairwise_accuracy" not in logs
     assert "ranking_loss_per_ranked_example" not in logs
+
+
+def test_ranking_metrics_profile_keeps_training_logs_slim():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(
+        reward_metrics_profile="ranking",
+        reward_ranking_score_diagnostics=True,
+    )
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+    )
+    trainer._reset_train_component_accumulator()
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(1.25),
+        classification_loss=torch.tensor(0.75),
+        num_examples=torch.tensor(3),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(3),
+        activity_logits=torch.tensor([-0.2, 0.0, 0.3]),
+        activity_labels=torch.tensor([0.0, 0.0, 1.0]),
+        ranking_score=torch.tensor([-0.2, 0.0, 0.3]),
+        pchembl_values=torch.tensor([5.0, 6.0, 7.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        cosine_similarity=torch.tensor([-0.2, 0.0, 0.3]),
+    )
+
+    logs = trainer._consume_train_component_logs()
+
+    assert set(logs) == {"cosine_std"}
+    assert logs["cosine_std"] == pytest.approx(
+        torch.tensor([-0.2, 0.0, 0.3]).std(unbiased=False).item()
+    )
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
@@ -766,6 +870,15 @@ def test_warm_start_architecture_allows_freeze_change_but_rejects_shape_change()
     with pytest.raises(ValueError, match="fusion_hidden_dim"):
         _validate_warm_start_architecture(checkpoint_config, incompatible)
 
+    simple_cosine = RewardModelConfig.from_dict(
+        {
+            **target_config.to_dict(),
+            "pair_scoring_mode": "cosine",
+        }
+    )
+    with pytest.raises(ValueError, match="pair_scoring_mode"):
+        _validate_warm_start_architecture(checkpoint_config, simple_cosine)
+
 
 def test_train_cli_accepts_weight_only_warm_start(monkeypatch):
     monkeypatch.setattr(
@@ -806,6 +919,29 @@ def test_unfrozen_phase_two_config_preserves_architecture_and_reduces_memory_bat
     assert config.training.learning_rate == pytest.approx(1.0e-5)
     assert config.training.dataloader_num_workers == 4
     assert "ranking_only_unfrozen_10000_steps" in config.training.output_dir
+
+
+def test_simple_cosine_config_is_ranking_only_without_fusion_settings():
+    config_path = (
+        Path(__file__).parents[1] / "configs" / "reward_train_simple_cosine.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.pair_scoring_mode == "cosine"
+    assert config.model.pooling_type == "mean"
+    assert config.model.fusion_hidden_dim == 512
+    assert config.model.dropout == pytest.approx(0.0)
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.model.ranking_loss_weight == pytest.approx(1.0)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.data.max_classification_only_per_item == 0
+    assert config.training.dataloader_num_workers == 4
+    assert config.training.training_mode == "single_gpu"
+    assert config.training.metrics_profile == "ranking"
+    assert config.training.ranking_score_diagnostics is True
+    assert config.training.protein_shuffle_sensitivity is False
+    assert "simple_cosine_ranking_only_unfrozen" in config.training.output_dir
 
 
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):

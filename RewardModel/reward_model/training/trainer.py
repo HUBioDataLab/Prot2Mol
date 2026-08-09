@@ -222,6 +222,16 @@ class RewardModelTrainer(Trainer):
             )
         )
 
+    def _ranking_metrics_profile_enabled(self) -> bool:
+        return (
+            getattr(
+                getattr(self, "args", None),
+                "reward_metrics_profile",
+                "full",
+            )
+            == "ranking"
+        )
+
     def _current_scaled_cosine_logs(self) -> Dict[str, float]:
         model = getattr(self, "model", None)
         if model is None:
@@ -307,7 +317,10 @@ class RewardModelTrainer(Trainer):
         ranking_loss_value = self._to_scalar(ranking_loss)
         num_ranking_lists_value = self._to_scalar(num_ranking_lists)
         self._train_component_sums["ranking_loss"] += ranking_loss_value
-        self._train_component_sums["classification_loss"] += self._to_scalar(classification_loss)
+        if not self._ranking_metrics_profile_enabled():
+            self._train_component_sums["classification_loss"] += self._to_scalar(
+                classification_loss
+            )
         self._train_component_sums["num_examples"] += self._to_scalar(num_examples)
         self._train_component_sums["num_ranking_lists"] += num_ranking_lists_value
         self._train_component_sums["num_ranked_examples"] += self._to_scalar(
@@ -316,16 +329,19 @@ class RewardModelTrainer(Trainer):
         with torch.no_grad():
             logits = activity_logits.detach().reshape(-1)
             labels = activity_labels.detach().to(device=logits.device).reshape(-1)
-            self._train_component_sums["classification_correct"] += float(
-                ((logits >= 0.0) == (labels >= 0.5)).sum().item()
-            )
-            self._train_component_sums["classification_count"] += float(
-                labels.numel()
-            )
-            self._train_classification_probabilities.extend(
-                torch.sigmoid(logits.float()).cpu().tolist()
-            )
-            self._train_classification_labels.extend(labels.float().cpu().tolist())
+            if not self._ranking_metrics_profile_enabled():
+                self._train_component_sums["classification_correct"] += float(
+                    ((logits >= 0.0) == (labels >= 0.5)).sum().item()
+                )
+                self._train_component_sums["classification_count"] += float(
+                    labels.numel()
+                )
+                self._train_classification_probabilities.extend(
+                    torch.sigmoid(logits.float()).cpu().tolist()
+                )
+                self._train_classification_labels.extend(
+                    labels.float().cpu().tolist()
+                )
 
             if pchembl_values is not None and ranking_group_ids is not None:
                 scores = ranking_score.detach().reshape(-1)
@@ -356,6 +372,20 @@ class RewardModelTrainer(Trainer):
         if self._train_component_count == 0:
             return {}
         denom = float(self._train_component_count)
+        if self._ranking_metrics_profile_enabled():
+            logs = {}
+            cosine_count = self._train_ranking_diagnostic_counts.get(
+                "ranking_cosine_std",
+                0,
+            )
+            if cosine_count > 0:
+                logs["cosine_std"] = (
+                    self._train_ranking_diagnostic_sums["ranking_cosine_std"]
+                    / cosine_count
+                )
+            self._reset_train_component_accumulator()
+            return logs
+
         logs = {
             "ranking_loss": self._train_component_sums["ranking_loss"] / denom,
             "classification_loss": self._train_component_sums["classification_loss"] / denom,
@@ -545,6 +575,7 @@ class RewardModelTrainer(Trainer):
             )
 
         model_config = self.model.config
+        ranking_metrics_profile = self._ranking_metrics_profile_enabled()
         metrics, assay_records = compute_joint_evaluation_metrics(
             activity_logits=activity_logits,
             ranking_scores=ranking_scores,
@@ -553,10 +584,14 @@ class RewardModelTrainer(Trainer):
             ranking_group_ids=ranking_group_ids,
             group_id_names=active_eval_dataset.group_ids,
             activity_types=(
-                list(active_eval_dataset.example_dataset["activity_type"])
-                if "activity_type"
-                in active_eval_dataset.example_dataset.column_names
-                else ["Unknown"] * len(active_eval_dataset)
+                None
+                if ranking_metrics_profile
+                else (
+                    list(active_eval_dataset.example_dataset["activity_type"])
+                    if "activity_type"
+                    in active_eval_dataset.example_dataset.column_names
+                    else ["Unknown"] * len(active_eval_dataset)
+                )
             ),
             protein_shuffled_scores=protein_shuffled_scores,
             classification_loss_weight=model_config.classification_loss_weight,
@@ -584,6 +619,11 @@ class RewardModelTrainer(Trainer):
             ),
             ranking_score_diagnostics=self._ranking_score_diagnostics_enabled(),
             cosine_similarities=cosine_similarities,
+            metrics_profile=getattr(
+                self.args,
+                "reward_metrics_profile",
+                "full",
+            ),
         )
         metrics.update(
             {
@@ -628,6 +668,34 @@ class RewardModelTrainer(Trainer):
         if "loss" in logs:
             logs.update(self._consume_train_component_logs())
             logs.update(self._current_scaled_cosine_logs())
+        if self._ranking_metrics_profile_enabled():
+            ranking_metric_suffixes = {
+                "loss",
+                "spearman",
+                "pearson",
+                "cosine_std",
+                "pair_accuracy",
+            }
+            logs = {
+                key: value
+                for key, value in logs.items()
+                if key
+                in {
+                    "loss",
+                    "grad_norm",
+                    "learning_rate",
+                    "epoch",
+                    "cosine_std",
+                    "train_loss",
+                }
+                or (
+                    key.startswith(("eval_", "test_"))
+                    and any(
+                        key.endswith(f"_{suffix}")
+                        for suffix in ranking_metric_suffixes
+                    )
+                )
+            }
         self._append_ranking_score_diagnostics_log(logs)
         parent_log = super().log
         if "start_time" in inspect.signature(parent_log).parameters:
@@ -648,6 +716,7 @@ class RewardModelTrainer(Trainer):
                 or "classification_logit_bias" in key
                 or "ranking_margin_pair_" in key
                 or "ranking_list_" in key
+                or key in {"cosine_std", "eval_cosine_std", "eval_pair_accuracy"}
                 or key in {"loss", "grad_norm", "ranking_loss", "total_loss"}
                 or key.endswith("_ranking_loss")
                 or key.endswith("_spearman")
@@ -739,6 +808,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         training_args.reward_ranking_score_diagnostics = (
             config.ranking_score_diagnostics
         )
+        training_args.reward_metrics_profile = config.metrics_profile
         training_args.reward_protein_shuffle_sensitivity = (
             config.protein_shuffle_sensitivity
         )

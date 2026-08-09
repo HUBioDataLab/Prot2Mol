@@ -187,16 +187,21 @@ def train_reward_model_from_config(
     train_examples = load_tokenized_example_dataset(example_paths["train"])
     val_examples = load_tokenized_example_dataset(example_paths["val"])
     test_examples = load_tokenized_example_dataset(example_paths["test"])
-    for split_name, split_examples in (
-        ("val", val_examples),
-        ("test", test_examples),
-    ):
-        if "activity_type" not in split_examples.column_names:
-            raise ValueError(
-                f"Tokenized {split_name} examples do not contain activity_type. "
-                "Rerun prepare_reward_training_data.py so Potency/qHTS metrics "
-                "are computed from the current split parquet files."
-            )
+    if config.training.metrics_profile == "full":
+        for split_name, split_examples in (
+            ("val", val_examples),
+            ("test", test_examples),
+        ):
+            if "activity_type" not in split_examples.column_names:
+                raise ValueError(
+                    f"Tokenized {split_name} examples do not contain activity_type. "
+                    "Rerun prepare_reward_training_data.py so Potency/qHTS metrics "
+                    "are computed from the current split parquet files."
+                )
+    elif config.model.classification_loss_weight != 0.0:
+        raise ValueError(
+            "metrics_profile=ranking requires classification_loss_weight=0.0"
+        )
     if config.model.ranking_min_pchembl_span != config.data.ranking_min_pchembl_span:
         raise ValueError(
             "model.ranking_min_pchembl_span and data.ranking_min_pchembl_span must match"
