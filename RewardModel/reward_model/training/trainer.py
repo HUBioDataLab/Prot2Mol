@@ -19,6 +19,7 @@ from .evaluation import (
     _append_assay_spearman_log,
     _with_metric_prefix,
     compute_classification_metrics,
+    compute_contrastive_evaluation_loss,
     compute_groupwise_rank_correlations,
     compute_joint_evaluation_metrics,
     compute_ranking_score_diagnostics,
@@ -35,6 +36,17 @@ REQUIRED_DISTRIBUTED_ENV_VARS = (
     "MASTER_ADDR",
     "MASTER_PORT",
 )
+
+
+def _encode_identity_ids(values: Sequence[Any]) -> torch.Tensor:
+    identities = [str(value) for value in values]
+    identity_to_id = {
+        identity: index for index, identity in enumerate(sorted(set(identities)))
+    }
+    return torch.tensor(
+        [identity_to_id[identity] for identity in identities],
+        dtype=torch.long,
+    )
 
 
 class LengthBucketSampler(Sampler[int]):
@@ -646,6 +658,10 @@ class RewardModelTrainer(Trainer):
             )
         dataloader = self.get_eval_dataloader(active_eval_dataset)
         model = self.model_wrapped if self.model_wrapped is not None else self.model
+        model_config = self.model.config
+        contrastive_evaluation_enabled = (
+            float(model_config.contrastive_loss_weight) > 0.0
+        )
         was_training = model.training
         model.eval()
 
@@ -656,6 +672,8 @@ class RewardModelTrainer(Trainer):
         gathered_groups: list[torch.Tensor] = []
         gathered_example_indices: list[torch.Tensor] = []
         gathered_cosines: list[torch.Tensor] = []
+        gathered_protein_embeddings: list[torch.Tensor] = []
+        gathered_molecule_embeddings: list[torch.Tensor] = []
         gathered_protein_shuffled_scores: list[torch.Tensor] = []
         for batch in dataloader:
             batch = self._prepare_inputs(batch)
@@ -671,6 +689,24 @@ class RewardModelTrainer(Trainer):
             ]
             if outputs.cosine_similarity is not None:
                 gathered_values.append(outputs.cosine_similarity.detach())
+            protein_embedding_index = None
+            molecule_embedding_index = None
+            if contrastive_evaluation_enabled:
+                if (
+                    outputs.normalized_protein_embedding is None
+                    or outputs.normalized_molecule_embedding is None
+                ):
+                    raise RuntimeError(
+                        "Contrastive evaluation requires normalized model embeddings"
+                    )
+                protein_embedding_index = len(gathered_values)
+                gathered_values.append(
+                    outputs.normalized_protein_embedding.detach()
+                )
+                molecule_embedding_index = len(gathered_values)
+                gathered_values.append(
+                    outputs.normalized_molecule_embedding.detach()
+                )
             gathered = self.accelerator.gather_for_metrics(tuple(gathered_values))
             logits, scores, labels, pchembl, group_indices, example_indices = gathered[:6]
             gathered_logits.append(logits.cpu())
@@ -679,8 +715,15 @@ class RewardModelTrainer(Trainer):
             gathered_pchembl.append(pchembl.cpu())
             gathered_groups.append(group_indices.cpu())
             gathered_example_indices.append(example_indices.cpu())
-            if len(gathered) == 7:
+            if outputs.cosine_similarity is not None:
                 gathered_cosines.append(gathered[6].cpu())
+            if protein_embedding_index is not None:
+                gathered_protein_embeddings.append(
+                    gathered[protein_embedding_index].cpu()
+                )
+                gathered_molecule_embeddings.append(
+                    gathered[molecule_embedding_index].cpu()
+                )
             if (
                 bool(
                     getattr(
@@ -719,6 +762,16 @@ class RewardModelTrainer(Trainer):
         cosine_similarities = (
             torch.cat(gathered_cosines) if gathered_cosines else None
         )
+        normalized_protein_embeddings = (
+            torch.cat(gathered_protein_embeddings)
+            if gathered_protein_embeddings
+            else None
+        )
+        normalized_molecule_embeddings = (
+            torch.cat(gathered_molecule_embeddings)
+            if gathered_molecule_embeddings
+            else None
+        )
         protein_shuffled_scores = (
             torch.cat(gathered_protein_shuffled_scores)
             if gathered_protein_shuffled_scores
@@ -742,12 +795,63 @@ class RewardModelTrainer(Trainer):
         ranking_group_ids = ranking_group_ids.index_select(0, stable_order)
         if cosine_similarities is not None:
             cosine_similarities = cosine_similarities.index_select(0, stable_order)
+        if normalized_protein_embeddings is not None:
+            normalized_protein_embeddings = normalized_protein_embeddings.index_select(
+                0,
+                stable_order,
+            )
+            normalized_molecule_embeddings = normalized_molecule_embeddings.index_select(
+                0,
+                stable_order,
+            )
         if protein_shuffled_scores is not None:
             protein_shuffled_scores = protein_shuffled_scores.index_select(
                 0, stable_order
             )
 
-        model_config = self.model.config
+        contrastive_loss = None
+        if contrastive_evaluation_enabled:
+            if (
+                normalized_protein_embeddings is None
+                or normalized_molecule_embeddings is None
+            ):
+                raise RuntimeError("Evaluation did not gather contrastive embeddings")
+            required_identity_columns = {"target_chembl_id", "compound_id"}
+            missing_identity_columns = required_identity_columns.difference(
+                active_eval_dataset.example_dataset.column_names
+            )
+            if missing_identity_columns:
+                raise ValueError(
+                    "Contrastive evaluation requires identity columns: "
+                    f"{sorted(missing_identity_columns)}"
+                )
+            contrastive_loss = compute_contrastive_evaluation_loss(
+                normalized_protein_embeddings=normalized_protein_embeddings,
+                normalized_molecule_embeddings=normalized_molecule_embeddings,
+                pchembl_values=pchembl_values,
+                ranking_group_ids=ranking_group_ids,
+                target_identity_ids=_encode_identity_ids(
+                    active_eval_dataset.example_dataset["target_chembl_id"]
+                ),
+                molecule_identity_ids=_encode_identity_ids(
+                    active_eval_dataset.example_dataset["compound_id"]
+                ),
+                temperature=model_config.ranking_temperature,
+                active_threshold=model_config.contrastive_active_threshold,
+                assay_batch_size=int(
+                    getattr(
+                        self,
+                        "_train_batch_size",
+                        self.args.per_device_train_batch_size,
+                    )
+                ),
+                ranking_max_ligands=active_eval_dataset.ranking_max_ligands,
+                ranking_num_partitions=active_eval_dataset.ranking_num_partitions,
+                ranking_partition_seed=active_eval_dataset.ranking_partition_seed,
+                ranking_min_pchembl_span=(
+                    active_eval_dataset.ranking_min_pchembl_span
+                ),
+            )
         ranking_metrics_profile = self._ranking_metrics_profile_enabled()
         metrics, assay_records = compute_joint_evaluation_metrics(
             activity_logits=activity_logits,
@@ -797,6 +901,8 @@ class RewardModelTrainer(Trainer):
                 "reward_metrics_profile",
                 "full",
             ),
+            contrastive_loss=contrastive_loss,
+            contrastive_loss_weight=model_config.contrastive_loss_weight,
         )
         metrics.update(
             {
@@ -904,7 +1010,7 @@ class RewardModelTrainer(Trainer):
                     "contrastive_loss",
                     "total_loss",
                 }
-                or key.endswith("_ranking_loss")
+                or key.endswith("_loss")
                 or key.endswith("_spearman")
             )
             and isinstance(value, (int, float))
@@ -966,8 +1072,8 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         disable_tqdm=True,
         report_to=config.report_to,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
+        metric_for_best_model="eval_spearman",
+        greater_is_better=True,
     )
     if config.max_steps is not None:
         args_kwargs["max_steps"] = config.max_steps

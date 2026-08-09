@@ -323,7 +323,7 @@ def test_ranking_metrics_profile_returns_only_decision_metrics():
         ranking_group_ids=torch.zeros(5, dtype=torch.long),
         group_id_names=["T1__A1"],
         classification_loss_weight=0.0,
-        ranking_loss_weight=1.0,
+        ranking_loss_weight=0.5,
         bce_pos_weight=1.0,
         ranking_temperature=1.0,
         ranking_affinity_margin=0.5,
@@ -331,10 +331,14 @@ def test_ranking_metrics_profile_returns_only_decision_metrics():
         ranking_score_diagnostics=True,
         cosine_similarities=torch.tensor([-0.4, -0.2, 0.0, 0.2, 0.4]),
         metrics_profile="ranking",
+        contrastive_loss=torch.tensor(2.0),
+        contrastive_loss_weight=0.5,
     )
 
     assert set(metrics) == {
         "eval_loss",
+        "eval_ranking_loss",
+        "eval_contrastive_loss",
         "eval_spearman",
         "eval_pearson",
         "eval_cosine_std",
@@ -343,6 +347,10 @@ def test_ranking_metrics_profile_returns_only_decision_metrics():
     assert metrics["eval_spearman"] == pytest.approx(1.0)
     assert metrics["eval_pearson"] == pytest.approx(1.0)
     assert metrics["eval_pair_accuracy"] == pytest.approx(1.0)
+    assert metrics["eval_loss"] == pytest.approx(
+        0.5 * metrics["eval_ranking_loss"]
+        + 0.5 * metrics["eval_contrastive_loss"]
+    )
     assert assay_records
 
 
@@ -583,10 +591,16 @@ def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
     assert objective_logs[-1]["contrastive_loss"] > 0.0
     assert set(eval_metrics) >= {
         "eval_loss",
+        "eval_ranking_loss",
+        "eval_contrastive_loss",
         "eval_spearman",
         "eval_pearson",
         "eval_pair_accuracy",
     }
+    assert eval_metrics["eval_loss"] == pytest.approx(
+        0.5 * eval_metrics["eval_ranking_loss"]
+        + 0.5 * eval_metrics["eval_contrastive_loss"]
+    )
 
 
 def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_set(tmp_path):
@@ -606,6 +620,8 @@ def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_s
     assert args.eval_steps == 25
     assert args.save_steps == 25
     assert args.max_steps == 1000
+    assert args.metric_for_best_model == "eval_spearman"
+    assert args.greater_is_better is True
     if hasattr(args, "evaluation_strategy"):
         assert _strategy_value(args.evaluation_strategy) == "steps"
     if hasattr(args, "eval_strategy"):

@@ -23,6 +23,7 @@ from .data import RewardPairCollator, RewardPairDataset
 from ..model.losses import (
     DEFAULT_RANKING_AFFINITY_MARGIN,
     MIN_LISTWISE_LIGANDS,
+    ligunity_bidirectional_contrastive_loss,
     ligunity_listwise_loss,
 )
 
@@ -110,6 +111,167 @@ def build_complete_coverage_ranking_partitions(
                 raise RuntimeError("validation partition did not cover the complete assay")
 
     return partitions
+
+
+def compute_contrastive_evaluation_loss(
+    *,
+    normalized_protein_embeddings: torch.Tensor,
+    normalized_molecule_embeddings: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ranking_group_ids: torch.Tensor,
+    target_identity_ids: torch.Tensor,
+    molecule_identity_ids: torch.Tensor,
+    temperature: float,
+    active_threshold: float,
+    assay_batch_size: int,
+    ranking_max_ligands: int = 16,
+    ranking_num_partitions: int = 3,
+    ranking_partition_seed: int = 42,
+    ranking_min_pchembl_span: float = 0.5,
+) -> torch.Tensor:
+    """Compute deterministic full-coverage LigUnity validation loss.
+
+    The validation rows are partitioned into the same bounded assay lists used
+    for ranking evaluation. Lists are deterministically shuffled into local
+    batches so each contrastive matrix has the same assay-list capacity as one
+    training-device microbatch. Losses are weighted by assay-list count before
+    averaging across complete-coverage partitions.
+    """
+    protein_embeddings = (
+        normalized_protein_embeddings.detach().cpu().float()
+    )
+    molecule_embeddings = (
+        normalized_molecule_embeddings.detach().cpu().float()
+    )
+    pchembl = pchembl_values.reshape(-1).detach().cpu().float()
+    assay_ids = ranking_group_ids.reshape(-1).detach().cpu().long()
+    target_ids = target_identity_ids.reshape(-1).detach().cpu().long()
+    molecule_ids = molecule_identity_ids.reshape(-1).detach().cpu().long()
+
+    if protein_embeddings.ndim != 2 or molecule_embeddings.ndim != 2:
+        raise ValueError("normalized evaluation embeddings must be rank-2")
+    if protein_embeddings.shape != molecule_embeddings.shape:
+        raise ValueError("normalized protein and molecule embeddings must align")
+    num_examples = protein_embeddings.size(0)
+    if not all(
+        values.numel() == num_examples
+        for values in (pchembl, assay_ids, target_ids, molecule_ids)
+    ):
+        raise ValueError("contrastive evaluation inputs must contain the same rows")
+    if not (
+        torch.isfinite(protein_embeddings).all()
+        and torch.isfinite(molecule_embeddings).all()
+        and torch.isfinite(pchembl).all()
+    ):
+        raise ValueError("contrastive evaluation inputs must be finite")
+    if (target_ids < 0).any() or (molecule_ids < 0).any():
+        raise ValueError("contrastive evaluation identity ids must be non-negative")
+    if temperature <= 0.0 or not math.isfinite(float(temperature)):
+        raise ValueError("temperature must be finite and > 0")
+    if not math.isfinite(float(active_threshold)):
+        raise ValueError("active_threshold must be finite")
+    if assay_batch_size <= 0:
+        raise ValueError("assay_batch_size must be > 0")
+
+    partitions = build_complete_coverage_ranking_partitions(
+        pchembl_values=pchembl,
+        ranking_group_ids=assay_ids,
+        max_list_size=ranking_max_ligands,
+        num_partitions=ranking_num_partitions,
+        seed=ranking_partition_seed,
+        min_pchembl_span=ranking_min_pchembl_span,
+    )
+    partition_losses: list[torch.Tensor] = []
+    max_seed = (1 << 63) - 1
+    for partition_index, partition_ids in enumerate(partitions):
+        ranked_indices = torch.nonzero(
+            partition_ids >= 0,
+            as_tuple=False,
+        ).flatten()
+        if ranked_indices.numel() == 0:
+            continue
+        ranked_list_ids = partition_ids.index_select(0, ranked_indices)
+        num_lists = int(ranked_list_ids.max().item()) + 1
+        list_counts = torch.bincount(
+            ranked_list_ids,
+            minlength=num_lists,
+        )
+        list_order = torch.argsort(ranked_list_ids, stable=True)
+        sorted_row_indices = ranked_indices.index_select(0, list_order)
+        list_offsets = torch.cat(
+            (
+                torch.zeros(1, dtype=torch.long),
+                list_counts.cumsum(dim=0),
+            )
+        )
+
+        generator = torch.Generator()
+        generator.manual_seed(
+            (
+                int(ranking_partition_seed)
+                + 2_000_003 * (partition_index + 1)
+            )
+            % max_seed
+        )
+        shuffled_lists = torch.randperm(num_lists, generator=generator)
+        weighted_partition_loss = torch.zeros((), dtype=torch.float32)
+        partition_list_count = 0
+        for start in range(0, num_lists, assay_batch_size):
+            batch_list_ids = shuffled_lists[start : start + assay_batch_size]
+            batch_members = [
+                sorted_row_indices[
+                    list_offsets[list_id] : list_offsets[list_id + 1]
+                ]
+                for list_id in batch_list_ids.tolist()
+            ]
+            selected_indices = torch.cat(batch_members)
+            group_sizes = torch.tensor(
+                [members.numel() for members in batch_members],
+                dtype=torch.long,
+            )
+            ligand_group_ids = torch.repeat_interleave(
+                torch.arange(len(batch_members), dtype=torch.long),
+                group_sizes,
+            )
+            representative_indices = torch.tensor(
+                [int(members[0].item()) for members in batch_members],
+                dtype=torch.long,
+            )
+            group_target_ids = target_ids.index_select(
+                0,
+                representative_indices,
+            )
+            selected_target_ids = target_ids.index_select(0, selected_indices)
+            if not torch.equal(
+                group_target_ids.index_select(0, ligand_group_ids),
+                selected_target_ids,
+            ):
+                raise ValueError(
+                    "every contrastive evaluation list must contain one target identity"
+                )
+
+            contrastive_scores = torch.matmul(
+                protein_embeddings.index_select(0, representative_indices),
+                molecule_embeddings.index_select(0, selected_indices).transpose(0, 1),
+            ) / float(temperature)
+            batch_loss, _, _ = ligunity_bidirectional_contrastive_loss(
+                contrastive_scores,
+                pchembl.index_select(0, selected_indices),
+                ligand_group_ids,
+                group_target_ids,
+                molecule_ids.index_select(0, selected_indices),
+                active_threshold=active_threshold,
+            )
+            batch_list_count = len(batch_members)
+            weighted_partition_loss += batch_loss * batch_list_count
+            partition_list_count += batch_list_count
+        if partition_list_count != num_lists:
+            raise RuntimeError("contrastive evaluation did not cover every assay list")
+        partition_losses.append(weighted_partition_loss / partition_list_count)
+
+    if not partition_losses:
+        return torch.zeros((), dtype=torch.float32)
+    return torch.stack(partition_losses).mean()
 
 
 def compute_ranking_score_diagnostics(
@@ -267,6 +429,8 @@ def compute_joint_evaluation_metrics(
     ranking_score_diagnostics: bool = False,
     cosine_similarities: torch.Tensor | None = None,
     metrics_profile: str = "full",
+    contrastive_loss: torch.Tensor | float | None = None,
+    contrastive_loss_weight: float = 0.0,
 ) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
     """Compute deterministic full-dataset losses and metrics from one scoring pass."""
     logits = activity_logits.reshape(-1).detach().cpu().float()
@@ -329,9 +493,28 @@ def compute_joint_evaluation_metrics(
         for partition_group_ids in ranking_partitions
     ]
     ranking_loss = torch.stack(partition_losses).mean()
+    if contrastive_loss_weight < 0.0 or not math.isfinite(
+        float(contrastive_loss_weight)
+    ):
+        raise ValueError("contrastive_loss_weight must be finite and >= 0")
+    has_contrastive_loss = contrastive_loss is not None
+    if contrastive_loss is None:
+        if contrastive_loss_weight > 0.0:
+            raise ValueError(
+                "contrastive_loss is required when contrastive_loss_weight > 0"
+            )
+        resolved_contrastive_loss = torch.zeros((), dtype=ranking_loss.dtype)
+    else:
+        resolved_contrastive_loss = torch.as_tensor(
+            contrastive_loss,
+            dtype=ranking_loss.dtype,
+        ).reshape(())
+        if not torch.isfinite(resolved_contrastive_loss):
+            raise ValueError("contrastive_loss must be finite")
     total_loss = (
         float(classification_loss_weight) * classification_loss
         + float(ranking_loss_weight) * ranking_loss
+        + float(contrastive_loss_weight) * resolved_contrastive_loss
     )
 
     string_group_ids = [group_id_names[int(index)] for index in group_indices.tolist()]
@@ -345,6 +528,7 @@ def compute_joint_evaluation_metrics(
     if metrics_profile == "ranking":
         metrics = {
             "eval_loss": float(total_loss.item()),
+            "eval_ranking_loss": float(ranking_loss.item()),
             "eval_spearman": spearman_metrics["eval_spearman"],
             "eval_pearson": _compute_weighted_groupwise_pearson(
                 group_ids=string_group_ids,
@@ -354,6 +538,10 @@ def compute_joint_evaluation_metrics(
                 min_pchembl_span=ranking_min_pchembl_span,
             ),
         }
+        if has_contrastive_loss:
+            metrics["eval_contrastive_loss"] = float(
+                resolved_contrastive_loss.item()
+            )
     elif metrics_profile == "full":
         probabilities = torch.sigmoid(logits).numpy()
         metrics = compute_classification_metrics(probabilities, labels.numpy())
@@ -399,6 +587,10 @@ def compute_joint_evaluation_metrics(
                 "eval_ranking_partitions": float(len(ranking_partitions)),
             }
         )
+        if has_contrastive_loss:
+            metrics["eval_contrastive_loss"] = float(
+                resolved_contrastive_loss.item()
+            )
     else:
         raise ValueError("metrics_profile must be 'full' or 'ranking'")
 

@@ -26,6 +26,7 @@ from reward_model.training import (
     RewardModelTrainer,
     RewardTrainerConfig,
     build_complete_coverage_ranking_partitions,
+    compute_contrastive_evaluation_loss,
     compute_joint_evaluation_metrics,
     create_training_arguments,
 )
@@ -669,6 +670,60 @@ def test_validation_partitions_reject_invalid_settings(kwargs, message):
             ranking_group_ids=torch.zeros(3, dtype=torch.long),
             **kwargs,
         )
+
+
+def test_contrastive_evaluation_matches_full_coverage_ligunity_loss():
+    protein_embeddings = torch.tensor(
+        [[1.0, 0.0]] * 3 + [[0.0, 1.0]] * 3,
+    )
+    molecule_embeddings = torch.nn.functional.normalize(
+        torch.tensor(
+            [
+                [1.0, 0.2],
+                [0.8, 0.4],
+                [0.6, 0.8],
+                [0.2, 1.0],
+                [0.4, 0.8],
+                [0.8, 0.6],
+            ]
+        ),
+        dim=-1,
+    )
+    pchembl_values = torch.tensor([7.0, 6.0, 5.0, 7.5, 6.5, 5.5])
+    assay_ids = torch.tensor([0, 0, 0, 1, 1, 1])
+    target_ids = torch.tensor([0, 0, 0, 1, 1, 1])
+    molecule_ids = torch.arange(6)
+    temperature = 0.1
+
+    actual = compute_contrastive_evaluation_loss(
+        normalized_protein_embeddings=protein_embeddings,
+        normalized_molecule_embeddings=molecule_embeddings,
+        pchembl_values=pchembl_values,
+        ranking_group_ids=assay_ids,
+        target_identity_ids=target_ids,
+        molecule_identity_ids=molecule_ids,
+        temperature=temperature,
+        active_threshold=5.0,
+        assay_batch_size=2,
+        ranking_max_ligands=16,
+        ranking_num_partitions=2,
+        ranking_partition_seed=17,
+        ranking_min_pchembl_span=0.5,
+    )
+    expected, _, _ = ligunity_bidirectional_contrastive_loss(
+        torch.matmul(
+            protein_embeddings[[0, 3]],
+            molecule_embeddings.transpose(0, 1),
+        )
+        / temperature,
+        pchembl_values,
+        assay_ids,
+        torch.tensor([0, 1]),
+        molecule_ids,
+        active_threshold=5.0,
+    )
+
+    assert actual == pytest.approx(expected.item())
 
 
 def test_joint_evaluation_averages_complete_coverage_partition_losses():
