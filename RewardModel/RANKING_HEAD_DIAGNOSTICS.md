@@ -67,6 +67,18 @@ python train_reward_model.py \
   --config configs/reward_train_simple_cosine.yaml
 ```
 
+The full-dataset scale-10 experiment keeps the same simple raw-cosine scorer
+and applies the successful overfit setting through
+`ranking_temperature: 0.1`. It also carries over the successful split learning
+rates (`1e-5` for both encoders and `1e-3` for the two projections) and gradient
+clip norm of 10, while restoring the standard dataset cache and ranking-list
+construction:
+
+```bash
+python train_reward_model.py \
+  --config configs/reward_train_simple_cosine_scale10.yaml
+```
+
 The MoLFormer variant keeps the same scoring path but changes only the
 molecule encoder and its input representation. It loads
 `ibm/MoLFormer-XL-both-10pct` and its tokenizer with remote code enabled,
