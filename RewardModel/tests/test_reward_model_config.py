@@ -12,6 +12,8 @@ def test_reward_model_config_round_trip(tmp_path):
         molecule_input_representation="smiles",
         molecule_trust_remote_code=True,
         molecule_deterministic_eval=True,
+        molecule_hidden_dropout_prob=0.0,
+        molecule_attention_probs_dropout_prob=0.0,
         fusion_hidden_dim=256,
         fusion_num_heads=8,
         fusion_residual=True,
@@ -125,6 +127,10 @@ def test_reward_model_config_validates_molecule_encoder_settings():
         RewardModelConfig(molecule_trust_remote_code="true")
     with pytest.raises(ValueError, match="molecule_deterministic_eval"):
         RewardModelConfig(molecule_deterministic_eval=1)
+    with pytest.raises(ValueError, match="molecule_hidden_dropout_prob"):
+        RewardModelConfig(molecule_hidden_dropout_prob=1.0)
+    with pytest.raises(ValueError, match="molecule_attention_probs_dropout_prob"):
+        RewardModelConfig(molecule_attention_probs_dropout_prob=float("nan"))
 
 
 @pytest.mark.parametrize(

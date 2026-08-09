@@ -1213,6 +1213,35 @@ def test_scale10_contrastive_config_mirrors_ligunity_without_classification():
     assert "scale10_contrastive_ranking" in config.training.output_dir
 
 
+def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale10_contrastive_lr1e4_4gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
+    assert config.model.molecule_hidden_dropout_prob == pytest.approx(0.0)
+    assert config.model.molecule_attention_probs_dropout_prob == pytest.approx(0.0)
+    assert config.model.dropout == pytest.approx(0.0)
+    assert config.model.ranking_temperature == pytest.approx(0.1)
+    assert config.model.ranking_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.training.learning_rate == pytest.approx(1.0e-4)
+    assert config.training.encoder_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.projection_learning_rate == pytest.approx(1.0e-3)
+    assert config.training.per_device_train_batch_size == 16
+    assert config.training.gradient_accumulation_steps == 1
+    assert config.training.training_mode == "multi_gpu"
+    assert config.training.bf16 is True
+    assert config.training.dataloader_num_workers == 8
+    assert "lr1e4_batch16_4gpu" in config.training.output_dir
+
+
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():
     config_dir = Path(__file__).parents[1] / "configs" / "overfit_grid"
     config_paths = sorted(config_dir.glob("*.yaml"))

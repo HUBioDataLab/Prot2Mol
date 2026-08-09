@@ -40,6 +40,14 @@ class RewardModel(nn.Module):
             }
             if self._config.molecule_deterministic_eval:
                 molecule_model_kwargs["deterministic_eval"] = True
+            if self._config.molecule_hidden_dropout_prob is not None:
+                molecule_model_kwargs["hidden_dropout_prob"] = (
+                    self._config.molecule_hidden_dropout_prob
+                )
+            if self._config.molecule_attention_probs_dropout_prob is not None:
+                molecule_model_kwargs["attention_probs_dropout_prob"] = (
+                    self._config.molecule_attention_probs_dropout_prob
+                )
             molecule_bundle = load_encoder_bundle(
                 name_or_path=self._config.molecule_model_name_or_path,
                 tokenizer_name_or_path=self._config.molecule_tokenizer_name_or_path,

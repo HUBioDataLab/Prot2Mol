@@ -70,7 +70,9 @@ def test_reward_model_passes_molformer_loading_contract(monkeypatch):
 
     def _load_bundle(name_or_path, **kwargs):
         captured.append((name_or_path, kwargs))
-        return protein_bundle if name_or_path == "protein/dummy" else molecule_bundle
+        return (
+            protein_bundle if name_or_path == "protein/dummy" else molecule_bundle
+        )
 
     monkeypatch.setattr("reward_model.model.core.load_encoder_bundle", _load_bundle)
 
@@ -99,6 +101,35 @@ def test_reward_model_passes_molformer_loading_contract(monkeypatch):
             },
         },
     )
+
+
+def test_reward_model_passes_molecule_encoder_dropout_overrides(monkeypatch):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    captured = []
+
+    def _load_bundle(name_or_path, **kwargs):
+        captured.append((name_or_path, kwargs))
+        return protein_bundle if name_or_path == "protein/dummy" else molecule_bundle
+
+    monkeypatch.setattr("reward_model.model.core.load_encoder_bundle", _load_bundle)
+
+    RewardModel(
+        RewardModelConfig(
+            protein_model_name_or_path="protein/dummy",
+            molecule_model_name_or_path="HUBioDataLab/SELFormer",
+            molecule_hidden_dropout_prob=0.0,
+            molecule_attention_probs_dropout_prob=0.0,
+            fusion_hidden_dim=10,
+            fusion_num_heads=2,
+            pair_scoring_mode="cosine",
+        )
+    )
+
+    assert captured[1][1]["model_kwargs"] == {
+        "trust_remote_code": False,
+        "hidden_dropout_prob": 0.0,
+        "attention_probs_dropout_prob": 0.0,
+    }
 
 
 def test_reward_model_save_and_load_round_trip(tmp_path):

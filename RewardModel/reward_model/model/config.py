@@ -26,6 +26,8 @@ class RewardModelConfig:
     molecule_input_representation: str = "selfies"
     molecule_trust_remote_code: bool = False
     molecule_deterministic_eval: bool = False
+    molecule_hidden_dropout_prob: Optional[float] = None
+    molecule_attention_probs_dropout_prob: Optional[float] = None
     protein_hidden_size: Optional[int] = None
     molecule_hidden_size: Optional[int] = None
     protein_max_length: int = 1024
@@ -74,6 +76,17 @@ class RewardModelConfig:
             raise ValueError("molecule_trust_remote_code must be a boolean")
         if not isinstance(self.molecule_deterministic_eval, bool):
             raise ValueError("molecule_deterministic_eval must be a boolean")
+        for field_name in (
+            "molecule_hidden_dropout_prob",
+            "molecule_attention_probs_dropout_prob",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (
+                not math.isfinite(float(value)) or not 0.0 <= float(value) < 1.0
+            ):
+                raise ValueError(
+                    f"{field_name} must be None or finite and in [0.0, 1.0)"
+                )
         if self.fusion_hidden_dim <= 0:
             raise ValueError("fusion_hidden_dim must be > 0")
         if self.fusion_num_heads <= 0:
