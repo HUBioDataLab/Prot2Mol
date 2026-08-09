@@ -1,0 +1,65 @@
+model:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  molecule_input_representation: selfies
+  protein_max_length: 1024
+  molecule_max_length: 256
+  fusion_hidden_dim: 512
+  dropout: 0.0
+  pooling_type: mean
+  pair_scoring_mode: cosine
+  activity_threshold: 6.0
+  ranking_loss_weight: 1.0
+  classification_loss_weight: 0.0
+  ranking_temperature: 0.1
+  ranking_affinity_margin: 0.47712125472
+  ranking_min_pchembl_span: 0.5
+  bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
+
+data:
+  train_parquet_path: ../../../dataset/processed/chembl_37/protein_cluster_50_activity_balanced/train.parquet
+  val_parquet_path: ../../../dataset/processed/chembl_37/protein_cluster_50_activity_balanced/val.parquet
+  test_parquet_path: ../../../dataset/processed/chembl_37/protein_cluster_50_activity_balanced/test.parquet
+  tokenized_dataset_dir: ../../reward_model/data/tokenized/chembl_37_mmseqs50_activity_balanced_overfit_50
+  tokenization_batch_size: 64
+  tokenization_num_proc: 8
+  ranking_max_ligands: 50
+  ranking_opportunity_divisor: 50
+  evaluation_ranking_partitions: 1
+  ranking_min_pchembl_span: 0.5
+  max_classification_only_per_item: 0
+
+training:
+  output_dir: ../../outputs/overfit_50_splitlr_clip1_temp0p1
+  num_train_epochs: 10
+  max_steps: 10000
+  per_device_train_batch_size: 12
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 4
+  eval_steps: 500
+  learning_rate: 1.0e-5
+  encoder_learning_rate: 1.0e-5
+  projection_learning_rate: 1.0e-3
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 8
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
+  seed: 42
+  fp16: false
+  bf16: true
+  optim: adamw_torch_fused
+  save_safetensors: false
+  save_total_limit: 2
+  training_mode: single_gpu
+  metrics_profile: ranking
+  ranking_score_diagnostics: true
+  protein_shuffle_sensitivity: false
+  report_to:
+    - wandb

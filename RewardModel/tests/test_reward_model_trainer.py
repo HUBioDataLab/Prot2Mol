@@ -546,6 +546,54 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     assert "wandb" not in list(args.report_to)
 
 
+def test_create_training_arguments_preserves_component_learning_rates(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            encoder_learning_rate=1.0e-5,
+            projection_learning_rate=1.0e-3,
+        )
+    )
+
+    assert args.reward_encoder_learning_rate == pytest.approx(1.0e-5)
+    assert args.reward_projection_learning_rate == pytest.approx(1.0e-3)
+
+
+def test_reward_trainer_builds_encoder_and_projection_lr_groups(tmp_path):
+    class ComponentModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.protein_encoder = torch.nn.Linear(2, 2)
+            self.molecule_encoder = torch.nn.Linear(2, 2)
+            self.protein_projection = torch.nn.Linear(2, 2)
+            self.molecule_projection = torch.nn.Linear(2, 2)
+
+    model = ComponentModel()
+    trainer = RewardModelTrainer(
+        model=model,
+        eval_dataset=[0],
+        args=create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "trainer_output"),
+                learning_rate=1.0e-5,
+                encoder_learning_rate=1.0e-5,
+                projection_learning_rate=1.0e-3,
+                optim="adamw_torch",
+            )
+        ),
+    )
+
+    optimizer = trainer.create_optimizer()
+    lr_by_parameter_id = {
+        id(parameter): group["lr"]
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    for name, parameter in model.named_parameters():
+        expected = 1.0e-5 if "encoder" in name else 1.0e-3
+        assert lr_by_parameter_id[id(parameter)] == pytest.approx(expected)
+
+
 def test_reward_trainer_log_supports_transformers_without_start_time(monkeypatch):
     captured = {}
 
@@ -977,6 +1025,44 @@ def test_simple_cosine_config_is_ranking_only_without_fusion_settings():
     assert config.training.ranking_score_diagnostics is True
     assert config.training.protein_shuffle_sensitivity is False
     assert "simple_cosine_ranking_only_unfrozen" in config.training.output_dir
+
+
+def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():
+    config_dir = Path(__file__).parents[1] / "configs" / "overfit_grid"
+    config_paths = sorted(config_dir.glob("*.yaml"))
+    combinations = set()
+
+    assert len(config_paths) == 8
+    for config_path in config_paths:
+        config = load_reward_training_config(str(config_path))
+        assert config.model.protein_model_name_or_path == (
+            "facebook/esm2_t12_35M_UR50D"
+        )
+        assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
+        assert config.model.pair_scoring_mode == "cosine"
+        assert config.model.classification_loss_weight == pytest.approx(0.0)
+        assert config.model.freeze_protein_encoder is False
+        assert config.model.freeze_molecule_encoder is False
+        assert config.data.ranking_max_ligands == 50
+        assert config.data.ranking_opportunity_divisor == 50
+        assert config.data.evaluation_ranking_partitions == 1
+        assert config.data.max_classification_only_per_item == 0
+        assert config.training.bf16 is True
+        assert config.training.dataloader_num_workers == 8
+        combinations.add(
+            (
+                config.training.projection_learning_rate,
+                config.training.max_grad_norm,
+                config.model.ranking_temperature,
+            )
+        )
+
+    assert combinations == {
+        (projection_lr, clip_norm, temperature)
+        for projection_lr in (1.0e-5, 1.0e-3)
+        for clip_norm in (1.0, 10.0)
+        for temperature in (1.0, 0.1)
+    }
 
 
 def test_molformer_simple_cosine_config_uses_smiles_and_separate_cache():

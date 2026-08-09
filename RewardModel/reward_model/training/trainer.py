@@ -219,6 +219,95 @@ class RewardModelTrainer(Trainer):
         self._train_ranking_window_cosines: list[torch.Tensor] = []
         self._train_ranking_group_offset = 0
 
+    @staticmethod
+    def _component_learning_rate(
+        parameter_name: str,
+        *,
+        default_learning_rate: float,
+        encoder_learning_rate: Optional[float],
+        projection_learning_rate: Optional[float],
+    ) -> float:
+        if parameter_name.startswith(("protein_encoder.", "molecule_encoder.")):
+            return float(encoder_learning_rate or default_learning_rate)
+        if parameter_name.startswith(
+            ("protein_projection.", "molecule_projection.")
+        ):
+            return float(projection_learning_rate or default_learning_rate)
+        return float(default_learning_rate)
+
+    def create_optimizer(self, model=None):
+        """Create AdamW-style parameter groups for controlled LR ablations."""
+        encoder_learning_rate = getattr(
+            self.args,
+            "reward_encoder_learning_rate",
+            None,
+        )
+        projection_learning_rate = getattr(
+            self.args,
+            "reward_projection_learning_rate",
+            None,
+        )
+        if encoder_learning_rate is None and projection_learning_rate is None:
+            parent_create_optimizer = super().create_optimizer
+            if "model" in inspect.signature(parent_create_optimizer).parameters:
+                return parent_create_optimizer(model=model)
+            return parent_create_optimizer()
+
+        if self.optimizer is not None:
+            return self.optimizer
+
+        opt_model = self.model if model is None else model
+        decay_parameters = self.get_decay_parameter_names(opt_model)
+        grouped_parameters: Dict[tuple[float, float], list[torch.nn.Parameter]] = {}
+        for parameter_name, parameter in opt_model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            learning_rate = self._component_learning_rate(
+                parameter_name,
+                default_learning_rate=float(self.args.learning_rate),
+                encoder_learning_rate=encoder_learning_rate,
+                projection_learning_rate=projection_learning_rate,
+            )
+            weight_decay = (
+                float(self.args.weight_decay)
+                if parameter_name in decay_parameters
+                else 0.0
+            )
+            grouped_parameters.setdefault((learning_rate, weight_decay), []).append(
+                parameter
+            )
+
+        optimizer_grouped_parameters = [
+            {
+                "params": parameters,
+                "lr": learning_rate,
+                "weight_decay": weight_decay,
+            }
+            for (learning_rate, weight_decay), parameters in (
+                grouped_parameters.items()
+            )
+        ]
+        if self.optimizer_cls_and_kwargs is not None:
+            optimizer_cls, raw_optimizer_kwargs = self.optimizer_cls_and_kwargs
+        else:
+            optimizer_cls, raw_optimizer_kwargs = self.get_optimizer_cls_and_kwargs(
+                self.args,
+                opt_model,
+            )
+        optimizer_kwargs = dict(raw_optimizer_kwargs)
+        unsupported_overrides = {
+            key
+            for key in ("params", "model", "optimizer_dict")
+            if key in optimizer_kwargs
+        }
+        if unsupported_overrides:
+            raise ValueError(
+                "encoder/projection learning rates are not compatible with optimizer "
+                f"parameter overrides: {sorted(unsupported_overrides)}"
+            )
+        self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+        return self.optimizer
+
     def _ranking_score_diagnostics_enabled(self) -> bool:
         return bool(
             getattr(
@@ -874,6 +963,10 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         training_args.reward_metrics_profile = config.metrics_profile
         training_args.reward_protein_shuffle_sensitivity = (
             config.protein_shuffle_sensitivity
+        )
+        training_args.reward_encoder_learning_rate = config.encoder_learning_rate
+        training_args.reward_projection_learning_rate = (
+            config.projection_learning_rate
         )
         return training_args
     except ImportError as exc:

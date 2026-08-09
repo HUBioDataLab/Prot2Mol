@@ -73,6 +73,8 @@ class RewardTrainerConfig:
     gradient_accumulation_steps: int = 1
     eval_steps: Optional[int] = None
     learning_rate: float = 1e-5
+    encoder_learning_rate: Optional[float] = None
+    projection_learning_rate: Optional[float] = None
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
     logging_steps: int = 10
@@ -118,6 +120,16 @@ class RewardTrainerConfig:
             raise ValueError("eval_steps must be > 0 when provided")
         if self.learning_rate <= 0.0:
             raise ValueError("learning_rate must be > 0")
+        if (
+            self.encoder_learning_rate is not None
+            and self.encoder_learning_rate <= 0.0
+        ):
+            raise ValueError("encoder_learning_rate must be > 0 when provided")
+        if (
+            self.projection_learning_rate is not None
+            and self.projection_learning_rate <= 0.0
+        ):
+            raise ValueError("projection_learning_rate must be > 0 when provided")
         if self.weight_decay < 0.0:
             raise ValueError("weight_decay must be >= 0")
         if self.max_grad_norm < 0.0:
