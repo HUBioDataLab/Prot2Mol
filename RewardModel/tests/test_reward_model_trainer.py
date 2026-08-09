@@ -1222,9 +1222,11 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
     config = load_reward_training_config(str(config_path))
 
     assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
-    assert config.model.molecule_hidden_dropout_prob == pytest.approx(0.0)
-    assert config.model.molecule_attention_probs_dropout_prob == pytest.approx(0.0)
-    assert config.model.dropout == pytest.approx(0.0)
+    assert config.model.protein_hidden_dropout_prob == pytest.approx(0.15)
+    assert config.model.protein_attention_probs_dropout_prob == pytest.approx(0.15)
+    assert config.model.molecule_hidden_dropout_prob == pytest.approx(0.15)
+    assert config.model.molecule_attention_probs_dropout_prob == pytest.approx(0.15)
+    assert config.model.dropout == pytest.approx(0.15)
     assert config.model.ranking_temperature == pytest.approx(0.1)
     assert config.model.ranking_loss_weight == pytest.approx(0.5)
     assert config.model.contrastive_loss_weight == pytest.approx(0.5)
@@ -1242,7 +1244,7 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
     assert config.training.training_mode == "multi_gpu"
     assert config.training.bf16 is True
     assert config.training.dataloader_num_workers == 4
-    assert "lr1e4_batch16_4gpu_100_epochs" in config.training.output_dir
+    assert "lr1e4_batch16_dropout015_4gpu_100_epochs" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():

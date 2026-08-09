@@ -1,13 +1,15 @@
 model:
   protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
   molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_hidden_dropout_prob: 0.15
+  protein_attention_probs_dropout_prob: 0.15
   molecule_input_representation: selfies
-  molecule_hidden_dropout_prob: 0.0
-  molecule_attention_probs_dropout_prob: 0.0
+  molecule_hidden_dropout_prob: 0.15
+  molecule_attention_probs_dropout_prob: 0.15
   protein_max_length: 1024
   molecule_max_length: 256
   fusion_hidden_dim: 512
-  dropout: 0.0
+  dropout: 0.15
   pooling_type: mean
   pair_scoring_mode: cosine
   activity_threshold: 6.0
@@ -38,7 +40,7 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale10_contrastive_lr1e4_batch16_4gpu_100_epochs
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale10_contrastive_lr1e4_batch16_dropout015_4gpu_100_epochs
   num_train_epochs: 100
   per_device_train_batch_size: 16
   per_device_eval_batch_size: 32

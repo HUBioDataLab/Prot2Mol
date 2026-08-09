@@ -103,7 +103,7 @@ def test_reward_model_passes_molformer_loading_contract(monkeypatch):
     )
 
 
-def test_reward_model_passes_molecule_encoder_dropout_overrides(monkeypatch):
+def test_reward_model_passes_encoder_dropout_overrides(monkeypatch):
     protein_bundle, molecule_bundle = _dummy_bundles()
     captured = []
 
@@ -117,18 +117,24 @@ def test_reward_model_passes_molecule_encoder_dropout_overrides(monkeypatch):
         RewardModelConfig(
             protein_model_name_or_path="protein/dummy",
             molecule_model_name_or_path="HUBioDataLab/SELFormer",
-            molecule_hidden_dropout_prob=0.0,
-            molecule_attention_probs_dropout_prob=0.0,
+            protein_hidden_dropout_prob=0.15,
+            protein_attention_probs_dropout_prob=0.15,
+            molecule_hidden_dropout_prob=0.15,
+            molecule_attention_probs_dropout_prob=0.15,
             fusion_hidden_dim=10,
             fusion_num_heads=2,
             pair_scoring_mode="cosine",
         )
     )
 
+    assert captured[0][1]["model_kwargs"] == {
+        "hidden_dropout_prob": 0.15,
+        "attention_probs_dropout_prob": 0.15,
+    }
     assert captured[1][1]["model_kwargs"] == {
         "trust_remote_code": False,
-        "hidden_dropout_prob": 0.0,
-        "attention_probs_dropout_prob": 0.0,
+        "hidden_dropout_prob": 0.15,
+        "attention_probs_dropout_prob": 0.15,
     }
 
 

@@ -150,7 +150,7 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
 
     assert model.protein_norm is None
     assert model.molecule_norm is None
-    assert model.projection_dropout is None
+    assert model.projection_dropout.p == pytest.approx(0.1)
     assert model.fusion is None
     assert model.ranking_head is None
     assert model.classification_head is None
@@ -177,6 +177,47 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
     assert model.protein_projection.weight.grad.abs().sum() > 0.0
     assert model.molecule_projection.weight.grad is not None
     assert model.molecule_projection.weight.grad.abs().sum() > 0.0
+
+
+def test_simple_cosine_projection_dropout_is_train_only():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+        dropout=0.5,
+    )
+    inputs = {
+        "protein_input_ids": torch.tensor([[1, 2, 3], [4, 5, 6]]),
+        "protein_attention_mask": torch.ones(2, 3, dtype=torch.long),
+        "molecule_input_ids": torch.tensor([[7, 8, 9], [1, 2, 3]]),
+        "molecule_attention_mask": torch.ones(2, 3, dtype=torch.long),
+        "return_token_embeddings": True,
+    }
+
+    model.train()
+    torch.manual_seed(11)
+    first_train = model(**inputs)
+    torch.manual_seed(12)
+    second_train = model(**inputs)
+    assert not torch.equal(
+        first_train.protein_token_embeddings,
+        second_train.protein_token_embeddings,
+    )
+    assert not torch.equal(
+        first_train.molecule_token_embeddings,
+        second_train.molecule_token_embeddings,
+    )
+
+    model.eval()
+    first_eval = model(**inputs)
+    second_eval = model(**inputs)
+    assert torch.equal(
+        first_eval.protein_token_embeddings,
+        second_eval.protein_token_embeddings,
+    )
+    assert torch.equal(
+        first_eval.molecule_token_embeddings,
+        second_eval.molecule_token_embeddings,
+    )
 
 
 def test_simple_cosine_shares_one_scaled_matrix_between_ranking_and_contrastive():

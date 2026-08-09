@@ -23,6 +23,8 @@ class RewardModelConfig:
     molecule_model_name_or_path: str = "HUBioDataLab/SELFormer"
     protein_tokenizer_name_or_path: Optional[str] = None
     molecule_tokenizer_name_or_path: Optional[str] = None
+    protein_hidden_dropout_prob: Optional[float] = None
+    protein_attention_probs_dropout_prob: Optional[float] = None
     molecule_input_representation: str = "selfies"
     molecule_trust_remote_code: bool = False
     molecule_deterministic_eval: bool = False
@@ -77,6 +79,8 @@ class RewardModelConfig:
         if not isinstance(self.molecule_deterministic_eval, bool):
             raise ValueError("molecule_deterministic_eval must be a boolean")
         for field_name in (
+            "protein_hidden_dropout_prob",
+            "protein_attention_probs_dropout_prob",
             "molecule_hidden_dropout_prob",
             "molecule_attention_probs_dropout_prob",
         ):

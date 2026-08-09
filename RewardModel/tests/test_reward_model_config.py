@@ -9,6 +9,8 @@ def test_reward_model_config_round_trip(tmp_path):
     config = RewardModelConfig(
         protein_model_name_or_path="protein/local",
         molecule_model_name_or_path="molecule/local",
+        protein_hidden_dropout_prob=0.15,
+        protein_attention_probs_dropout_prob=0.15,
         molecule_input_representation="smiles",
         molecule_trust_remote_code=True,
         molecule_deterministic_eval=True,
@@ -131,6 +133,10 @@ def test_reward_model_config_validates_molecule_encoder_settings():
         RewardModelConfig(molecule_hidden_dropout_prob=1.0)
     with pytest.raises(ValueError, match="molecule_attention_probs_dropout_prob"):
         RewardModelConfig(molecule_attention_probs_dropout_prob=float("nan"))
+    with pytest.raises(ValueError, match="protein_hidden_dropout_prob"):
+        RewardModelConfig(protein_hidden_dropout_prob=-0.1)
+    with pytest.raises(ValueError, match="protein_attention_probs_dropout_prob"):
+        RewardModelConfig(protein_attention_probs_dropout_prob=1.0)
 
 
 @pytest.mark.parametrize(

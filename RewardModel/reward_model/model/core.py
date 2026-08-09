@@ -30,9 +30,19 @@ class RewardModel(nn.Module):
         self._config = config if isinstance(config, RewardModelConfig) else RewardModelConfig.from_dict(config)
 
         if protein_bundle is None:
+            protein_model_kwargs: Dict[str, Any] = {}
+            if self._config.protein_hidden_dropout_prob is not None:
+                protein_model_kwargs["hidden_dropout_prob"] = (
+                    self._config.protein_hidden_dropout_prob
+                )
+            if self._config.protein_attention_probs_dropout_prob is not None:
+                protein_model_kwargs["attention_probs_dropout_prob"] = (
+                    self._config.protein_attention_probs_dropout_prob
+                )
             protein_bundle = load_encoder_bundle(
                 name_or_path=self._config.protein_model_name_or_path,
                 tokenizer_name_or_path=self._config.protein_tokenizer_name_or_path,
+                model_kwargs=protein_model_kwargs or None,
             )
         if molecule_bundle is None:
             molecule_model_kwargs: Dict[str, Any] = {
@@ -75,13 +85,12 @@ class RewardModel(nn.Module):
         self.protein_projection = nn.Linear(self._config.protein_hidden_size, self._config.fusion_hidden_dim)
         self.molecule_projection = nn.Linear(self._config.molecule_hidden_size, self._config.fusion_hidden_dim)
         if self._config.pair_scoring_mode == "cosine":
-            # The simple cosine ablation is intentionally only
-            # encoder -> projection -> pooling -> L2 normalization. Keep these
-            # attributes for a stable public interface, but do not instantiate
-            # any of the non-encoder processing used by the other modes.
+            # The simple cosine path remains encoder -> projection -> pooling
+            # -> L2 normalization, with optional regularization immediately
+            # after each projection.
             self.protein_norm = None
             self.molecule_norm = None
-            self.projection_dropout = None
+            self.projection_dropout = nn.Dropout(self._config.dropout)
             self.fusion = None
         else:
             self.protein_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
@@ -510,8 +519,14 @@ class RewardModel(nn.Module):
         molecule_mask = normalize_mask(molecule_attention_mask, molecule_tokens)
 
         if self._config.pair_scoring_mode == "cosine":
-            protein_tokens = self.protein_projection(protein_tokens)
-            molecule_tokens = self.molecule_projection(molecule_tokens)
+            if self.projection_dropout is None:
+                raise RuntimeError("Projection dropout is not initialized")
+            protein_tokens = self.projection_dropout(
+                self.protein_projection(protein_tokens)
+            )
+            molecule_tokens = self.projection_dropout(
+                self.molecule_projection(molecule_tokens)
+            )
             fused_protein = None
             fused_molecule = None
             pooled_protein = masked_pool(
