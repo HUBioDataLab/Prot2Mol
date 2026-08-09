@@ -64,6 +64,43 @@ def test_load_encoder_bundle_uses_full_name_and_infers_hidden_size(monkeypatch):
     )
 
 
+def test_reward_model_passes_molformer_loading_contract(monkeypatch):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    captured = []
+
+    def _load_bundle(name_or_path, **kwargs):
+        captured.append((name_or_path, kwargs))
+        return protein_bundle if name_or_path == "protein/dummy" else molecule_bundle
+
+    monkeypatch.setattr("reward_model.model.core.load_encoder_bundle", _load_bundle)
+
+    model = RewardModel(
+        RewardModelConfig(
+            protein_model_name_or_path="protein/dummy",
+            molecule_model_name_or_path="ibm/MoLFormer-XL-both-10pct",
+            molecule_input_representation="smiles",
+            molecule_trust_remote_code=True,
+            molecule_deterministic_eval=True,
+            fusion_hidden_dim=10,
+            fusion_num_heads=2,
+            pair_scoring_mode="cosine",
+        )
+    )
+
+    assert model.molecule_encoder is molecule_bundle.model
+    assert captured[1] == (
+        "ibm/MoLFormer-XL-both-10pct",
+        {
+            "tokenizer_name_or_path": None,
+            "tokenizer_kwargs": {"trust_remote_code": True},
+            "model_kwargs": {
+                "trust_remote_code": True,
+                "deterministic_eval": True,
+            },
+        },
+    )
+
+
 def test_reward_model_save_and_load_round_trip(tmp_path):
     protein_bundle, molecule_bundle = _dummy_bundles()
     config = RewardModelConfig(

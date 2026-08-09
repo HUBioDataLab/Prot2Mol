@@ -32,9 +32,18 @@ class RewardModel(nn.Module):
                 tokenizer_name_or_path=self._config.protein_tokenizer_name_or_path,
             )
         if molecule_bundle is None:
+            molecule_model_kwargs: Dict[str, Any] = {
+                "trust_remote_code": self._config.molecule_trust_remote_code,
+            }
+            if self._config.molecule_deterministic_eval:
+                molecule_model_kwargs["deterministic_eval"] = True
             molecule_bundle = load_encoder_bundle(
                 name_or_path=self._config.molecule_model_name_or_path,
                 tokenizer_name_or_path=self._config.molecule_tokenizer_name_or_path,
+                tokenizer_kwargs={
+                    "trust_remote_code": self._config.molecule_trust_remote_code,
+                },
+                model_kwargs=molecule_model_kwargs,
             )
 
         self.protein_tokenizer = protein_bundle.tokenizer

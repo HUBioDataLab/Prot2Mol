@@ -22,15 +22,22 @@ PAIR_RULE_UPPER_PCHEMBL = 8.0
 PAIR_RULE_LOWER_FOLD_CHANGE = 10.0
 PAIR_RULE_UPPER_FOLD_CHANGE = 2.0
 
-SOURCE_PARQUET_COLUMNS = (
+BASE_SOURCE_PARQUET_COLUMNS = (
     "target_chembl_id",
     "protein_sequence",
     "assay_id",
     "compound_id",
-    "compound_selfies",
     "pchembl_value",
     "binary_label",
 )
+
+MOLECULE_INPUT_COLUMNS = {
+    "selfies": "compound_selfies",
+    "smiles": "smiles",
+}
+
+# Backward-compatible public constant for the default SELFormer/SELFIES path.
+SOURCE_PARQUET_COLUMNS = BASE_SOURCE_PARQUET_COLUMNS + ("compound_selfies",)
 
 TOKENIZED_DATASET_COLUMNS = (
     "example_id",
@@ -156,7 +163,11 @@ def is_valid_negative_for_positive(positive_pchembl: float, negative_pchembl: fl
     return negative_pchembl <= negative_threshold
 
 
-def _load_split_parquet_rows(path: str) -> List[Dict[str, Any]]:
+def _load_split_parquet_rows(
+    path: str,
+    *,
+    molecule_input_representation: str = "selfies",
+) -> List[Dict[str, Any]]:
     try:
         import pandas as pd
     except ImportError as exc:
@@ -166,13 +177,15 @@ def _load_split_parquet_rows(path: str) -> List[Dict[str, Any]]:
         ) from exc
 
     resolved_path = os.path.abspath(path)
+    molecule_input_column = MOLECULE_INPUT_COLUMNS[molecule_input_representation]
+    required_columns = BASE_SOURCE_PARQUET_COLUMNS + (molecule_input_column,)
     try:
         import pyarrow.parquet as parquet
 
         available_columns = set(parquet.ParquetFile(resolved_path).schema.names)
         missing_columns = [
             column
-            for column in SOURCE_PARQUET_COLUMNS
+            for column in required_columns
             if column not in available_columns
         ]
         if missing_columns:
@@ -180,20 +193,22 @@ def _load_split_parquet_rows(path: str) -> List[Dict[str, Any]]:
                 f"Split parquet at {resolved_path} is missing required columns: "
                 f"{missing_columns}"
             )
-        selected_columns = list(SOURCE_PARQUET_COLUMNS)
+        selected_columns = list(required_columns)
         if "activity_type" in available_columns:
             selected_columns.append("activity_type")
         frame = pd.read_parquet(resolved_path, columns=selected_columns)
     except ImportError:
         frame = pd.read_parquet(resolved_path)
         available_columns = set(frame.columns)
-    missing_columns = [column for column in SOURCE_PARQUET_COLUMNS if column not in available_columns]
+    missing_columns = [
+        column for column in required_columns if column not in available_columns
+    ]
     if missing_columns:
         raise ValueError(
             f"Split parquet at {resolved_path} is missing required columns: {missing_columns}"
         )
 
-    minimal_frame = frame.loc[:, list(SOURCE_PARQUET_COLUMNS)].copy()
+    minimal_frame = frame.loc[:, list(required_columns)].copy()
     minimal_frame["activity_type"] = (
         frame["activity_type"].fillna("").astype(str)
         if "activity_type" in frame.columns
@@ -206,7 +221,9 @@ def _prepare_split_rows(
     split_rows: Sequence[Mapping[str, Any]],
     *,
     activity_threshold: float = 6.0,
+    molecule_input_representation: str = "selfies",
 ) -> List[Dict[str, Any]]:
+    molecule_input_column = MOLECULE_INPUT_COLUMNS[molecule_input_representation]
     prepared_rows: List[Dict[str, Any]] = []
     for index, row in enumerate(split_rows):
         target_chembl_id = str(row["target_chembl_id"])
@@ -228,7 +245,7 @@ def _prepare_split_rows(
                 "protein_sequence": str(row["protein_sequence"]),
                 "assay_id": assay_id,
                 "compound_id": str(row["compound_id"]),
-                "compound_selfies": str(row["compound_selfies"]),
+                "molecule_text": str(row[molecule_input_column]),
                 "pchembl_value": pchembl_value,
                 "binary_label": binary_label,
                 "activity_type": str(row.get("activity_type", "Unknown")),
@@ -276,7 +293,10 @@ def _filter_rows_that_fit_max_lengths(
 ) -> Dataset:
     def _mark_rows_that_fit(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[bool]]:
         protein_lengths = _measure_tokenized_lengths(protein_tokenizer, batch["protein_sequence"])
-        molecule_lengths = _measure_tokenized_lengths(molecule_tokenizer, batch["compound_selfies"])
+        molecule_lengths = _measure_tokenized_lengths(
+            molecule_tokenizer,
+            batch["molecule_text"],
+        )
         return {
             "_fits_max_lengths": [
                 protein_length <= model_config.protein_max_length
@@ -327,7 +347,7 @@ def _tokenize_example_rows(
         )
         molecule_batch = batch_encode_texts(
             tokenizer=molecule_tokenizer,
-            texts=batch["compound_selfies"],
+            texts=batch["molecule_text"],
             max_length=model_config.molecule_max_length,
         )
         return {
@@ -362,7 +382,11 @@ def prepare_tokenized_split_datasets(
         model_config.protein_tokenizer_name_or_path or model_config.protein_model_name_or_path
     )
     molecule_tokenizer = load_tokenizer(
-        model_config.molecule_tokenizer_name_or_path or model_config.molecule_model_name_or_path
+        model_config.molecule_tokenizer_name_or_path
+        or model_config.molecule_model_name_or_path,
+        tokenizer_kwargs={
+            "trust_remote_code": model_config.molecule_trust_remote_code,
+        },
     )
 
     stats: Dict[str, Tuple[int, int]] = {}
@@ -373,8 +397,16 @@ def prepare_tokenized_split_datasets(
     }
     for split_name, parquet_path in source_paths.items():
         prepared_rows = _prepare_split_rows(
-            _load_split_parquet_rows(parquet_path),
+            _load_split_parquet_rows(
+                parquet_path,
+                molecule_input_representation=(
+                    model_config.molecule_input_representation
+                ),
+            ),
             activity_threshold=model_config.activity_threshold,
+            molecule_input_representation=(
+                model_config.molecule_input_representation
+            ),
         )
         tokenized = _tokenize_example_rows(
             prepared_rows,

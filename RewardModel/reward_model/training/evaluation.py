@@ -619,13 +619,31 @@ def _compute_weighted_groupwise_pearson(
     min_group_size: int = 3,
     min_pchembl_span: float = 0.0,
 ) -> float:
+    return compute_groupwise_rank_correlations(
+        group_ids=group_ids,
+        ranking_scores=ranking_scores,
+        pchembl_values=pchembl_values,
+        min_group_size=min_group_size,
+        min_pchembl_span=min_pchembl_span,
+    )["pearson"]
+
+
+def compute_groupwise_rank_correlations(
+    *,
+    group_ids: Sequence[str | int],
+    ranking_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_group_size: int = 3,
+    min_pchembl_span: float = 0.0,
+) -> Dict[str, float]:
+    """Return example-weighted Spearman and Pearson across ranking groups."""
     grouped_scores: Dict[str, list[float]] = defaultdict(list)
     grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
     for group_id, score, pchembl in zip(group_ids, ranking_scores, pchembl_values):
         grouped_scores[str(group_id)].append(float(score))
         grouped_pchembl[str(group_id)].append(float(pchembl))
 
-    correlations: list[tuple[float, int]] = []
+    correlations: list[tuple[float, float, int]] = []
     for group_id in sorted(grouped_scores):
         scores = grouped_scores[group_id]
         pchembls = grouped_pchembl[group_id]
@@ -636,18 +654,32 @@ def _compute_weighted_groupwise_pearson(
         if max(pchembls) - min(pchembls) < min_pchembl_span:
             continue
         if len(set(scores)) == 1:
-            correlation = float("nan")
+            spearman = float("nan")
+            pearson = float("nan")
         else:
-            result = pearsonr(scores, pchembls)
-            correlation = float(getattr(result, "statistic", result[0]))
-        correlations.append((correlation, len(scores)))
+            spearman_result = spearmanr(scores, pchembls)
+            pearson_result = pearsonr(scores, pchembls)
+            spearman = float(
+                getattr(spearman_result, "statistic", spearman_result[0])
+            )
+            pearson = float(
+                getattr(pearson_result, "statistic", pearson_result[0])
+            )
+        correlations.append((spearman, pearson, len(scores)))
 
     if not correlations:
-        return float("nan")
-    return float(
-        sum(correlation * size for correlation, size in correlations)
-        / sum(size for _, size in correlations)
-    )
+        return {"spearman": float("nan"), "pearson": float("nan")}
+    total_size = sum(size for _, _, size in correlations)
+    return {
+        "spearman": float(
+            sum(spearman * size for spearman, _, size in correlations)
+            / total_size
+        ),
+        "pearson": float(
+            sum(pearson * size for _, pearson, size in correlations)
+            / total_size
+        ),
+    }
 
 
 def _compute_groupwise_spearman_with_records(

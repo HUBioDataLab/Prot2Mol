@@ -572,7 +572,12 @@ def test_ranking_metrics_profile_filters_reporter_only_fields(monkeypatch):
     trainer.args = SimpleNamespace(reward_metrics_profile="ranking")
     trainer.model = torch.nn.Module()
     trainer.model.config = RewardModelConfig(pair_scoring_mode="cosine")
-    trainer._consume_train_component_logs = lambda: {"cosine_std": 0.12}
+    trainer._consume_train_component_logs = lambda: {
+        "cosine_std": 0.12,
+        "pair_accuracy": 0.75,
+        "spearman": 0.3,
+        "pearson": 0.4,
+    }
     trainer._append_ranking_score_diagnostics_log = lambda logs: None
 
     result = trainer.log(
@@ -593,6 +598,9 @@ def test_ranking_metrics_profile_filters_reporter_only_fields(monkeypatch):
         "learning_rate": 1.0e-5,
         "epoch": 0.1,
         "cosine_std": 0.12,
+        "pair_accuracy": 0.75,
+        "spearman": 0.3,
+        "pearson": 0.4,
     }
 
 
@@ -679,20 +687,38 @@ def test_ranking_metrics_profile_keeps_training_logs_slim():
         num_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
-        activity_logits=torch.tensor([-0.2, 0.0, 0.3]),
+        activity_logits=torch.tensor([-0.3, 0.0, 0.3]),
         activity_labels=torch.tensor([0.0, 0.0, 1.0]),
-        ranking_score=torch.tensor([-0.2, 0.0, 0.3]),
+        ranking_score=torch.tensor([-0.3, 0.0, 0.3]),
         pchembl_values=torch.tensor([5.0, 6.0, 7.0]),
         ranking_group_ids=torch.tensor([0, 0, 0]),
-        cosine_similarity=torch.tensor([-0.2, 0.0, 0.3]),
+        cosine_similarity=torch.tensor([-0.3, 0.0, 0.3]),
+    )
+    trainer._record_train_components(
+        ranking_loss=torch.tensor(1.5),
+        classification_loss=torch.tensor(0.5),
+        num_examples=torch.tensor(5),
+        num_ranking_lists=torch.tensor(1),
+        num_ranked_examples=torch.tensor(5),
+        activity_logits=torch.tensor([0.5, 0.25, 0.0, -0.25, -0.5]),
+        activity_labels=torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0]),
+        ranking_score=torch.tensor([0.5, 0.25, 0.0, -0.25, -0.5]),
+        pchembl_values=torch.tensor([5.0, 6.0, 7.0, 8.0, 9.0]),
+        ranking_group_ids=torch.zeros(5, dtype=torch.long),
+        cosine_similarity=torch.tensor([0.5, 0.25, 0.0, -0.25, -0.5]),
     )
 
     logs = trainer._consume_train_component_logs()
 
-    assert set(logs) == {"cosine_std"}
+    assert set(logs) == {"cosine_std", "pair_accuracy", "spearman", "pearson"}
     assert logs["cosine_std"] == pytest.approx(
-        torch.tensor([-0.2, 0.0, 0.3]).std(unbiased=False).item()
+        torch.tensor([-0.3, 0.0, 0.3, 0.5, 0.25, 0.0, -0.25, -0.5])
+        .std(unbiased=False)
+        .item()
     )
+    assert logs["pair_accuracy"] == pytest.approx(3.0 / 13.0)
+    assert logs["spearman"] == pytest.approx(-0.25)
+    assert logs["pearson"] == pytest.approx(-0.25)
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
@@ -942,6 +968,28 @@ def test_simple_cosine_config_is_ranking_only_without_fusion_settings():
     assert config.training.ranking_score_diagnostics is True
     assert config.training.protein_shuffle_sensitivity is False
     assert "simple_cosine_ranking_only_unfrozen" in config.training.output_dir
+
+
+def test_molformer_simple_cosine_config_uses_smiles_and_separate_cache():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_molformer.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.molecule_model_name_or_path == (
+        "ibm/MoLFormer-XL-both-10pct"
+    )
+    assert config.model.molecule_input_representation == "smiles"
+    assert config.model.molecule_trust_remote_code is True
+    assert config.model.molecule_deterministic_eval is True
+    assert config.model.molecule_max_length == 202
+    assert config.model.pair_scoring_mode == "cosine"
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert "molformer_smiles" in config.data.tokenized_dataset_dir
+    assert "molformer_smiles" in config.training.output_dir
+    assert config.training.metrics_profile == "ranking"
 
 
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):

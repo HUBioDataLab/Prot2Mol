@@ -336,6 +336,68 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     assert "split" not in train_dataset.column_names
 
 
+def test_prepare_tokenized_split_datasets_uses_smiles_with_molformer_tokenizer(
+    tmp_path,
+    monkeypatch,
+):
+    split_rows = _split_parquet_rows()
+    expected_smiles = set()
+    for split_name, rows in split_rows.items():
+        for index, row in enumerate(rows):
+            smiles = f"C{index}O"
+            row["smiles"] = smiles
+            expected_smiles.add(smiles)
+        _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
+
+    protein_tokenizer = DummyTokenizer()
+    molecule_tokenizer = DummyTokenizer(pad_token_id=2)
+    tokenizer_loads = []
+
+    def _load_tokenizer(name_or_path, tokenizer_kwargs=None):
+        tokenizer_loads.append((name_or_path, tokenizer_kwargs))
+        return (
+            molecule_tokenizer
+            if name_or_path == "ibm/MoLFormer-XL-both-10pct"
+            else protein_tokenizer
+        )
+
+    monkeypatch.setattr(
+        "reward_model.training.data.load_tokenizer",
+        _load_tokenizer,
+    )
+
+    prepare_tokenized_split_datasets(
+        RewardTrainingDataConfig(
+            train_parquet_path=str(tmp_path / "train.parquet"),
+            val_parquet_path=str(tmp_path / "val.parquet"),
+            test_parquet_path=str(tmp_path / "test.parquet"),
+            tokenized_dataset_dir=str(tmp_path / "tokenized_smiles"),
+            tokenization_batch_size=2,
+        ),
+        RewardModelConfig(
+            protein_model_name_or_path="dummy/protein",
+            molecule_model_name_or_path="ibm/MoLFormer-XL-both-10pct",
+            molecule_input_representation="smiles",
+            molecule_trust_remote_code=True,
+            molecule_deterministic_eval=True,
+            protein_max_length=16,
+            molecule_max_length=16,
+        ),
+    )
+
+    assert tokenizer_loads[1] == (
+        "ibm/MoLFormer-XL-both-10pct",
+        {"trust_remote_code": True},
+    )
+    tokenized_molecule_texts = {
+        text
+        for call in molecule_tokenizer.calls
+        for text in call["texts"]
+    }
+    assert tokenized_molecule_texts == expected_smiles
+    assert not any(text.startswith("[") for text in tokenized_molecule_texts)
+
+
 def test_prepare_tokenized_split_datasets_rejects_labels_inconsistent_with_threshold(
     tmp_path,
     monkeypatch,

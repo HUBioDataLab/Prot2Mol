@@ -55,7 +55,8 @@ ranking_score = dot(protein, ligand)
 There is no projection LayerNorm or dropout, cross-attention fusion, MLP head,
 learned cosine scale, classification bias, or classification loss in this
 mode. Its ranking metrics profile keeps the dashboard to `loss`, `grad_norm`,
-`learning_rate`, and `cosine_std` during training, and `eval_loss`,
+`learning_rate`, `cosine_std`, `pair_accuracy`, `spearman`, and `pearson`
+during training, and `eval_loss`,
 `eval_spearman`, `eval_pearson`, `eval_cosine_std`, and the margin-aware
 `eval_pair_accuracy` during evaluation. Protein-shuffle evaluation is disabled
 for this run. Start it directly from the pretrained encoders; a fusion checkpoint is
@@ -64,6 +65,19 @@ architecturally incompatible and must not be supplied:
 ```bash
 python train_reward_model.py \
   --config configs/reward_train_simple_cosine.yaml
+```
+
+The MoLFormer variant keeps the same scoring path but changes only the
+molecule encoder and its input representation. It loads
+`ibm/MoLFormer-XL-both-10pct` and its tokenizer with remote code enabled,
+uses deterministic evaluation, and tokenizes the split Parquets' canonical
+`smiles` column into a separate cache:
+
+```bash
+python prepare_reward_training_data.py \
+  --config configs/reward_train_simple_cosine_molformer.yaml
+python train_reward_model.py \
+  --config configs/reward_train_simple_cosine_molformer.yaml
 ```
 
 ## Two-stage training

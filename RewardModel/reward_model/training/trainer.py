@@ -19,6 +19,7 @@ from .evaluation import (
     _append_assay_spearman_log,
     _with_metric_prefix,
     compute_classification_metrics,
+    compute_groupwise_rank_correlations,
     compute_joint_evaluation_metrics,
     compute_ranking_score_diagnostics,
 )
@@ -212,6 +213,11 @@ class RewardModelTrainer(Trainer):
         self._train_classification_labels: list[float] = []
         self._train_ranking_diagnostic_sums: Dict[str, float] = {}
         self._train_ranking_diagnostic_counts: Dict[str, int] = {}
+        self._train_ranking_window_scores: list[torch.Tensor] = []
+        self._train_ranking_window_targets: list[torch.Tensor] = []
+        self._train_ranking_window_group_ids: list[torch.Tensor] = []
+        self._train_ranking_window_cosines: list[torch.Tensor] = []
+        self._train_ranking_group_offset = 0
 
     def _ranking_score_diagnostics_enabled(self) -> bool:
         return bool(
@@ -347,7 +353,38 @@ class RewardModelTrainer(Trainer):
                 scores = ranking_score.detach().reshape(-1)
                 targets = pchembl_values.detach().to(device=scores.device).reshape(-1)
                 group_ids = ranking_group_ids.detach().to(device=scores.device).reshape(-1)
-                if self._ranking_score_diagnostics_enabled():
+                if self._ranking_metrics_profile_enabled():
+                    ranked_mask = group_ids >= 0
+                    if ranked_mask.any():
+                        ranked_group_ids = group_ids[ranked_mask]
+                        _, remapped_group_ids = torch.unique(
+                            ranked_group_ids,
+                            sorted=True,
+                            return_inverse=True,
+                        )
+                        remapped_group_ids = (
+                            remapped_group_ids + self._train_ranking_group_offset
+                        )
+                        self._train_ranking_group_offset += int(
+                            remapped_group_ids.max().item()
+                            - remapped_group_ids.min().item()
+                            + 1
+                        )
+                        self._train_ranking_window_scores.append(
+                            scores[ranked_mask].float().cpu()
+                        )
+                        self._train_ranking_window_targets.append(
+                            targets[ranked_mask].float().cpu()
+                        )
+                        self._train_ranking_window_group_ids.append(
+                            remapped_group_ids.long().cpu()
+                        )
+                        if cosine_similarity is not None:
+                            cosines = cosine_similarity.detach().reshape(-1)
+                            self._train_ranking_window_cosines.append(
+                                cosines[ranked_mask].float().cpu()
+                            )
+                elif self._ranking_score_diagnostics_enabled():
                     diagnostics = compute_ranking_score_diagnostics(
                         ranking_scores=scores,
                         pchembl_values=targets,
@@ -374,14 +411,35 @@ class RewardModelTrainer(Trainer):
         denom = float(self._train_component_count)
         if self._ranking_metrics_profile_enabled():
             logs = {}
-            cosine_count = self._train_ranking_diagnostic_counts.get(
-                "ranking_cosine_std",
-                0,
-            )
-            if cosine_count > 0:
-                logs["cosine_std"] = (
-                    self._train_ranking_diagnostic_sums["ranking_cosine_std"]
-                    / cosine_count
+            if self._train_ranking_window_scores:
+                scores = torch.cat(self._train_ranking_window_scores)
+                targets = torch.cat(self._train_ranking_window_targets)
+                group_ids = torch.cat(self._train_ranking_window_group_ids)
+                diagnostics = compute_ranking_score_diagnostics(
+                    ranking_scores=scores,
+                    pchembl_values=targets,
+                    ranking_group_ids=group_ids,
+                    temperature=float(self.model.config.ranking_temperature),
+                    affinity_margin=float(
+                        self.model.config.ranking_affinity_margin
+                    ),
+                )
+                if "ranking_margin_pair_accuracy" in diagnostics:
+                    logs["pair_accuracy"] = diagnostics[
+                        "ranking_margin_pair_accuracy"
+                    ]
+                logs.update(
+                    compute_groupwise_rank_correlations(
+                        group_ids=group_ids.tolist(),
+                        ranking_scores=scores.tolist(),
+                        pchembl_values=targets.tolist(),
+                    )
+                )
+            if self._train_ranking_window_cosines:
+                logs["cosine_std"] = float(
+                    torch.cat(self._train_ranking_window_cosines)
+                    .std(unbiased=False)
+                    .item()
                 )
             self._reset_train_component_accumulator()
             return logs
@@ -686,6 +744,9 @@ class RewardModelTrainer(Trainer):
                     "learning_rate",
                     "epoch",
                     "cosine_std",
+                    "pair_accuracy",
+                    "spearman",
+                    "pearson",
                     "train_loss",
                 }
                 or (
@@ -717,6 +778,7 @@ class RewardModelTrainer(Trainer):
                 or "ranking_margin_pair_" in key
                 or "ranking_list_" in key
                 or key in {"cosine_std", "eval_cosine_std", "eval_pair_accuracy"}
+                or key in {"pair_accuracy", "spearman", "pearson"}
                 or key in {"loss", "grad_norm", "ranking_loss", "total_loss"}
                 or key.endswith("_ranking_loss")
                 or key.endswith("_spearman")

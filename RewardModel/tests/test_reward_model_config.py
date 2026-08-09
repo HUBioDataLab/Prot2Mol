@@ -9,6 +9,9 @@ def test_reward_model_config_round_trip(tmp_path):
     config = RewardModelConfig(
         protein_model_name_or_path="protein/local",
         molecule_model_name_or_path="molecule/local",
+        molecule_input_representation="smiles",
+        molecule_trust_remote_code=True,
+        molecule_deterministic_eval=True,
         fusion_hidden_dim=256,
         fusion_num_heads=8,
         fusion_residual=True,
@@ -87,6 +90,15 @@ def test_reward_model_config_validates_scaled_cosine_settings():
         RewardModelConfig(cosine_scale_init=101.0, cosine_scale_max=100.0)
     with pytest.raises(ValueError, match="cosine_classification_bias_init"):
         RewardModelConfig(cosine_classification_bias_init=float("nan"))
+
+
+def test_reward_model_config_validates_molecule_encoder_settings():
+    with pytest.raises(ValueError, match="molecule_input_representation"):
+        RewardModelConfig(molecule_input_representation="inchi")
+    with pytest.raises(ValueError, match="molecule_trust_remote_code"):
+        RewardModelConfig(molecule_trust_remote_code="true")
+    with pytest.raises(ValueError, match="molecule_deterministic_eval"):
+        RewardModelConfig(molecule_deterministic_eval=1)
 
 
 @pytest.mark.parametrize(

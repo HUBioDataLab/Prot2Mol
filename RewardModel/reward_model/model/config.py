@@ -11,6 +11,7 @@ from .losses import DEFAULT_RANKING_AFFINITY_MARGIN
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
 _VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
 _VALID_PAIR_SCORING_MODES = {"cosine", "mlp", "scaled_cosine"}
+_VALID_MOLECULE_INPUT_REPRESENTATIONS = {"selfies", "smiles"}
 
 
 @dataclass(eq=True)
@@ -19,6 +20,9 @@ class RewardModelConfig:
     molecule_model_name_or_path: str = "HUBioDataLab/SELFormer"
     protein_tokenizer_name_or_path: Optional[str] = None
     molecule_tokenizer_name_or_path: Optional[str] = None
+    molecule_input_representation: str = "selfies"
+    molecule_trust_remote_code: bool = False
+    molecule_deterministic_eval: bool = False
     protein_hidden_size: Optional[int] = None
     molecule_hidden_size: Optional[int] = None
     protein_max_length: int = 1024
@@ -53,6 +57,18 @@ class RewardModelConfig:
             raise ValueError("protein_model_name_or_path must be provided")
         if not self.molecule_model_name_or_path:
             raise ValueError("molecule_model_name_or_path must be provided")
+        if (
+            self.molecule_input_representation
+            not in _VALID_MOLECULE_INPUT_REPRESENTATIONS
+        ):
+            raise ValueError(
+                "molecule_input_representation must be one of "
+                f"{sorted(_VALID_MOLECULE_INPUT_REPRESENTATIONS)}"
+            )
+        if not isinstance(self.molecule_trust_remote_code, bool):
+            raise ValueError("molecule_trust_remote_code must be a boolean")
+        if not isinstance(self.molecule_deterministic_eval, bool):
+            raise ValueError("molecule_deterministic_eval must be a boolean")
         if self.fusion_hidden_dim <= 0:
             raise ValueError("fusion_hidden_dim must be > 0")
         if self.fusion_num_heads <= 0:

@@ -24,6 +24,9 @@ from ..model import (
 _WARM_START_ARCHITECTURE_FIELDS = (
     "protein_model_name_or_path",
     "molecule_model_name_or_path",
+    "molecule_input_representation",
+    "molecule_trust_remote_code",
+    "molecule_deterministic_eval",
     "protein_hidden_size",
     "molecule_hidden_size",
     "fusion_hidden_dim",
