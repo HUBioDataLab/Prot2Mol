@@ -1005,6 +1005,34 @@ def test_molformer_simple_cosine_config_uses_smiles_and_separate_cache():
     assert config.training.metrics_profile == "ranking"
 
 
+def test_selformer_esm2_150m_config_reuses_esm_tokenized_cache():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_selformer_esm2_150m.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.protein_model_name_or_path == (
+        "facebook/esm2_t30_150M_UR50D"
+    )
+    assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
+    assert config.model.molecule_input_representation == "selfies"
+    assert config.model.freeze_protein_encoder is False
+    assert config.model.freeze_molecule_encoder is False
+    assert config.model.pair_scoring_mode == "cosine"
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.data.tokenization_num_proc == 8
+    assert config.data.tokenized_dataset_dir.endswith(
+        "chembl_37_mmseqs50_activity_balanced"
+    )
+    assert config.training.dataloader_num_workers == 8
+    assert config.training.fp16 is False
+    assert config.training.bf16 is True
+    assert "selformer_esm2_150m" in config.training.output_dir
+    assert config.training.metrics_profile == "ranking"
+
+
 def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pairs(tmp_path):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
     pair_paths = get_saved_pair_dataset_paths(str(tmp_path / "tokenized"))
