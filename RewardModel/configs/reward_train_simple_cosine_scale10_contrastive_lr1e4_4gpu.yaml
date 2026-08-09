@@ -38,13 +38,11 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale10_contrastive_lr1e4_batch16_4gpu_10000_steps
-  num_train_epochs: 10
-  max_steps: 10000
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale10_contrastive_lr1e4_batch16_4gpu_100_epochs
+  num_train_epochs: 100
   per_device_train_batch_size: 16
   per_device_eval_batch_size: 32
   gradient_accumulation_steps: 1
-  eval_steps: 500
   learning_rate: 1.0e-4
   encoder_learning_rate: 1.0e-4
   projection_learning_rate: 1.0e-3
