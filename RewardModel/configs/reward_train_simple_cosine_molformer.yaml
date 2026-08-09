@@ -52,7 +52,8 @@ training:
   length_bucketing: true
   length_bucket_size_multiplier: 50
   seed: 42
-  fp16: true
+  fp16: false
+  bf16: true
   optim: adamw_torch_fused
   save_safetensors: false
   save_total_limit: 2

@@ -82,6 +82,7 @@ class RewardTrainerConfig:
     length_bucket_size_multiplier: int = 50
     seed: int = 42
     fp16: bool = False
+    bf16: bool = False
     optim: str = "adamw_torch"
     save_safetensors: bool = False
     save_total_limit: int = 2
@@ -125,6 +126,12 @@ class RewardTrainerConfig:
             raise ValueError("logging_steps must be > 0")
         if self.dataloader_num_workers < 0 or self.dataloader_num_workers > 10:
             raise ValueError("dataloader_num_workers must be in [0, 10]")
+        if not isinstance(self.fp16, bool):
+            raise ValueError("fp16 must be a boolean")
+        if not isinstance(self.bf16, bool):
+            raise ValueError("bf16 must be a boolean")
+        if self.fp16 and self.bf16:
+            raise ValueError("fp16 and bf16 cannot both be enabled")
         if not isinstance(self.optim, str) or not self.optim:
             raise ValueError("optim must be a non-empty string")
         if not isinstance(self.dynamic_padding, bool):

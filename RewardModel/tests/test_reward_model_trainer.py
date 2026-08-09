@@ -742,6 +742,15 @@ def test_trainer_config_enforces_shared_server_worker_limit(tmp_path):
         )
 
 
+def test_reward_trainer_config_rejects_multiple_mixed_precision_modes(tmp_path):
+    with pytest.raises(ValueError, match="fp16 and bf16 cannot both be enabled"):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            fp16=True,
+            bf16=True,
+        )
+
+
 @pytest.mark.parametrize("max_steps", [0, -1])
 def test_reward_trainer_config_rejects_invalid_max_steps(tmp_path, max_steps):
     with pytest.raises(ValueError, match="max_steps must be > 0"):
@@ -989,6 +998,8 @@ def test_molformer_simple_cosine_config_uses_smiles_and_separate_cache():
     assert config.model.classification_loss_weight == pytest.approx(0.0)
     assert config.data.tokenization_num_proc == 8
     assert config.training.dataloader_num_workers == 8
+    assert config.training.fp16 is False
+    assert config.training.bf16 is True
     assert "molformer_smiles" in config.data.tokenized_dataset_dir
     assert "molformer_smiles" in config.training.output_dir
     assert config.training.metrics_profile == "ranking"
