@@ -28,6 +28,7 @@ data:
   test_parquet_path: ../../dataset/processed/chembl_37/protein_cluster_50_activity_balanced/test.parquet
   tokenized_dataset_dir: ../reward_model/data/tokenized/chembl_37_mmseqs50_activity_balanced_molformer_smiles
   tokenization_batch_size: 64
+  tokenization_num_proc: 8
   ranking_max_ligands: 16
   ranking_opportunity_divisor: 32
   evaluation_ranking_partitions: 3

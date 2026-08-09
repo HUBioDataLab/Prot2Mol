@@ -14,7 +14,7 @@ from torch.utils.data import Dataset as TorchDataset
 
 from ..model import RewardModelConfig
 from ..model.losses import MIN_LISTWISE_LIGANDS
-from ..model.encoders import batch_encode_texts, load_tokenizer
+from ..model.encoders import load_tokenizer
 from .config import RewardTrainingDataConfig
 
 PAIR_RULE_LOWER_PCHEMBL = 5.0
@@ -262,15 +262,18 @@ def _select_tokenized_columns(dataset: Dataset) -> Dataset:
     return dataset.remove_columns(removable)
 
 
-def _measure_tokenized_lengths(
+def _tokenize_and_pad_texts(
     tokenizer: Any,
     texts: Sequence[str],
-) -> List[int]:
+    *,
+    max_length: int,
+) -> Dict[str, List[Any]]:
     encode_kwargs = {
         "add_special_tokens": True,
-        "padding": "longest",
+        "padding": False,
         "truncation": False,
-        "return_tensors": "pt",
+        "return_attention_mask": True,
+        "return_tensors": None,
     }
     text_list = list(texts)
 
@@ -279,45 +282,50 @@ def _measure_tokenized_lengths(
     else:
         encoded = tokenizer.batch_encode_plus(text_list, **encode_kwargs)
 
-    return [int(length) for length in encoded["attention_mask"].sum(dim=1).tolist()]
+    input_rows = encoded["input_ids"]
+    attention_rows = encoded["attention_mask"]
+    if isinstance(input_rows, torch.Tensor):
+        input_rows = input_rows.tolist()
+    if isinstance(attention_rows, torch.Tensor):
+        attention_rows = attention_rows.tolist()
 
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        raise ValueError("Tokenizer must define pad_token_id for reward-model preparation")
+    padding_side = getattr(tokenizer, "padding_side", "right")
+    if padding_side not in {"left", "right"}:
+        raise ValueError(f"Unsupported tokenizer padding_side: {padding_side!r}")
 
-def _filter_rows_that_fit_max_lengths(
-    dataset: Dataset,
-    *,
-    split_name: str,
-    data_config: RewardTrainingDataConfig,
-    model_config: RewardModelConfig,
-    protein_tokenizer: Any,
-    molecule_tokenizer: Any,
-) -> Dataset:
-    def _mark_rows_that_fit(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[bool]]:
-        protein_lengths = _measure_tokenized_lengths(protein_tokenizer, batch["protein_sequence"])
-        molecule_lengths = _measure_tokenized_lengths(
-            molecule_tokenizer,
-            batch["molecule_text"],
-        )
-        return {
-            "_fits_max_lengths": [
-                protein_length <= model_config.protein_max_length
-                and molecule_length <= model_config.molecule_max_length
-                for protein_length, molecule_length in zip(protein_lengths, molecule_lengths)
-            ]
-        }
+    padded_input_rows: List[List[int]] = []
+    padded_attention_rows: List[List[int]] = []
+    lengths: List[int] = []
+    for input_row, attention_row in zip(input_rows, attention_rows):
+        input_ids = [int(value) for value in input_row]
+        attention_mask = [int(value) for value in attention_row]
+        if len(input_ids) != len(attention_mask):
+            raise ValueError("Tokenizer input_ids and attention_mask lengths must match")
 
-    filtered = dataset.map(
-        _mark_rows_that_fit,
-        batched=True,
-        batch_size=data_config.tokenization_batch_size,
-        desc=f"Filtering {split_name} reward-model examples by max token length",
-    )
-    filtered = filtered.filter(
-        lambda row: bool(row["_fits_max_lengths"]),
-        desc=f"Dropping overlong {split_name} reward-model examples",
-    )
-    filtered = filtered.remove_columns("_fits_max_lengths")
-    filtered = filtered.remove_columns("example_id")
-    return filtered.add_column("example_id", list(range(len(filtered))))
+        token_length = int(sum(attention_mask))
+        lengths.append(token_length)
+        input_ids = input_ids[:max_length]
+        attention_mask = attention_mask[:max_length]
+        padding_length = max_length - len(input_ids)
+        padding_ids = [int(pad_token_id)] * padding_length
+        padding_mask = [0] * padding_length
+        if padding_side == "left":
+            input_ids = padding_ids + input_ids
+            attention_mask = padding_mask + attention_mask
+        else:
+            input_ids = input_ids + padding_ids
+            attention_mask = attention_mask + padding_mask
+        padded_input_rows.append(input_ids)
+        padded_attention_rows.append(attention_mask)
+
+    return {
+        "input_ids": padded_input_rows,
+        "attention_mask": padded_attention_rows,
+        "length": lengths,
+    }
 
 
 def _tokenize_example_rows(
@@ -330,41 +338,56 @@ def _tokenize_example_rows(
     molecule_tokenizer: Any,
 ) -> Dataset:
     dataset = Dataset.from_list([dict(row) for row in prepared_rows])
-    dataset = _filter_rows_that_fit_max_lengths(
-        dataset,
-        split_name=split_name,
-        data_config=data_config,
-        model_config=model_config,
-        protein_tokenizer=protein_tokenizer,
-        molecule_tokenizer=molecule_tokenizer,
+    tokenization_num_proc = (
+        data_config.tokenization_num_proc
+        if data_config.tokenization_num_proc > 1
+        else None
     )
 
     def _tokenize_batch(batch: Mapping[str, Sequence[str]]) -> Dict[str, List[Any]]:
-        protein_batch = batch_encode_texts(
-            tokenizer=protein_tokenizer,
-            texts=batch["protein_sequence"],
+        protein_batch = _tokenize_and_pad_texts(
+            protein_tokenizer,
+            batch["protein_sequence"],
             max_length=model_config.protein_max_length,
         )
-        molecule_batch = batch_encode_texts(
-            tokenizer=molecule_tokenizer,
-            texts=batch["molecule_text"],
+        molecule_batch = _tokenize_and_pad_texts(
+            molecule_tokenizer,
+            batch["molecule_text"],
             max_length=model_config.molecule_max_length,
         )
         return {
-            "protein_input_ids": protein_batch["input_ids"].tolist(),
-            "protein_attention_mask": protein_batch["attention_mask"].tolist(),
-            "protein_length": protein_batch["attention_mask"].sum(dim=1).tolist(),
-            "molecule_input_ids": molecule_batch["input_ids"].tolist(),
-            "molecule_attention_mask": molecule_batch["attention_mask"].tolist(),
-            "molecule_length": molecule_batch["attention_mask"].sum(dim=1).tolist(),
+            "protein_input_ids": protein_batch["input_ids"],
+            "protein_attention_mask": protein_batch["attention_mask"],
+            "protein_length": protein_batch["length"],
+            "molecule_input_ids": molecule_batch["input_ids"],
+            "molecule_attention_mask": molecule_batch["attention_mask"],
+            "molecule_length": molecule_batch["length"],
         }
 
     tokenized = dataset.map(
         _tokenize_batch,
         batched=True,
         batch_size=data_config.tokenization_batch_size,
-        desc=f"Tokenizing {split_name} reward-model examples",
+        num_proc=tokenization_num_proc,
+        desc=f"Tokenizing {split_name} reward-model examples once",
     )
+    tokenized = tokenized.filter(
+        lambda protein_lengths, molecule_lengths: [
+            int(protein_length) <= model_config.protein_max_length
+            and int(molecule_length) <= model_config.molecule_max_length
+            for protein_length, molecule_length in zip(
+                protein_lengths,
+                molecule_lengths,
+            )
+        ],
+        input_columns=["protein_length", "molecule_length"],
+        batched=True,
+        batch_size=data_config.tokenization_batch_size,
+        num_proc=tokenization_num_proc,
+        desc=f"Dropping overlong {split_name} reward-model examples",
+    )
+    tokenized = tokenized.remove_columns("example_id")
+    tokenized = tokenized.add_column("example_id", list(range(len(tokenized))))
     return _select_tokenized_columns(tokenized)
 
 
@@ -377,6 +400,9 @@ def prepare_tokenized_split_datasets(
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+
+    if data_config.tokenization_num_proc > 1:
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     protein_tokenizer = load_tokenizer(
         model_config.protein_tokenizer_name_or_path or model_config.protein_model_name_or_path

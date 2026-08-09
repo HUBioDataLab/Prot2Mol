@@ -396,6 +396,76 @@ def test_prepare_tokenized_split_datasets_uses_smiles_with_molformer_tokenizer(
     }
     assert tokenized_molecule_texts == expected_smiles
     assert not any(text.startswith("[") for text in tokenized_molecule_texts)
+    total_examples = sum(len(rows) for rows in split_rows.values())
+    assert sum(len(call["texts"]) for call in protein_tokenizer.calls) == total_examples
+    assert sum(len(call["texts"]) for call in molecule_tokenizer.calls) == total_examples
+    assert all(call["truncation"] is False for call in protein_tokenizer.calls)
+    assert all(call["truncation"] is False for call in molecule_tokenizer.calls)
+    assert all(call["padding"] is False for call in protein_tokenizer.calls)
+    assert all(call["padding"] is False for call in molecule_tokenizer.calls)
+
+
+def test_prepare_tokenized_split_datasets_passes_configured_process_count(
+    tmp_path,
+    monkeypatch,
+):
+    split_rows = _split_parquet_rows()
+    for split_name, rows in split_rows.items():
+        _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
+
+    monkeypatch.setattr(
+        "reward_model.training.data.load_tokenizer",
+        lambda *_args, **_kwargs: DummyTokenizer(),
+    )
+    original_map = Dataset.map
+    original_filter = Dataset.filter
+    observed_map_process_counts = []
+    observed_filter_process_counts = []
+
+    def _recording_map(dataset, *args, **kwargs):
+        if str(kwargs.get("desc", "")).startswith("Tokenizing"):
+            observed_map_process_counts.append(kwargs["num_proc"])
+        kwargs["num_proc"] = None
+        return original_map(dataset, *args, **kwargs)
+
+    def _recording_filter(dataset, *args, **kwargs):
+        observed_filter_process_counts.append(kwargs["num_proc"])
+        kwargs["num_proc"] = None
+        return original_filter(dataset, *args, **kwargs)
+
+    monkeypatch.setattr(Dataset, "map", _recording_map)
+    monkeypatch.setattr(Dataset, "filter", _recording_filter)
+
+    prepare_tokenized_split_datasets(
+        RewardTrainingDataConfig(
+            train_parquet_path=str(tmp_path / "train.parquet"),
+            val_parquet_path=str(tmp_path / "val.parquet"),
+            test_parquet_path=str(tmp_path / "test.parquet"),
+            tokenized_dataset_dir=str(tmp_path / "tokenized_examples"),
+            tokenization_batch_size=2,
+            tokenization_num_proc=8,
+        ),
+        RewardModelConfig(
+            protein_model_name_or_path="dummy/protein",
+            molecule_model_name_or_path="dummy/molecule",
+            protein_max_length=16,
+            molecule_max_length=16,
+        ),
+    )
+
+    assert observed_map_process_counts == [8, 8, 8]
+    assert observed_filter_process_counts == [8, 8, 8]
+
+
+def test_reward_training_data_config_rejects_invalid_tokenization_process_count():
+    with pytest.raises(ValueError, match="tokenization_num_proc must be > 0"):
+        RewardTrainingDataConfig(
+            train_parquet_path="train.parquet",
+            val_parquet_path="val.parquet",
+            test_parquet_path="test.parquet",
+            tokenized_dataset_dir="tokenized",
+            tokenization_num_proc=0,
+        )
 
 
 def test_prepare_tokenized_split_datasets_rejects_labels_inconsistent_with_threshold(

@@ -26,6 +26,7 @@ class RewardTrainingDataConfig:
     tokenized_dataset_dir: str
     val2_tokenized_dataset_dir: Optional[str] = None
     tokenization_batch_size: int = 64
+    tokenization_num_proc: int = 1
     ranking_max_ligands: int = 16
     ranking_opportunity_divisor: int = 32
     evaluation_ranking_partitions: int = 3
@@ -46,6 +47,8 @@ class RewardTrainingDataConfig:
             raise ValueError("tokenized_dataset_dir must be provided")
         if self.tokenization_batch_size <= 0:
             raise ValueError("tokenization_batch_size must be > 0")
+        if self.tokenization_num_proc <= 0:
+            raise ValueError("tokenization_num_proc must be > 0")
         if self.ranking_max_ligands < 5:
             raise ValueError("ranking_max_ligands must be >= 5")
         if self.ranking_opportunity_divisor < self.ranking_max_ligands:
