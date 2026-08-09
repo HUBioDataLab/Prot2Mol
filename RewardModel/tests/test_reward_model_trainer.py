@@ -988,6 +988,7 @@ def test_molformer_simple_cosine_config_uses_smiles_and_separate_cache():
     assert config.model.pair_scoring_mode == "cosine"
     assert config.model.classification_loss_weight == pytest.approx(0.0)
     assert config.data.tokenization_num_proc == 8
+    assert config.training.dataloader_num_workers == 8
     assert "molformer_smiles" in config.data.tokenized_dataset_dir
     assert "molformer_smiles" in config.training.output_dir
     assert config.training.metrics_profile == "ranking"
