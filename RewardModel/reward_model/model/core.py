@@ -109,9 +109,8 @@ class RewardModel(nn.Module):
             self._config.fusion_hidden_dim,
         )
         if self._config.pair_scoring_mode == "cosine":
-            # The simple cosine path remains encoder -> projection -> pooling
-            # -> L2 normalization, with optional regularization immediately
-            # after each projection.
+            # LigUnity-style cosine path: pool the encoder representation first,
+            # then project the pooled vector and L2-normalize it for scoring.
             self.protein_norm = None
             self.molecule_norm = None
             self.projection_dropout = nn.Dropout(self._config.dropout)
@@ -545,23 +544,25 @@ class RewardModel(nn.Module):
         if self._config.pair_scoring_mode == "cosine":
             if self.projection_dropout is None:
                 raise RuntimeError("Projection dropout is not initialized")
-            protein_tokens = self.projection_dropout(
-                self.protein_projection(protein_tokens)
-            )
-            molecule_tokens = self.projection_dropout(
-                self.molecule_projection(molecule_tokens)
-            )
             fused_protein = None
             fused_molecule = None
-            pooled_protein = masked_pool(
-                protein_tokens,
-                protein_mask,
-                self._config.pooling_type,
+            pooled_protein = self.projection_dropout(
+                self.protein_projection(
+                    masked_pool(
+                        protein_tokens,
+                        protein_mask,
+                        self._config.pooling_type,
+                    )
+                )
             )
-            pooled_molecule = masked_pool(
-                molecule_tokens,
-                molecule_mask,
-                self._config.pooling_type,
+            pooled_molecule = self.projection_dropout(
+                self.molecule_projection(
+                    masked_pool(
+                        molecule_tokens,
+                        molecule_mask,
+                        self._config.pooling_type,
+                    )
+                )
             )
         else:
             protein_tokens, molecule_tokens = self._project_tokens(

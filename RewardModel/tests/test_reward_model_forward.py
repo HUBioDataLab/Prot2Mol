@@ -27,13 +27,14 @@ def _build_model(**config_overrides):
         hidden_size=8,
     )
     dropout = config_overrides.pop("dropout", 0.0)
+    pooling_type = config_overrides.pop("pooling_type", "mean")
     config = RewardModelConfig(
         protein_model_name_or_path="protein/dummy",
         molecule_model_name_or_path="molecule/dummy",
         fusion_hidden_dim=10,
         fusion_num_heads=2,
         dropout=dropout,
-        pooling_type="mean",
+        pooling_type=pooling_type,
         **config_overrides,
     )
     return RewardModel(config=config, protein_bundle=protein_bundle, molecule_bundle=molecule_bundle)
@@ -95,10 +96,12 @@ def test_reward_model_applies_configured_dropout_outside_encoders():
     assert model.fusion.dropout == pytest.approx(0.1)
 
 
-def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
+def test_simple_cosine_is_exact_cls_pool_projection_normalize_ranking_path():
     torch.manual_seed(7)
     model = _build_model(
         pair_scoring_mode="cosine",
+        pooling_type="cls",
+        projection_type="nonlinear",
         classification_loss_weight=0.0,
         dropout=0.1,
     )
@@ -116,32 +119,47 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
         [[1, 1, 0], [1, 1, 1], [1, 1, 1]], dtype=torch.long
     )
 
-    outputs = model(
-        protein_input_ids=protein_input_ids,
-        protein_attention_mask=protein_mask,
-        molecule_input_ids=molecule_input_ids,
-        molecule_attention_mask=molecule_mask,
-        activity_labels=torch.tensor([1.0, 0.0, 1.0]),
-        pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
-        ranking_group_ids=torch.tensor([0, 0, 0]),
-        return_token_embeddings=True,
-    )
+    projection_input_shapes = []
+    hooks = [
+        model.protein_projection.register_forward_pre_hook(
+            lambda _module, args: projection_input_shapes.append(tuple(args[0].shape))
+        ),
+        model.molecule_projection.register_forward_pre_hook(
+            lambda _module, args: projection_input_shapes.append(tuple(args[0].shape))
+        ),
+    ]
+    try:
+        outputs = model(
+            protein_input_ids=protein_input_ids,
+            protein_attention_mask=protein_mask,
+            molecule_input_ids=molecule_input_ids,
+            molecule_attention_mask=molecule_mask,
+            activity_labels=torch.tensor([1.0, 0.0, 1.0]),
+            pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
+            ranking_group_ids=torch.tensor([0, 0, 0]),
+            return_token_embeddings=True,
+        )
+    finally:
+        for hook in hooks:
+            hook.remove()
 
     with torch.no_grad():
+        protein_tokens = model.encode_protein(protein_input_ids, protein_mask)
+        molecule_tokens = model.encode_molecule(molecule_input_ids, molecule_mask)
         projected_protein = model.protein_projection(
-            model.encode_protein(protein_input_ids, protein_mask)
+            masked_pool(protein_tokens, protein_mask.bool(), "cls")
         )
         projected_molecule = model.molecule_projection(
-            model.encode_molecule(molecule_input_ids, molecule_mask)
+            masked_pool(molecule_tokens, molecule_mask.bool(), "cls")
         )
         expected_protein = F.normalize(
-            masked_pool(projected_protein, protein_mask.bool(), "mean"),
+            projected_protein,
             p=2,
             dim=-1,
             eps=1e-6,
         )
         expected_molecule = F.normalize(
-            masked_pool(projected_molecule, molecule_mask.bool(), "mean"),
+            projected_molecule,
             p=2,
             dim=-1,
             eps=1e-6,
@@ -156,12 +174,13 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
     assert model.classification_head is None
     assert model.logit_scale is None
     assert model.classification_logit_bias is None
+    assert projection_input_shapes == [(3, 6), (3, 8)]
     assert outputs.fused_protein_tokens is None
     assert outputs.fused_molecule_tokens is None
     assert outputs.score_scale is None
     assert outputs.classification_logit_bias is None
-    assert torch.allclose(outputs.protein_token_embeddings, projected_protein)
-    assert torch.allclose(outputs.molecule_token_embeddings, projected_molecule)
+    assert torch.allclose(outputs.protein_token_embeddings, protein_tokens)
+    assert torch.allclose(outputs.molecule_token_embeddings, molecule_tokens)
     assert torch.allclose(outputs.normalized_protein_embedding, expected_protein)
     assert torch.allclose(outputs.normalized_molecule_embedding, expected_molecule)
     assert torch.allclose(outputs.ranking_score, expected_score)
@@ -173,15 +192,17 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
     assert torch.allclose(outputs.loss, outputs.ranking_loss)
 
     outputs.loss.backward()
-    assert model.protein_projection.weight.grad is not None
-    assert model.protein_projection.weight.grad.abs().sum() > 0.0
-    assert model.molecule_projection.weight.grad is not None
-    assert model.molecule_projection.weight.grad.abs().sum() > 0.0
+    for projection in (model.protein_projection, model.molecule_projection):
+        assert projection.linear1.weight.grad is not None
+        assert projection.linear1.weight.grad.abs().sum() > 0.0
+        assert projection.linear2.weight.grad is not None
+        assert projection.linear2.weight.grad.abs().sum() > 0.0
 
 
 def test_simple_cosine_supports_ligunity_style_nonlinear_projection():
     model = _build_model(
         pair_scoring_mode="cosine",
+        pooling_type="cls",
         projection_type="nonlinear",
         classification_loss_weight=0.0,
     )
@@ -231,24 +252,24 @@ def test_simple_cosine_projection_dropout_is_train_only():
     torch.manual_seed(12)
     second_train = model(**inputs)
     assert not torch.equal(
-        first_train.protein_token_embeddings,
-        second_train.protein_token_embeddings,
+        first_train.normalized_protein_embedding,
+        second_train.normalized_protein_embedding,
     )
     assert not torch.equal(
-        first_train.molecule_token_embeddings,
-        second_train.molecule_token_embeddings,
+        first_train.normalized_molecule_embedding,
+        second_train.normalized_molecule_embedding,
     )
 
     model.eval()
     first_eval = model(**inputs)
     second_eval = model(**inputs)
     assert torch.equal(
-        first_eval.protein_token_embeddings,
-        second_eval.protein_token_embeddings,
+        first_eval.normalized_protein_embedding,
+        second_eval.normalized_protein_embedding,
     )
     assert torch.equal(
-        first_eval.molecule_token_embeddings,
-        second_eval.molecule_token_embeddings,
+        first_eval.normalized_molecule_embedding,
+        second_eval.normalized_molecule_embedding,
     )
 
 

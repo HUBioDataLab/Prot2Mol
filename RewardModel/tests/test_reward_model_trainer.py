@@ -1292,6 +1292,7 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
 
     assert config.model.fusion_hidden_dim == 128
     assert config.model.projection_type == "nonlinear"
+    assert config.model.pooling_type == "cls"
     assert config.model.ranking_temperature == pytest.approx(1.0 / 13.0)
     assert config.model.ranking_loss_weight == pytest.approx(0.5)
     assert config.model.contrastive_loss_weight == pytest.approx(0.5)
@@ -1304,6 +1305,7 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
     assert config.training.per_device_train_batch_size == 12
     assert config.training.training_mode == "multi_gpu"
     assert "scale13" in config.training.output_dir
+    assert "cls_nonlinear128" in config.training.output_dir
     assert "lr1e4_all_batch12_clip1_warmup006" in config.training.output_dir
 
 

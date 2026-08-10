@@ -11,7 +11,7 @@ model:
   fusion_hidden_dim: 128
   projection_type: nonlinear
   dropout: 0.15
-  pooling_type: mean
+  pooling_type: cls
   pair_scoring_mode: cosine
   activity_threshold: 6.0
   ranking_loss_weight: 0.5
@@ -41,7 +41,7 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale13_contrastive_nonlinear128_lr1e4_all_batch12_clip1_warmup006_dropout015_4gpu_100_epochs
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale13_contrastive_cls_nonlinear128_lr1e4_all_batch12_clip1_warmup006_dropout015_4gpu_100_epochs
   num_train_epochs: 100
   per_device_train_batch_size: 12
   per_device_eval_batch_size: 32
