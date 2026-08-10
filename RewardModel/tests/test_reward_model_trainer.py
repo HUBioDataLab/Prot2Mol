@@ -645,11 +645,25 @@ def test_create_training_arguments_preserves_component_learning_rates(tmp_path):
             output_dir=str(tmp_path / "trainer_output"),
             encoder_learning_rate=1.0e-5,
             projection_learning_rate=1.0e-3,
+            warmup_ratio=0.06,
         )
     )
 
     assert args.reward_encoder_learning_rate == pytest.approx(1.0e-5)
     assert args.reward_projection_learning_rate == pytest.approx(1.0e-3)
+    assert args.warmup_ratio == pytest.approx(0.06)
+
+
+@pytest.mark.parametrize("warmup_ratio", [-0.01, 1.01, float("nan")])
+def test_reward_trainer_config_rejects_invalid_warmup_ratio(
+    tmp_path,
+    warmup_ratio,
+):
+    with pytest.raises(ValueError, match="warmup_ratio"):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            warmup_ratio=warmup_ratio,
+        )
 
 
 def test_reward_trainer_builds_encoder_and_projection_lr_groups(tmp_path):
@@ -1266,6 +1280,31 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
         "nonlinear128_lr1e4_batch12_dropout015_4gpu_100_epochs"
         in config.training.output_dir
     )
+
+
+def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale13_contrastive_lr1e4_4gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.fusion_hidden_dim == 128
+    assert config.model.projection_type == "nonlinear"
+    assert config.model.ranking_temperature == pytest.approx(1.0 / 13.0)
+    assert config.model.ranking_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.training.learning_rate == pytest.approx(1.0e-4)
+    assert config.training.encoder_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.projection_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.warmup_ratio == pytest.approx(0.06)
+    assert config.training.max_grad_norm == pytest.approx(1.0)
+    assert config.training.per_device_train_batch_size == 12
+    assert config.training.training_mode == "multi_gpu"
+    assert "scale13" in config.training.output_dir
+    assert "lr1e4_all_batch12_clip1_warmup006" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():

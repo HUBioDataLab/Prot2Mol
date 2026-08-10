@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
@@ -76,6 +77,7 @@ class RewardTrainerConfig:
     encoder_learning_rate: Optional[float] = None
     projection_learning_rate: Optional[float] = None
     weight_decay: float = 0.01
+    warmup_ratio: float = 0.0
     max_grad_norm: float = 1.0
     logging_steps: int = 10
     dataloader_num_workers: int = 0
@@ -132,6 +134,11 @@ class RewardTrainerConfig:
             raise ValueError("projection_learning_rate must be > 0 when provided")
         if self.weight_decay < 0.0:
             raise ValueError("weight_decay must be >= 0")
+        if (
+            not math.isfinite(float(self.warmup_ratio))
+            or not 0.0 <= self.warmup_ratio <= 1.0
+        ):
+            raise ValueError("warmup_ratio must be finite and in [0.0, 1.0]")
         if self.max_grad_norm < 0.0:
             raise ValueError("max_grad_norm must be >= 0")
         if self.logging_steps <= 0:

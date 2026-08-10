@@ -1056,6 +1056,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         num_train_epochs=config.num_train_epochs,
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
+        warmup_ratio=config.warmup_ratio,
         per_device_train_batch_size=config.per_device_train_batch_size,
         per_device_eval_batch_size=config.per_device_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
