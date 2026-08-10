@@ -14,6 +14,7 @@ from .losses import (
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
 _VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
 _VALID_PAIR_SCORING_MODES = {"cosine", "mlp", "scaled_cosine"}
+_VALID_PROJECTION_TYPES = {"linear", "nonlinear"}
 _VALID_MOLECULE_INPUT_REPRESENTATIONS = {"selfies", "smiles"}
 
 
@@ -35,6 +36,7 @@ class RewardModelConfig:
     protein_max_length: int = 1024
     molecule_max_length: int = 512
     fusion_hidden_dim: int = 512
+    projection_type: str = "linear"
     fusion_num_heads: int = 8
     fusion_attention_backend: str = "manual"
     fusion_residual: bool = False
@@ -93,6 +95,11 @@ class RewardModelConfig:
                 )
         if self.fusion_hidden_dim <= 0:
             raise ValueError("fusion_hidden_dim must be > 0")
+        if self.projection_type not in _VALID_PROJECTION_TYPES:
+            raise ValueError(
+                "projection_type must be one of "
+                f"{sorted(_VALID_PROJECTION_TYPES)}"
+            )
         if self.fusion_num_heads <= 0:
             raise ValueError("fusion_num_heads must be > 0")
         if self.fusion_hidden_dim % self.fusion_num_heads != 0:

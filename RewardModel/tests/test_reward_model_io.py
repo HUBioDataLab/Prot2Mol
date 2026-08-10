@@ -220,6 +220,7 @@ def test_simple_cosine_reward_model_save_and_load_round_trip(tmp_path):
         molecule_model_name_or_path="molecule/dummy",
         fusion_hidden_dim=10,
         fusion_num_heads=2,
+        projection_type="nonlinear",
         pair_scoring_mode="cosine",
         classification_loss_weight=0.0,
     )
@@ -239,6 +240,7 @@ def test_simple_cosine_reward_model_save_and_load_round_trip(tmp_path):
     )
 
     assert reloaded.config.pair_scoring_mode == "cosine"
+    assert reloaded.config.projection_type == "nonlinear"
     assert reloaded.fusion is None
     assert reloaded.protein_norm is None
     assert reloaded.molecule_norm is None

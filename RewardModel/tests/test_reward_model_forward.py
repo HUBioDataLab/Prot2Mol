@@ -179,6 +179,38 @@ def test_simple_cosine_is_exact_projection_pool_normalize_ranking_path():
     assert model.molecule_projection.weight.grad.abs().sum() > 0.0
 
 
+def test_simple_cosine_supports_ligunity_style_nonlinear_projection():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        projection_type="nonlinear",
+        classification_loss_weight=0.0,
+    )
+    outputs = model(
+        protein_input_ids=torch.tensor([[1, 2, 3], [4, 5, 6]]),
+        protein_attention_mask=torch.ones(2, 3, dtype=torch.long),
+        molecule_input_ids=torch.tensor([[7, 8, 9], [1, 2, 3]]),
+        molecule_attention_mask=torch.ones(2, 3, dtype=torch.long),
+        pchembl_values=torch.tensor([7.0, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0]),
+    )
+
+    assert model.protein_projection.linear1.in_features == 6
+    assert model.protein_projection.linear1.out_features == 6
+    assert model.protein_projection.linear2.out_features == 10
+    assert model.molecule_projection.linear1.in_features == 8
+    assert model.molecule_projection.linear1.out_features == 8
+    assert model.molecule_projection.linear2.out_features == 10
+    assert outputs.normalized_protein_embedding.shape == (2, 10)
+    assert outputs.normalized_molecule_embedding.shape == (2, 10)
+
+    outputs.ranking_score.sum().backward()
+    for projection in (model.protein_projection, model.molecule_projection):
+        assert projection.linear1.weight.grad is not None
+        assert projection.linear1.weight.grad.abs().sum() > 0.0
+        assert projection.linear2.weight.grad is not None
+        assert projection.linear2.weight.grad.abs().sum() > 0.0
+
+
 def test_simple_cosine_projection_dropout_is_train_only():
     model = _build_model(
         pair_scoring_mode="cosine",

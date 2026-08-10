@@ -96,6 +96,12 @@ def test_reward_model_config_validates_scaled_cosine_settings():
         RewardModelConfig(cosine_classification_bias_init=float("nan"))
 
 
+def test_reward_model_config_validates_projection_type():
+    assert RewardModelConfig(projection_type="nonlinear").projection_type == "nonlinear"
+    with pytest.raises(ValueError, match="projection_type"):
+        RewardModelConfig(projection_type="unknown")
+
+
 def test_reward_model_config_validates_ligunity_contrastive_settings():
     config = RewardModelConfig(
         pair_scoring_mode="cosine",

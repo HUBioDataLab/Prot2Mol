@@ -17,6 +17,19 @@ from .losses import (
 from .outputs import RewardModelOutput
 
 
+class NonlinearProjection(nn.Module):
+    """LigUnity-style input-width MLP projection with a ReLU bottleneck."""
+
+    def __init__(self, input_dim: int, output_dim: int):
+        super().__init__()
+        self.linear1 = nn.Linear(input_dim, input_dim)
+        self.activation = nn.ReLU()
+        self.linear2 = nn.Linear(input_dim, output_dim)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        return self.linear2(self.activation(self.linear1(tokens)))
+
+
 class RewardModel(nn.Module):
     """Standalone reward model for protein-molecule pair scoring."""
 
@@ -82,8 +95,19 @@ class RewardModel(nn.Module):
         self._config.molecule_hidden_size = self._config.molecule_hidden_size or molecule_bundle.hidden_size
         self._config.validate()
 
-        self.protein_projection = nn.Linear(self._config.protein_hidden_size, self._config.fusion_hidden_dim)
-        self.molecule_projection = nn.Linear(self._config.molecule_hidden_size, self._config.fusion_hidden_dim)
+        projection_class = (
+            NonlinearProjection
+            if self._config.projection_type == "nonlinear"
+            else nn.Linear
+        )
+        self.protein_projection = projection_class(
+            self._config.protein_hidden_size,
+            self._config.fusion_hidden_dim,
+        )
+        self.molecule_projection = projection_class(
+            self._config.molecule_hidden_size,
+            self._config.fusion_hidden_dim,
+        )
         if self._config.pair_scoring_mode == "cosine":
             # The simple cosine path remains encoder -> projection -> pooling
             # -> L2 normalization, with optional regularization immediately
