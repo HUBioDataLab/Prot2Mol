@@ -1254,7 +1254,7 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
     assert config.training.learning_rate == pytest.approx(1.0e-4)
     assert config.training.encoder_learning_rate == pytest.approx(1.0e-4)
     assert config.training.projection_learning_rate == pytest.approx(1.0e-3)
-    assert config.training.per_device_train_batch_size == 16
+    assert config.training.per_device_train_batch_size == 12
     assert config.training.gradient_accumulation_steps == 1
     assert config.training.num_train_epochs == pytest.approx(100.0)
     assert config.training.max_steps is None
@@ -1263,7 +1263,7 @@ def test_scale10_contrastive_lr1e4_4gpu_config_is_controlled_experiment():
     assert config.training.bf16 is True
     assert config.training.dataloader_num_workers == 4
     assert (
-        "nonlinear128_lr1e4_batch16_dropout015_4gpu_100_epochs"
+        "nonlinear128_lr1e4_batch12_dropout015_4gpu_100_epochs"
         in config.training.output_dir
     )
 
