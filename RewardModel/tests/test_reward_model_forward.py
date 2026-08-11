@@ -309,6 +309,7 @@ def test_simple_cosine_shares_one_scaled_matrix_between_ranking_and_contrastive(
         molecule_attention_mask=molecule_input_ids.ne(0).long(),
         pchembl_values=pchembl,
         ranking_group_ids=group_ids,
+        contrastive_group_ids=group_ids,
         contrastive_target_ids=target_ids,
         contrastive_molecule_ids=molecule_ids,
     )
@@ -380,6 +381,7 @@ def test_contrastive_only_objective_excludes_ranking_loss_from_total():
         molecule_attention_mask=molecule_input_ids.ne(0).long(),
         pchembl_values=torch.tensor([8.0, 7.0, 4.5, 8.5, 6.5, 5.5]),
         ranking_group_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
+        contrastive_group_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
         contrastive_target_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
         contrastive_molecule_ids=torch.arange(6),
     )
@@ -403,6 +405,7 @@ def test_contrastive_objective_requires_identity_metadata():
             molecule_attention_mask=torch.ones((3, 2), dtype=torch.long),
             pchembl_values=torch.tensor([7.0, 6.0, 5.0]),
             ranking_group_ids=torch.tensor([0, 0, 0]),
+            contrastive_group_ids=torch.tensor([0, 0, 0]),
         )
 
 

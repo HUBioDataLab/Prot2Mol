@@ -11,6 +11,8 @@ from .data import (
     get_tokenized_split_dataset_paths,
     load_tokenized_example_dataset,
     prepare_tokenized_split_datasets,
+    select_fixed_ranking_evaluation_subset,
+    validate_tokenized_split_cardinality,
 )
 from .trainer import RewardModelTrainer, create_training_arguments
 from ..model import (
@@ -139,6 +141,11 @@ def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
     }
     for split_name in ("train", "val", "test"):
         example_dataset = load_tokenized_example_dataset(example_paths[split_name])
+        validate_tokenized_split_cardinality(
+            config.data,
+            config.model,
+            {split_name: example_dataset},
+        )
         assay_dataset = RewardAssayListDataset(
             example_dataset,
             seed=config.training.seed,
@@ -148,15 +155,28 @@ def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
             max_classification_only_per_item=(
                 config.data.max_classification_only_per_item
             ),
+            include_all_assays_for_contrastive=(
+                config.model.contrastive_loss_weight > 0.0
+            ),
         )
         stats = assay_dataset.stats
-        if split_name in {"train", "val"} and stats.num_ranking_lists == 0:
+        if (
+            split_name in {"train", "val"}
+            and config.model.ranking_loss_weight > 0.0
+            and stats.num_ranking_lists == 0
+        ):
             raise ValueError(
                 f"{split_name.capitalize()} split produced zero eligible ranking lists"
             )
         summaries[f"{split_name}_examples"] = stats.num_examples
         summaries[f"{split_name}_groups"] = stats.num_assays
         summaries[f"{split_name}_eligible_groups"] = stats.num_eligible_assays
+        summaries[f"{split_name}_contrastive_lists"] = (
+            stats.num_contrastive_lists
+        )
+        summaries[f"{split_name}_contrastive_examples"] = (
+            stats.num_contrastive_examples
+        )
         summaries[f"{split_name}_ranking_lists"] = stats.num_ranking_lists
         summaries[f"{split_name}_ranked_examples"] = stats.num_ranked_examples
         summaries[f"{split_name}_classification_only_examples"] = (
@@ -191,6 +211,15 @@ def train_reward_model_from_config(
     train_examples = load_tokenized_example_dataset(example_paths["train"])
     val_examples = load_tokenized_example_dataset(example_paths["val"])
     test_examples = load_tokenized_example_dataset(example_paths["test"])
+    validate_tokenized_split_cardinality(
+        config.data,
+        config.model,
+        {
+            "train": train_examples,
+            "val": val_examples,
+            "test": test_examples,
+        },
+    )
     if config.training.metrics_profile == "full":
         for split_name, split_examples in (
             ("val", val_examples),
@@ -223,6 +252,9 @@ def train_reward_model_from_config(
         ranking_opportunity_divisor=config.data.ranking_opportunity_divisor,
         ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
         max_classification_only_per_item=config.data.max_classification_only_per_item,
+        include_all_assays_for_contrastive=(
+            config.model.contrastive_loss_weight > 0.0
+        ),
         item_count_multiple=item_count_multiple,
     )
     eval_dataset = RewardEvaluationDataset(
@@ -268,6 +300,23 @@ def train_reward_model_from_config(
             ranking_partition_seed=config.training.seed,
             protein_shuffle_sensitivity=config.training.protein_shuffle_sensitivity,
         )
+    fixed_train_eval_dataset = None
+    fixed_train_eval_examples = None
+    if config.training.fixed_train_eval_assays > 0:
+        fixed_train_eval_examples = select_fixed_ranking_evaluation_subset(
+            train_examples,
+            num_assays=config.training.fixed_train_eval_assays,
+            seed=config.training.seed,
+            min_pchembl_span=config.data.ranking_min_pchembl_span,
+        )
+        fixed_train_eval_dataset = RewardEvaluationDataset(
+            fixed_train_eval_examples,
+            ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+            ranking_max_ligands=config.data.ranking_max_ligands,
+            ranking_num_partitions=config.data.evaluation_ranking_partitions,
+            ranking_partition_seed=config.training.seed,
+            protein_shuffle_sensitivity=False,
+        )
     model = _initialize_training_model(config.model, warm_start_path)
     collator = RewardAssayListCollator(
         dynamic_padding=config.training.dynamic_padding,
@@ -289,6 +338,7 @@ def train_reward_model_from_config(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         val2_eval_dataset=val2_eval_dataset,
+        fixed_train_eval_dataset=fixed_train_eval_dataset,
         data_collator=collator,
     )
     trainer.train()
@@ -308,12 +358,26 @@ def train_reward_model_from_config(
         "test_groups": len(set(test_examples["group_id"])),
         "train_ranking_lists": train_dataset.stats.num_ranking_lists,
         "train_ranked_examples": train_dataset.stats.num_ranked_examples,
+        "train_contrastive_lists": train_dataset.stats.num_contrastive_lists,
+        "train_contrastive_examples": (
+            train_dataset.stats.num_contrastive_examples
+        ),
         "train_classification_examples": train_dataset.stats.num_examples,
         "output_dir": os.path.abspath(config.training.output_dir),
         "init_from_checkpoint": warm_start_path,
         "optimizer_state_restored": False,
         "eval_metrics": eval_metrics,
         "test_metrics": test_metrics,
+        **(
+            {}
+            if fixed_train_eval_examples is None
+            else {
+                "fixed_train_eval_examples": len(fixed_train_eval_examples),
+                "fixed_train_eval_assays": len(
+                    set(fixed_train_eval_examples["group_id"])
+                ),
+            }
+        ),
         **(
             {}
             if val2_eval_dataset is None

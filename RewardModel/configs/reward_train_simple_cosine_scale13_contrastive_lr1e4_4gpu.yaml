@@ -41,7 +41,7 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale13_contrastive_cls_nonlinear128_lr1e4_all_batch12_clip1_warmup006_dropout_p0_m01_proj0_4gpu_100_epochs
+  output_dir: ../outputs/chembl_37_mmseqs50_activity_balanced_simple_cosine_scale13_contrastive_all_assays_truncated1024_cls_nonlinear128_lr1e4_all_batch12_clip1_warmup006_dropout_p0_m01_proj0_4gpu_100_epochs
   num_train_epochs: 100
   per_device_train_batch_size: 12
   per_device_eval_batch_size: 32
@@ -66,6 +66,8 @@ training:
   training_mode: multi_gpu
   metrics_profile: ranking
   ranking_score_diagnostics: true
+  objective_gradient_diagnostics_steps: 100
+  fixed_train_eval_assays: 1000
   protein_shuffle_sensitivity: false
   report_to:
     - wandb

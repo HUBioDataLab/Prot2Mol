@@ -113,12 +113,75 @@ def build_complete_coverage_ranking_partitions(
     return partitions
 
 
+def build_complete_coverage_contrastive_partitions(
+    *,
+    contrastive_group_ids: torch.Tensor,
+    max_list_size: int = 16,
+    num_partitions: int = 3,
+    seed: int = 42,
+) -> list[torch.Tensor]:
+    """Build deterministic bounded lists covering every assay observation.
+
+    Unlike ranking partitions, contrastive partitions deliberately retain
+    singleton, two-ligand, and narrow-affinity-span assays. This is the data
+    boundary used by LigUnity's retrieval objective.
+    """
+    assay_ids = contrastive_group_ids.reshape(-1).detach().cpu().long()
+    if (assay_ids < 0).any():
+        raise ValueError(
+            "contrastive_group_ids must be non-negative for evaluation"
+        )
+    if max_list_size <= 0:
+        raise ValueError("max_list_size must be > 0")
+    if num_partitions <= 0:
+        raise ValueError("num_partitions must be > 0")
+
+    partitions = [torch.full_like(assay_ids, -1) for _ in range(num_partitions)]
+    next_list_ids = [0 for _ in range(num_partitions)]
+    max_seed = (1 << 63) - 1
+    for assay_id_tensor in torch.unique(assay_ids, sorted=True):
+        assay_id = int(assay_id_tensor.item())
+        assay_indices = torch.nonzero(
+            assay_ids == assay_id,
+            as_tuple=False,
+        ).flatten()
+        assay_size = int(assay_indices.numel())
+        list_count = math.ceil(assay_size / max_list_size)
+        base_size, larger_list_count = divmod(assay_size, list_count)
+        list_sizes = [base_size + 1] * larger_list_count + [base_size] * (
+            list_count - larger_list_count
+        )
+        for partition_index, partition_ids in enumerate(partitions):
+            generator = torch.Generator()
+            partition_seed = (
+                int(seed)
+                + 1_000_003 * (partition_index + 1)
+                + 97_409 * (assay_id + 1)
+            ) % max_seed
+            generator.manual_seed(partition_seed)
+            shuffled_indices = assay_indices.index_select(
+                0,
+                torch.randperm(assay_size, generator=generator),
+            )
+            cursor = 0
+            for list_size in list_sizes:
+                list_indices = shuffled_indices[cursor : cursor + list_size]
+                partition_ids[list_indices] = next_list_ids[partition_index]
+                next_list_ids[partition_index] += 1
+                cursor += list_size
+            if cursor != assay_size:
+                raise RuntimeError(
+                    "contrastive partition did not cover the complete assay"
+                )
+    return partitions
+
+
 def compute_contrastive_evaluation_loss(
     *,
     normalized_protein_embeddings: torch.Tensor,
     normalized_molecule_embeddings: torch.Tensor,
     pchembl_values: torch.Tensor,
-    ranking_group_ids: torch.Tensor,
+    contrastive_group_ids: torch.Tensor,
     target_identity_ids: torch.Tensor,
     molecule_identity_ids: torch.Tensor,
     temperature: float,
@@ -131,11 +194,12 @@ def compute_contrastive_evaluation_loss(
 ) -> torch.Tensor:
     """Compute deterministic full-coverage LigUnity validation loss.
 
-    The validation rows are partitioned into the same bounded assay lists used
-    for ranking evaluation. Lists are deterministically shuffled into local
-    batches so each contrastive matrix has the same assay-list capacity as one
-    training-device microbatch. Losses are weighted by assay-list count before
-    averaging across complete-coverage partitions.
+    Every assay is partitioned into bounded lists, including singleton,
+    two-ligand, and narrow-affinity-span assays that are ineligible for ranking.
+    Lists are deterministically shuffled into local batches so each contrastive
+    matrix has the same assay-list capacity as one training-device microbatch.
+    Losses are weighted by assay-list count before averaging across
+    complete-coverage partitions.
     """
     protein_embeddings = (
         normalized_protein_embeddings.detach().cpu().float()
@@ -144,7 +208,7 @@ def compute_contrastive_evaluation_loss(
         normalized_molecule_embeddings.detach().cpu().float()
     )
     pchembl = pchembl_values.reshape(-1).detach().cpu().float()
-    assay_ids = ranking_group_ids.reshape(-1).detach().cpu().long()
+    assay_ids = contrastive_group_ids.reshape(-1).detach().cpu().long()
     target_ids = target_identity_ids.reshape(-1).detach().cpu().long()
     molecule_ids = molecule_identity_ids.reshape(-1).detach().cpu().long()
 
@@ -173,13 +237,11 @@ def compute_contrastive_evaluation_loss(
     if assay_batch_size <= 0:
         raise ValueError("assay_batch_size must be > 0")
 
-    partitions = build_complete_coverage_ranking_partitions(
-        pchembl_values=pchembl,
-        ranking_group_ids=assay_ids,
+    partitions = build_complete_coverage_contrastive_partitions(
+        contrastive_group_ids=assay_ids,
         max_list_size=ranking_max_ligands,
         num_partitions=ranking_num_partitions,
         seed=ranking_partition_seed,
-        min_pchembl_span=ranking_min_pchembl_span,
     )
     partition_losses: list[torch.Tensor] = []
     max_seed = (1 << 63) - 1

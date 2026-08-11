@@ -205,9 +205,18 @@ def _validate_training_mode_environment(config: RewardTrainerConfig) -> None:
 
 
 class RewardModelTrainer(Trainer):
-    def __init__(self, *args, val2_eval_dataset=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        val2_eval_dataset=None,
+        fixed_train_eval_dataset=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.val2_eval_dataset = val2_eval_dataset
+        self.fixed_train_eval_dataset = fixed_train_eval_dataset
+        self._last_objective_gradient_diagnostic_step: int | None = None
+        self._pending_objective_gradient_logs: Dict[str, float] = {}
         self._reset_train_component_accumulator()
 
     def _reset_train_component_accumulator(self) -> None:
@@ -216,6 +225,8 @@ class RewardModelTrainer(Trainer):
             "contrastive_loss": 0.0,
             "classification_loss": 0.0,
             "num_examples": 0.0,
+            "num_contrastive_lists": 0.0,
+            "num_contrastive_examples": 0.0,
             "num_ranking_lists": 0.0,
             "num_ranked_examples": 0.0,
             "classification_correct": 0.0,
@@ -340,6 +351,96 @@ class RewardModelTrainer(Trainer):
             == "ranking"
         )
 
+    def _record_objective_gradient_diagnostics(self, outputs) -> None:
+        """Measure effective objective gradients at the shared embedding boundary."""
+        interval = int(
+            getattr(
+                getattr(self, "args", None),
+                "reward_objective_gradient_diagnostics_steps",
+                0,
+            )
+        )
+        if interval <= 0:
+            return
+        # compute_loss runs before Trainer increments global_step. Associate the
+        # diagnostic with the optimizer step this batch is about to complete so
+        # an interval of 100 appears in the step-100 log, not step 110.
+        diagnostic_step = int(self.state.global_step) + 1
+        if diagnostic_step % interval != 0:
+            return
+        if self._last_objective_gradient_diagnostic_step == diagnostic_step:
+            return
+        if outputs.ranking_loss is None or outputs.contrastive_loss is None:
+            return
+        embedding_tensors = (
+            outputs.normalized_protein_embedding,
+            outputs.normalized_molecule_embedding,
+        )
+        if any(tensor is None for tensor in embedding_tensors):
+            return
+
+        config = self.model.config
+        ranking_objective = (
+            outputs.ranking_loss * float(config.ranking_loss_weight)
+        )
+        contrastive_objective = (
+            outputs.contrastive_loss * float(config.contrastive_loss_weight)
+        )
+        ranking_gradients = torch.autograd.grad(
+            ranking_objective,
+            embedding_tensors,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        contrastive_gradients = torch.autograd.grad(
+            contrastive_objective,
+            embedding_tensors,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        reference = next(
+            tensor for tensor in embedding_tensors if tensor is not None
+        )
+        ranking_square = torch.zeros((), device=reference.device, dtype=torch.float32)
+        contrastive_square = torch.zeros_like(ranking_square)
+        gradient_dot = torch.zeros_like(ranking_square)
+        for ranking_gradient, contrastive_gradient in zip(
+            ranking_gradients,
+            contrastive_gradients,
+        ):
+            if ranking_gradient is not None:
+                ranking_gradient = ranking_gradient.detach().float()
+                ranking_square += ranking_gradient.square().sum()
+            if contrastive_gradient is not None:
+                contrastive_gradient = contrastive_gradient.detach().float()
+                contrastive_square += contrastive_gradient.square().sum()
+            if ranking_gradient is not None and contrastive_gradient is not None:
+                gradient_dot += (ranking_gradient * contrastive_gradient).sum()
+        ranking_norm = ranking_square.sqrt()
+        contrastive_norm = contrastive_square.sqrt()
+        denominator = ranking_norm * contrastive_norm
+        gradient_cosine = torch.where(
+            denominator > 0,
+            gradient_dot / denominator,
+            torch.zeros_like(denominator),
+        )
+        diagnostics = torch.stack(
+            [ranking_norm, contrastive_norm, gradient_cosine]
+        )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.all_reduce(
+                diagnostics,
+                op=torch.distributed.ReduceOp.SUM,
+            )
+            diagnostics /= torch.distributed.get_world_size()
+        values = diagnostics.cpu().tolist()
+        self._pending_objective_gradient_logs = {
+            "ranking_embedding_grad_norm": float(values[0]),
+            "contrastive_embedding_grad_norm": float(values[1]),
+            "ranking_contrastive_embedding_grad_cosine": float(values[2]),
+        }
+        self._last_objective_gradient_diagnostic_step = diagnostic_step
+
     def _current_scaled_cosine_logs(self) -> Dict[str, float]:
         model = getattr(self, "model", None)
         if model is None:
@@ -413,6 +514,8 @@ class RewardModelTrainer(Trainer):
         ranking_loss: Optional[torch.Tensor],
         classification_loss: Optional[torch.Tensor],
         num_examples: Any,
+        num_contrastive_lists: Any,
+        num_contrastive_examples: Any,
         num_ranking_lists: Any,
         num_ranked_examples: Any,
         activity_logits: torch.Tensor,
@@ -434,6 +537,12 @@ class RewardModelTrainer(Trainer):
                 classification_loss
             )
         self._train_component_sums["num_examples"] += self._to_scalar(num_examples)
+        self._train_component_sums["num_contrastive_lists"] += self._to_scalar(
+            num_contrastive_lists
+        )
+        self._train_component_sums["num_contrastive_examples"] += self._to_scalar(
+            num_contrastive_examples
+        )
         self._train_component_sums["num_ranking_lists"] += num_ranking_lists_value
         self._train_component_sums["num_ranked_examples"] += self._to_scalar(
             num_ranked_examples
@@ -566,6 +675,12 @@ class RewardModelTrainer(Trainer):
             "contrastive_loss": self._train_component_sums["contrastive_loss"] / denom,
             "classification_loss": self._train_component_sums["classification_loss"] / denom,
             "num_examples": self._train_component_sums["num_examples"] / denom,
+            "num_contrastive_lists": self._train_component_sums[
+                "num_contrastive_lists"
+            ] / denom,
+            "num_contrastive_examples": self._train_component_sums[
+                "num_contrastive_examples"
+            ] / denom,
             "num_ranking_lists": self._train_component_sums["num_ranking_lists"] / denom,
             "num_ranked_examples": self._train_component_sums["num_ranked_examples"] / denom,
         }
@@ -608,6 +723,10 @@ class RewardModelTrainer(Trainer):
         if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
             model_inputs["pchembl_values"] = inputs["pchembl_values"]
             model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
+            if "contrastive_group_ids" in inputs:
+                model_inputs["contrastive_group_ids"] = inputs[
+                    "contrastive_group_ids"
+                ]
             if "contrastive_target_ids" in inputs:
                 model_inputs["contrastive_target_ids"] = inputs[
                     "contrastive_target_ids"
@@ -628,10 +747,15 @@ class RewardModelTrainer(Trainer):
             raise RuntimeError("RewardModel did not return a scalar loss")
 
         if getattr(model, "training", False):
+            self._record_objective_gradient_diagnostics(outputs)
             self._record_train_components(
                 ranking_loss=outputs.ranking_loss,
                 classification_loss=outputs.classification_loss,
                 num_examples=inputs.get("num_examples"),
+                num_contrastive_lists=inputs.get("num_contrastive_lists"),
+                num_contrastive_examples=inputs.get(
+                    "num_contrastive_examples"
+                ),
                 num_ranking_lists=inputs.get("num_ranking_lists"),
                 num_ranked_examples=inputs.get("num_ranked_examples"),
                 activity_logits=outputs.activity_logits,
@@ -650,6 +774,7 @@ class RewardModelTrainer(Trainer):
         eval_dataset,
         ignore_keys=None,
         metric_key_prefix: str = "eval",
+        notify_callbacks: bool = True,
     ) -> Dict[str, float]:
         active_eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
         if not isinstance(active_eval_dataset, RewardEvaluationDataset):
@@ -829,7 +954,7 @@ class RewardModelTrainer(Trainer):
                 normalized_protein_embeddings=normalized_protein_embeddings,
                 normalized_molecule_embeddings=normalized_molecule_embeddings,
                 pchembl_values=pchembl_values,
-                ranking_group_ids=ranking_group_ids,
+                contrastive_group_ids=ranking_group_ids,
                 target_identity_ids=_encode_identity_ids(
                     active_eval_dataset.example_dataset["target_chembl_id"]
                 ),
@@ -918,12 +1043,13 @@ class RewardModelTrainer(Trainer):
             metric_key_prefix=metric_key_prefix,
         )
         self.log(metrics)
-        self.control = self.callback_handler.on_evaluate(
-            self.args,
-            self.state,
-            self.control,
-            metrics,
-        )
+        if notify_callbacks:
+            self.control = self.callback_handler.on_evaluate(
+                self.args,
+                self.state,
+                self.control,
+                metrics,
+            )
         return metrics
 
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
@@ -940,6 +1066,19 @@ class RewardModelTrainer(Trainer):
                     metric_key_prefix="eval_val2",
                 )
             )
+        if (
+            eval_dataset is None
+            and metric_key_prefix == "eval"
+            and self.fixed_train_eval_dataset is not None
+        ):
+            metrics.update(
+                self._evaluate_reward_dataset(
+                    eval_dataset=self.fixed_train_eval_dataset,
+                    ignore_keys=ignore_keys,
+                    metric_key_prefix="train_eval",
+                    notify_callbacks=False,
+                )
+            )
         return metrics
 
     def log(self, logs, start_time=None):
@@ -947,6 +1086,10 @@ class RewardModelTrainer(Trainer):
         if "loss" in logs:
             logs.update(self._consume_train_component_logs())
             logs.update(self._current_scaled_cosine_logs())
+            logs.update(
+                getattr(self, "_pending_objective_gradient_logs", {})
+            )
+            self._pending_objective_gradient_logs = {}
         if self._ranking_metrics_profile_enabled():
             ranking_metric_suffixes = {
                 "loss",
@@ -971,9 +1114,12 @@ class RewardModelTrainer(Trainer):
                     "ranking_loss",
                     "contrastive_loss",
                     "train_loss",
+                    "ranking_embedding_grad_norm",
+                    "contrastive_embedding_grad_norm",
+                    "ranking_contrastive_embedding_grad_cosine",
                 }
                 or (
-                    key.startswith(("eval_", "test_"))
+                    key.startswith(("eval_", "test_", "train_eval_"))
                     and any(
                         key.endswith(f"_{suffix}")
                         for suffix in ranking_metric_suffixes
@@ -1000,6 +1146,8 @@ class RewardModelTrainer(Trainer):
                 or "classification_logit_bias" in key
                 or "ranking_margin_pair_" in key
                 or "ranking_list_" in key
+                or "embedding_grad_" in key
+                or "embedding_grad" in key
                 or key in {"cosine_std", "eval_cosine_std", "eval_pair_accuracy"}
                 or key in {"pair_accuracy", "spearman", "pearson"}
                 or key
@@ -1021,6 +1169,8 @@ class RewardModelTrainer(Trainer):
         split = "train"
         if any(key.startswith("eval_val2_") for key in diagnostic_metrics):
             split = "eval_val2"
+        elif any(key.startswith("train_eval_") for key in diagnostic_metrics):
+            split = "train_eval"
         elif any(key.startswith("eval_") for key in diagnostic_metrics):
             split = "eval"
         os.makedirs(self.args.output_dir, exist_ok=True)
@@ -1101,6 +1251,9 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         training_args.length_bucket_size_multiplier = config.length_bucket_size_multiplier
         training_args.reward_ranking_score_diagnostics = (
             config.ranking_score_diagnostics
+        )
+        training_args.reward_objective_gradient_diagnostics_steps = (
+            config.objective_gradient_diagnostics_steps
         )
         training_args.reward_metrics_profile = config.metrics_profile
         training_args.reward_protein_shuffle_sensitivity = (

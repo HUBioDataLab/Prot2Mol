@@ -25,10 +25,12 @@ from reward_model.training import (
     RewardEvaluationDataset,
     RewardModelTrainer,
     RewardTrainerConfig,
+    build_complete_coverage_contrastive_partitions,
     build_complete_coverage_ranking_partitions,
     compute_contrastive_evaluation_loss,
     compute_joint_evaluation_metrics,
     create_training_arguments,
+    select_fixed_ranking_evaluation_subset,
 )
 
 
@@ -633,6 +635,31 @@ def test_validation_partition_seed_changes_only_the_fixed_grouping():
     assert sorted(torch.bincount(second[0]).tolist()) == [13, 13, 14]
 
 
+def test_contrastive_partitions_cover_singleton_two_ligand_and_large_assays():
+    assay_ids = torch.tensor([0, 1, 1, *([2] * 17)], dtype=torch.long)
+
+    partitions = build_complete_coverage_contrastive_partitions(
+        contrastive_group_ids=assay_ids,
+        max_list_size=16,
+        num_partitions=3,
+        seed=37,
+    )
+    replica = build_complete_coverage_contrastive_partitions(
+        contrastive_group_ids=assay_ids,
+        max_list_size=16,
+        num_partitions=3,
+        seed=37,
+    )
+
+    assert all(torch.equal(left, right) for left, right in zip(partitions, replica))
+    assert not torch.equal(partitions[0], partitions[1])
+    for partition_ids in partitions:
+        assert (partition_ids >= 0).all()
+        assert sorted(torch.bincount(partition_ids).tolist()) == [1, 2, 8, 9]
+        for list_id in torch.unique(partition_ids):
+            assert torch.unique(assay_ids[partition_ids == list_id]).numel() == 1
+
+
 @pytest.mark.parametrize(
     "assay_size",
     [3, 4, 5, 15, 16, 17, 31, 32, 33, 47, 48, 49, 100, 257],
@@ -699,7 +726,7 @@ def test_contrastive_evaluation_matches_full_coverage_ligunity_loss():
         normalized_protein_embeddings=protein_embeddings,
         normalized_molecule_embeddings=molecule_embeddings,
         pchembl_values=pchembl_values,
-        ranking_group_ids=assay_ids,
+        contrastive_group_ids=assay_ids,
         target_identity_ids=target_ids,
         molecule_identity_ids=molecule_ids,
         temperature=temperature,
@@ -816,6 +843,122 @@ def test_assay_list_dataset_has_exact_coverage_and_dynamic_nonoverlapping_lists(
     )
     replica.set_epoch(1)
     assert replica.epoch_ranking_indices() == dataset.epoch_ranking_indices()
+
+
+def test_all_assays_feed_contrastive_while_ranking_keeps_eligibility_filter():
+    examples = _tokenized_rows(group_sizes=(40, 20, 3, 2, 1))
+    dataset = RewardAssayListDataset(
+        examples,
+        seed=42,
+        ranking_max_ligands=16,
+        ranking_opportunity_divisor=32,
+        ranking_min_pchembl_span=0.5,
+        max_classification_only_per_item=0,
+        include_all_assays_for_contrastive=True,
+    )
+    batch = RewardAssayListCollator()(
+        [dataset[index] for index in range(len(dataset))]
+    )
+
+    assert dataset.stats.num_assays == 5
+    assert dataset.stats.num_eligible_assays == 2
+    assert dataset.stats.num_contrastive_lists == 6
+    assert dataset.stats.num_contrastive_examples == 54
+    assert dataset.stats.num_ranking_lists == 3
+    assert dataset.stats.num_ranked_examples == 48
+    assert len(dataset.epoch_contrastive_indices()) == 54
+    assert batch["num_contrastive_lists"].item() == 6
+    assert batch["num_contrastive_examples"].item() == 54
+    assert (batch["contrastive_group_ids"] >= 0).all()
+    assert batch["num_ranking_lists"].item() == 3
+    assert batch["num_ranked_examples"].item() == 48
+    assert (batch["ranking_group_ids"] < 0).sum().item() == 6
+    assert set(batch["contrastive_target_ids"].tolist()) == {0, 1, 2, 3, 4}
+
+
+def test_ligunity_repeated_assay_opportunities_sample_independently():
+    examples = _tokenized_rows(group_sizes=(40,))
+    dataset = RewardAssayListDataset(
+        examples,
+        seed=42,
+        ranking_max_ligands=16,
+        ranking_opportunity_divisor=32,
+        max_classification_only_per_item=0,
+        include_all_assays_for_contrastive=True,
+    )
+    replica = RewardAssayListDataset(
+        examples,
+        seed=42,
+        ranking_max_ligands=16,
+        ranking_opportunity_divisor=32,
+        max_classification_only_per_item=0,
+        include_all_assays_for_contrastive=True,
+    )
+
+    epoch_zero = dataset.epoch_contrastive_indices()
+    assert len(epoch_zero) == 32
+    assert len(set(epoch_zero)) < 32
+    assert replica.epoch_contrastive_indices() == epoch_zero
+    dataset.set_epoch(1)
+    assert dataset.epoch_contrastive_indices() != epoch_zero
+
+
+def test_singleton_contrastive_assay_has_nonzero_retrieval_gradient():
+    model = _dummy_model()
+    protein_embeddings = torch.nn.functional.normalize(
+        torch.tensor([[1.0, 0.2], [0.2, 1.0], [0.2, 1.0]], requires_grad=True),
+        dim=-1,
+    )
+    molecule_embeddings = torch.nn.functional.normalize(
+        torch.tensor([[0.8, 0.4], [0.1, 1.0], [0.9, 0.1]], requires_grad=True),
+        dim=-1,
+    )
+
+    loss, _, _ = model._compute_contrastive_loss(
+        protein_embeddings,
+        molecule_embeddings,
+        torch.tensor([7.0, 7.5, 4.0]),
+        torch.tensor([0, 1, 1]),
+        torch.tensor([0, 1, 1]),
+        torch.tensor([0, 1, 2]),
+    )
+    protein_gradient, molecule_gradient = torch.autograd.grad(
+        loss,
+        (protein_embeddings, molecule_embeddings),
+    )
+
+    assert torch.isfinite(loss)
+    assert loss.item() > 0.0
+    assert protein_gradient[0].abs().sum().item() > 0.0
+    assert molecule_gradient[0].abs().sum().item() > 0.0
+
+
+def test_fixed_train_evaluation_subset_is_deterministic_complete_and_rank_eligible():
+    examples = _tokenized_rows(group_sizes=(40, 20, 3, 1))
+    first = select_fixed_ranking_evaluation_subset(
+        examples,
+        num_assays=1,
+        seed=19,
+        min_pchembl_span=0.5,
+    )
+    second = select_fixed_ranking_evaluation_subset(
+        examples,
+        num_assays=1,
+        seed=19,
+        min_pchembl_span=0.5,
+    )
+
+    assert first["example_id"] == second["example_id"]
+    assert len(set(first["group_id"])) == 1
+    selected_group = first["group_id"][0]
+    expected_ids = [
+        example_id
+        for example_id, group_id in zip(examples["example_id"], examples["group_id"])
+        if group_id == selected_group
+    ]
+    assert first["example_id"] == expected_ids
+    assert len(first) >= 3
+    assert max(first["pchembl_value"]) - min(first["pchembl_value"]) >= 0.5
 
 
 def test_ranking_only_dataset_omits_classification_only_examples():

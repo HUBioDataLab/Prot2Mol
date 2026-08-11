@@ -24,8 +24,11 @@ from .data import (
     load_tokenized_example_dataset,
     prepare_tokenized_split_datasets,
     save_pair_dataset_from_example_dataset,
+    select_fixed_ranking_evaluation_subset,
+    validate_tokenized_split_cardinality,
 )
 from .evaluation import (
+    build_complete_coverage_contrastive_partitions,
     build_complete_coverage_ranking_partitions,
     compute_activity_type_metrics,
     compute_classification_metrics,
@@ -69,6 +72,7 @@ __all__ = [
     "TokenizedSplitArtifacts",
     "build_group_id",
     "build_pair_records",
+    "build_complete_coverage_contrastive_partitions",
     "build_complete_coverage_ranking_partitions",
     "compute_activity_type_metrics",
     "compute_classification_metrics",
@@ -89,5 +93,7 @@ __all__ = [
     "prepare_tokenized_split_datasets",
     "prepare_training_examples_from_config",
     "save_pair_dataset_from_example_dataset",
+    "select_fixed_ranking_evaluation_subset",
+    "validate_tokenized_split_cardinality",
     "train_reward_model_from_config",
 ]

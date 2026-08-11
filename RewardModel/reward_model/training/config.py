@@ -94,6 +94,8 @@ class RewardTrainerConfig:
     report_to: Optional[Any] = None
     metrics_profile: str = "full"
     ranking_score_diagnostics: bool = False
+    objective_gradient_diagnostics_steps: int = 0
+    fixed_train_eval_assays: int = 0
     protein_shuffle_sensitivity: bool = True
 
     def __post_init__(self) -> None:
@@ -172,6 +174,12 @@ class RewardTrainerConfig:
             )
         if not isinstance(self.ranking_score_diagnostics, bool):
             raise ValueError("ranking_score_diagnostics must be a boolean")
+        if self.objective_gradient_diagnostics_steps < 0:
+            raise ValueError(
+                "objective_gradient_diagnostics_steps must be >= 0"
+            )
+        if self.fixed_train_eval_assays < 0:
+            raise ValueError("fixed_train_eval_assays must be >= 0")
         if not isinstance(self.protein_shuffle_sensitivity, bool):
             raise ValueError("protein_shuffle_sensitivity must be a boolean")
 

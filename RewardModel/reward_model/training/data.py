@@ -8,6 +8,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Mapping, Sequence, Tuple
 
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import torch
 from datasets import Dataset, Features, Value, load_from_disk
 from torch.utils.data import Dataset as TorchDataset
@@ -109,6 +111,8 @@ class AssayListSamplingStats:
     num_examples: int
     num_assays: int
     num_eligible_assays: int
+    num_contrastive_lists: int
+    num_contrastive_examples: int
     num_ranking_lists: int
     num_ranked_examples: int
     num_classification_only_examples: int
@@ -271,7 +275,11 @@ def _tokenize_and_pad_texts(
     encode_kwargs = {
         "add_special_tokens": True,
         "padding": False,
-        "truncation": False,
+        # Delegate truncation to the tokenizer so model-specific special-token
+        # handling is preserved (for example, ESM's CLS/EOS layout). Slicing a
+        # fully encoded row here can silently remove its terminal special token.
+        "truncation": True,
+        "max_length": max_length,
         "return_attention_mask": True,
         "return_tensors": None,
     }
@@ -305,10 +313,13 @@ def _tokenize_and_pad_texts(
         if len(input_ids) != len(attention_mask):
             raise ValueError("Tokenizer input_ids and attention_mask lengths must match")
 
+        if len(input_ids) > max_length:
+            raise ValueError(
+                "Tokenizer returned an overlength row despite "
+                f"truncation=True and max_length={max_length}"
+            )
         token_length = int(sum(attention_mask))
         lengths.append(token_length)
-        input_ids = input_ids[:max_length]
-        attention_mask = attention_mask[:max_length]
         padding_length = max_length - len(input_ids)
         padding_ids = [int(pad_token_id)] * padding_length
         padding_mask = [0] * padding_length
@@ -370,21 +381,6 @@ def _tokenize_example_rows(
         batch_size=data_config.tokenization_batch_size,
         num_proc=tokenization_num_proc,
         desc=f"Tokenizing {split_name} reward-model examples once",
-    )
-    tokenized = tokenized.filter(
-        lambda protein_lengths, molecule_lengths: [
-            int(protein_length) <= model_config.protein_max_length
-            and int(molecule_length) <= model_config.molecule_max_length
-            for protein_length, molecule_length in zip(
-                protein_lengths,
-                molecule_lengths,
-            )
-        ],
-        input_columns=["protein_length", "molecule_length"],
-        batched=True,
-        batch_size=data_config.tokenization_batch_size,
-        num_proc=tokenization_num_proc,
-        desc=f"Dropping overlong {split_name} reward-model examples",
     )
     tokenized = tokenized.remove_columns("example_id")
     tokenized = tokenized.add_column("example_id", list(range(len(tokenized))))
@@ -463,17 +459,161 @@ def load_tokenized_example_dataset(dataset_path: str) -> Dataset:
     return load_from_disk(os.path.abspath(dataset_path))
 
 
-class RewardAssayListDataset(TorchDataset):
-    """Epoch-aware joint classification and assay-list ranking dataset.
+def validate_tokenized_split_cardinality(
+    data_config: RewardTrainingDataConfig,
+    model_config: RewardModelConfig,
+    split_datasets: Mapping[str, Dataset],
+) -> None:
+    """Reject stale token caches created before retain-and-truncate semantics."""
+    source_paths = {
+        "train": data_config.train_parquet_path,
+        "val": data_config.val_parquet_path,
+        "test": data_config.test_parquet_path,
+    }
+    for split_name, dataset in split_datasets.items():
+        source_path = source_paths.get(split_name)
+        if source_path is None or not os.path.isfile(source_path):
+            continue
+        source_rows = int(pq.ParquetFile(source_path).metadata.num_rows)
+        if len(dataset) != source_rows:
+            raise ValueError(
+                f"Tokenized {split_name} cache contains {len(dataset)} rows but "
+                f"the MMseqs50 parquet contains {source_rows}. The cache was "
+                "created with the obsolete drop-overlength policy; rerun "
+                "prepare_reward_training_data.py to retain truncated examples."
+            )
+        required_length_columns = {"protein_length", "molecule_length"}
+        missing_length_columns = required_length_columns.difference(
+            dataset.column_names
+        )
+        if missing_length_columns:
+            raise ValueError(
+                f"Tokenized {split_name} cache is missing length columns "
+                f"{sorted(missing_length_columns)}; rerun "
+                "prepare_reward_training_data.py."
+            )
+        observed_protein_max = int(
+            pc.max(dataset.data.column("protein_length")).as_py() or 0
+        )
+        observed_molecule_max = int(
+            pc.max(dataset.data.column("molecule_length")).as_py() or 0
+        )
+        if (
+            observed_protein_max > model_config.protein_max_length
+            or observed_molecule_max > model_config.molecule_max_length
+        ):
+            raise ValueError(
+                f"Tokenized {split_name} cache exceeds the configured token "
+                "limits: "
+                f"protein={observed_protein_max}/{model_config.protein_max_length}, "
+                f"molecule={observed_molecule_max}/{model_config.molecule_max_length}. "
+                "Rerun prepare_reward_training_data.py so tokenizer-owned "
+                "truncation is applied."
+            )
 
-    With a positive ``max_classification_only_per_item``, every source
-    observation appears exactly once as a classification example per epoch.
-    Set it to zero for ranking-only training; observations not selected for a
-    ranking list are then omitted. Assays with at least three ligands and
-    sufficient affinity span contribute ``ceil(n / opportunity_divisor)``
-    non-overlapping lists of at most ``ranking_max_ligands`` observations. The
-    selected ranking observations change deterministically with ``seed +
-    epoch``.
+        token_columns = {
+            "protein_input_ids": model_config.protein_max_length,
+            "protein_attention_mask": model_config.protein_max_length,
+            "molecule_input_ids": model_config.molecule_max_length,
+            "molecule_attention_mask": model_config.molecule_max_length,
+        }
+        missing_token_columns = set(token_columns).difference(dataset.column_names)
+        if missing_token_columns:
+            raise ValueError(
+                f"Tokenized {split_name} cache is missing token columns "
+                f"{sorted(missing_token_columns)}; rerun "
+                "prepare_reward_training_data.py."
+            )
+        if len(dataset) == 0:
+            continue
+        first_row = dataset[0]
+        mismatched_widths = {
+            column_name: (len(first_row[column_name]), expected_width)
+            for column_name, expected_width in token_columns.items()
+            if len(first_row[column_name]) != expected_width
+        }
+        if mismatched_widths:
+            width_summary = ", ".join(
+                f"{column_name}={observed}/{expected}"
+                for column_name, (observed, expected) in mismatched_widths.items()
+            )
+            raise ValueError(
+                f"Tokenized {split_name} cache token array widths do not match "
+                f"the configured limits: {width_summary}. Rerun "
+                "prepare_reward_training_data.py instead of reusing a cache "
+                "prepared for different max lengths."
+            )
+
+
+def select_fixed_ranking_evaluation_subset(
+    example_dataset: Dataset,
+    *,
+    num_assays: int,
+    seed: int,
+    min_pchembl_span: float,
+) -> Dataset:
+    """Select a reproducible set of complete rank-eligible training assays."""
+    if num_assays <= 0:
+        raise ValueError("num_assays must be > 0")
+    if min_pchembl_span < 0.0 or not math.isfinite(float(min_pchembl_span)):
+        raise ValueError("min_pchembl_span must be finite and >= 0")
+
+    members: Dict[str, list[int]] = defaultdict(list)
+    minima: Dict[str, float] = {}
+    maxima: Dict[str, float] = {}
+    scan_batch_size = 65536
+    metadata = example_dataset.select_columns(["group_id", "pchembl_value"])
+    for start in range(0, len(metadata), scan_batch_size):
+        rows = metadata[start : min(start + scan_batch_size, len(metadata))]
+        for offset, (group_id, pchembl_value) in enumerate(
+            zip(rows["group_id"], rows["pchembl_value"])
+        ):
+            group_id = str(group_id)
+            value = float(pchembl_value)
+            if not math.isfinite(value):
+                raise ValueError("pchembl_value must contain only finite values")
+            members[group_id].append(start + offset)
+            minima[group_id] = min(value, minima.get(group_id, value))
+            maxima[group_id] = max(value, maxima.get(group_id, value))
+
+    eligible_group_ids = sorted(
+        group_id
+        for group_id, indices in members.items()
+        if len(indices) >= MIN_LISTWISE_LIGANDS
+        and maxima[group_id] - minima[group_id] >= float(min_pchembl_span)
+    )
+    if not eligible_group_ids:
+        raise ValueError("training data contains no rank-eligible assays")
+    generator = torch.Generator().manual_seed(int(seed))
+    order = torch.randperm(len(eligible_group_ids), generator=generator).tolist()
+    selected_group_ids = {
+        eligible_group_ids[index]
+        for index in order[: min(num_assays, len(eligible_group_ids))]
+    }
+    selected_indices = sorted(
+        index
+        for group_id in selected_group_ids
+        for index in members[group_id]
+    )
+    return example_dataset.select(selected_indices)
+
+
+class RewardAssayListDataset(TorchDataset):
+    """Epoch-aware assay sampler for contrastive, ranking, and classification.
+
+    When ``include_all_assays_for_contrastive`` is true, every assay contributes
+    at least one bounded contrastive list, including singleton, two-ligand, and
+    narrow-affinity-span assays. Ranking eligibility remains independent: only
+    assays with at least three ligands and sufficient affinity span receive a
+    ranking group id. This mirrors LigUnity's separation between retrieval
+    supervision and within-assay ranking supervision.
+
+    In contrastive/ranking-only mode, lists use LigUnity's released behavior:
+    ``ceil(n / 32)`` independent opportunities, each sampling at most
+    ``ranking_max_ligands`` observations without replacement inside that list.
+    The same observation may therefore appear in two opportunities. When
+    classification-only rows are requested, the legacy non-overlapping sampler
+    is retained so every source observation still appears exactly once.
     """
 
     def __init__(
@@ -485,6 +625,7 @@ class RewardAssayListDataset(TorchDataset):
         ranking_opportunity_divisor: int = 32,
         ranking_min_pchembl_span: float = 0.5,
         max_classification_only_per_item: int = 16,
+        include_all_assays_for_contrastive: bool = False,
         item_count_multiple: int = 1,
     ):
         if ranking_max_ligands <= 1:
@@ -521,6 +662,9 @@ class RewardAssayListDataset(TorchDataset):
         self.ranking_opportunity_divisor = int(ranking_opportunity_divisor)
         self.ranking_min_pchembl_span = float(ranking_min_pchembl_span)
         self.max_classification_only_per_item = int(max_classification_only_per_item)
+        self.include_all_assays_for_contrastive = bool(
+            include_all_assays_for_contrastive
+        )
         self.item_count_multiple = int(item_count_multiple)
         self._group_members, self._pchembl_values = self._build_group_metadata()
         self._eligible_group_ids = {
@@ -534,41 +678,59 @@ class RewardAssayListDataset(TorchDataset):
             >= self.ranking_min_pchembl_span
         }
 
+        sampled_group_ids = (
+            set(self._group_members)
+            if self.include_all_assays_for_contrastive
+            else self._eligible_group_ids
+        )
+        group_list_counts = {
+            group_id: math.ceil(
+                len(self._group_members[group_id])
+                / self.ranking_opportunity_divisor
+            )
+            for group_id in sampled_group_ids
+        }
+        num_contrastive_lists = sum(group_list_counts.values())
+        num_contrastive_examples = sum(
+            min(
+                len(self._group_members[group_id]),
+                group_list_counts[group_id] * self.ranking_max_ligands,
+            )
+            for group_id in sampled_group_ids
+        )
         num_ranking_lists = sum(
-            math.ceil(len(self._group_members[group_id]) / self.ranking_opportunity_divisor)
+            group_list_counts[group_id]
             for group_id in self._eligible_group_ids
         )
         num_ranked_examples = sum(
             min(
                 len(self._group_members[group_id]),
-                math.ceil(
-                    len(self._group_members[group_id]) / self.ranking_opportunity_divisor
-                )
-                * self.ranking_max_ligands,
+                group_list_counts[group_id] * self.ranking_max_ligands,
             )
             for group_id in self._eligible_group_ids
         )
-        num_unranked_examples = len(example_dataset) - num_ranked_examples
+        num_unsampled_examples = len(example_dataset) - num_contrastive_examples
         include_classification_only = self.max_classification_only_per_item > 0
         num_classification_only = (
-            num_unranked_examples if include_classification_only else 0
+            num_unsampled_examples if include_classification_only else 0
         )
+        num_assay_lists = num_contrastive_lists
         if include_classification_only:
             desired_items = max(
                 1,
-                num_ranking_lists,
+                num_assay_lists,
                 math.ceil(
                     num_classification_only / self.max_classification_only_per_item
                 ),
             )
-            max_nonempty_items = num_ranking_lists + num_classification_only
+            max_nonempty_items = num_assay_lists + num_classification_only
         else:
-            if num_ranking_lists == 0:
+            if num_assay_lists == 0:
                 raise ValueError(
-                    "ranking-only training requires at least one eligible ranking list"
+                    "assay-list training requires at least one sampled assay list"
                 )
-            desired_items = num_ranking_lists
-            max_nonempty_items = num_ranking_lists
+            desired_items = num_assay_lists
+            max_nonempty_items = num_assay_lists
         if self.item_count_multiple > 1 and max_nonempty_items < self.item_count_multiple:
             raise ValueError(
                 "Training dataset is too small for duplicate-free distributed sharding: "
@@ -591,6 +753,8 @@ class RewardAssayListDataset(TorchDataset):
             num_examples=len(example_dataset),
             num_assays=len(self._group_members),
             num_eligible_assays=len(self._eligible_group_ids),
+            num_contrastive_lists=num_contrastive_lists,
+            num_contrastive_examples=num_contrastive_examples,
             num_ranking_lists=num_ranking_lists,
             num_ranked_examples=num_ranked_examples,
             num_classification_only_examples=num_classification_only,
@@ -598,7 +762,7 @@ class RewardAssayListDataset(TorchDataset):
         )
         self._epoch: int | None = None
         self._bundles: list[
-            tuple[list[tuple[str, tuple[int, ...]]], tuple[int, ...]]
+            tuple[list[tuple[str, tuple[int, ...], bool]], tuple[int, ...]]
         ] = []
         self._example_lengths: array | None = None
         self.set_epoch(0)
@@ -641,44 +805,74 @@ class RewardAssayListDataset(TorchDataset):
         generator = torch.Generator()
         generator.manual_seed(self.seed + epoch)
 
-        ranking_lists: list[tuple[str, tuple[int, ...]]] = []
+        assay_lists: list[tuple[str, tuple[int, ...], bool]] = []
         classification_only: list[int] = []
         for group_id, members in self._group_members.items():
-            if group_id not in self._eligible_group_ids:
+            ranking_eligible = group_id in self._eligible_group_ids
+            should_sample = (
+                self.include_all_assays_for_contrastive or ranking_eligible
+            )
+            if not should_sample:
                 if self.max_classification_only_per_item > 0:
                     classification_only.extend(members)
                 continue
-            shuffled = self._permuted(members, generator)
             list_count = math.ceil(len(members) / self.ranking_opportunity_divisor)
-            ranked_count = min(
-                len(members),
-                list_count * self.ranking_max_ligands,
-            )
-            selected = shuffled[:ranked_count]
-            if self.max_classification_only_per_item > 0:
-                classification_only.extend(shuffled[ranked_count:])
-            for start in range(0, ranked_count, self.ranking_max_ligands):
-                ranking_lists.append(
-                    (
-                        group_id,
-                        tuple(selected[start : start + self.ranking_max_ligands]),
+            if (
+                self.include_all_assays_for_contrastive
+                and self.max_classification_only_per_item == 0
+            ):
+                # Exact LigUnity train-time semantics: each repeated assay
+                # entry samples independently, so opportunities may overlap.
+                list_size = min(len(members), self.ranking_max_ligands)
+                for _ in range(list_count):
+                    selected = self._permuted(members, generator)[:list_size]
+                    assay_lists.append(
+                        (group_id, tuple(selected), ranking_eligible)
                     )
+            else:
+                shuffled = self._permuted(members, generator)
+                sampled_count = min(
+                    len(members),
+                    list_count * self.ranking_max_ligands,
                 )
+                selected = shuffled[:sampled_count]
+                if self.max_classification_only_per_item > 0:
+                    classification_only.extend(shuffled[sampled_count:])
+                for start in range(
+                    0,
+                    sampled_count,
+                    self.ranking_max_ligands,
+                ):
+                    assay_lists.append(
+                        (
+                            group_id,
+                            tuple(
+                                selected[
+                                    start : start + self.ranking_max_ligands
+                                ]
+                            ),
+                            ranking_eligible,
+                        )
+                    )
 
-        ranking_lists = [
-            ranking_lists[index]
+        assay_lists = [
+            assay_lists[index]
             for index in torch.randperm(
-                len(ranking_lists), generator=generator
+                len(assay_lists), generator=generator
             ).tolist()
-        ] if ranking_lists else []
+        ] if assay_lists else []
         classification_only = self._permuted(classification_only, generator)
 
         num_items = self.stats.num_dataset_items
-        assigned_ranking: list[list[tuple[str, tuple[int, ...]]]] = [
+        assigned_assays: list[list[tuple[str, tuple[int, ...], bool]]] = [
             [] for _ in range(num_items)
         ]
-        for list_index, ranking_list in enumerate(ranking_lists):
-            assigned_ranking[list_index % num_items].append(ranking_list)
+        for list_index, assay_list in enumerate(assay_lists):
+            assigned_assays[list_index % num_items].append(assay_list)
+        for assigned in assigned_assays:
+            # Preserve the legacy invariant that ranked rows precede any
+            # non-ranked rows within a dataset item.
+            assigned.sort(key=lambda item: not item[2])
 
         classification_counts = [
             len(classification_only) // num_items for _ in range(num_items)
@@ -687,7 +881,7 @@ class RewardAssayListDataset(TorchDataset):
             classification_counts[item_index] += 1
         classification_item_order = sorted(
             range(num_items),
-            key=lambda index: (bool(assigned_ranking[index]), index),
+            key=lambda index: (bool(assigned_assays[index]), index),
         )
         assigned_classification: list[tuple[int, ...]] = [tuple() for _ in range(num_items)]
         cursor = 0
@@ -699,12 +893,26 @@ class RewardAssayListDataset(TorchDataset):
             cursor += count
 
         self._bundles = [
-            (assigned_ranking[index], assigned_classification[index])
+            (assigned_assays[index], assigned_classification[index])
             for index in range(num_items)
         ]
-        if any(not ranking and not classification for ranking, classification in self._bundles):
+        if any(not assays and not classification for assays, classification in self._bundles):
             raise RuntimeError("assay-list sampler produced an empty dataset item")
-        if sum(len(indices) for _, indices in ranking_lists) != self.stats.num_ranked_examples:
+        if (
+            sum(len(indices) for _, indices, _ in assay_lists)
+            != self.stats.num_contrastive_examples
+        ):
+            raise RuntimeError(
+                "contrastive example count changed while constructing the epoch"
+            )
+        if (
+            sum(
+                len(indices)
+                for _, indices, ranking_eligible in assay_lists
+                if ranking_eligible
+            )
+            != self.stats.num_ranked_examples
+        ):
             raise RuntimeError("ranked example count changed while constructing the epoch")
         if cursor != self.stats.num_classification_only_examples:
             raise RuntimeError("classification-only example count changed while constructing the epoch")
@@ -730,35 +938,53 @@ class RewardAssayListDataset(TorchDataset):
         if isinstance(index, tuple):
             epoch, index = index
             self.set_epoch(int(epoch))
-        ranking_lists, classification_indices = self._bundles[int(index)]
+        assay_lists, classification_indices = self._bundles[int(index)]
         all_indices: list[int] = []
+        contrastive_group_sizes: list[int] = []
+        contrastive_assay_ids: list[str] = []
+        ranking_group_flags: list[bool] = []
         ranking_group_sizes: list[int] = []
         ranking_assay_ids: list[str] = []
-        for group_id, ranking_indices in ranking_lists:
-            all_indices.extend(ranking_indices)
-            ranking_group_sizes.append(len(ranking_indices))
-            ranking_assay_ids.append(group_id)
+        for group_id, assay_indices, ranking_eligible in assay_lists:
+            all_indices.extend(assay_indices)
+            contrastive_group_sizes.append(len(assay_indices))
+            contrastive_assay_ids.append(group_id)
+            ranking_group_flags.append(ranking_eligible)
+            if ranking_eligible:
+                ranking_group_sizes.append(len(assay_indices))
+                ranking_assay_ids.append(group_id)
         all_indices.extend(classification_indices)
         return {
             "rows": self._rows_for_indices(all_indices),
             "example_indices": all_indices,
+            "contrastive_group_sizes": contrastive_group_sizes,
+            "contrastive_assay_ids": contrastive_assay_ids,
+            "ranking_group_flags": ranking_group_flags,
             "ranking_group_sizes": ranking_group_sizes,
             "ranking_assay_ids": ranking_assay_ids,
         }
 
     def epoch_example_indices(self) -> list[int]:
         indices: list[int] = []
-        for ranking_lists, classification_indices in self._bundles:
-            for _, ranking_indices in ranking_lists:
-                indices.extend(ranking_indices)
+        for assay_lists, classification_indices in self._bundles:
+            for _, assay_indices, _ in assay_lists:
+                indices.extend(assay_indices)
             indices.extend(classification_indices)
+        return indices
+
+    def epoch_contrastive_indices(self) -> list[int]:
+        indices: list[int] = []
+        for assay_lists, _ in self._bundles:
+            for _, assay_indices, _ in assay_lists:
+                indices.extend(assay_indices)
         return indices
 
     def epoch_ranking_indices(self) -> list[int]:
         indices: list[int] = []
-        for ranking_lists, _ in self._bundles:
-            for _, ranking_indices in ranking_lists:
-                indices.extend(ranking_indices)
+        for assay_lists, _ in self._bundles:
+            for _, assay_indices, ranking_eligible in assay_lists:
+                if ranking_eligible:
+                    indices.extend(assay_indices)
         return indices
 
     def get_item_sequence_lengths(self) -> Sequence[int]:
@@ -785,11 +1011,11 @@ class RewardAssayListDataset(TorchDataset):
             self._example_lengths = lengths
 
         item_lengths = array("I")
-        for ranking_lists, classification_indices in self._bundles:
+        for assay_lists, classification_indices in self._bundles:
             indices = [
                 index
-                for _, ranking_indices in ranking_lists
-                for index in ranking_indices
+                for _, assay_indices, _ in assay_lists
+                for index in assay_indices
             ]
             indices.extend(classification_indices)
             item_lengths.append(max(self._example_lengths[index] for index in indices))
@@ -861,6 +1087,9 @@ class RewardEvaluationDataset(TorchDataset):
         feature = {
             "rows": [dict(self.example_dataset[resolved_index])],
             "example_indices": [int(index)],
+            "contrastive_group_sizes": [],
+            "contrastive_assay_ids": [],
+            "ranking_group_flags": [],
             "ranking_group_sizes": [],
             "ranking_assay_ids": [],
             "evaluation_group_indices": [int(self._row_group_indices[resolved_index])],
@@ -1231,34 +1460,76 @@ class RewardAssayListCollator(RewardPairCollator):
 
         all_rows: list[Dict[str, Any]] = []
         ranking_group_ids: list[int] = []
+        contrastive_group_ids: list[int] = []
         ranking_assay_ids: list[str] = []
         evaluation_group_indices: list[int] = []
         evaluation_example_indices: list[int] = []
         protein_shuffled_rows: list[Dict[str, Any]] = []
         protein_shuffle_presence: list[bool] = []
-        next_group_id = 0
+        next_ranking_group_id = 0
+        next_contrastive_group_id = 0
         for feature in features:
             rows = [dict(row) for row in feature["rows"]]
-            group_sizes = [int(size) for size in feature.get("ranking_group_sizes", [])]
-            assay_ids = [str(value) for value in feature.get("ranking_assay_ids", [])]
-            if len(group_sizes) != len(assay_ids):
+            has_contrastive_metadata = "contrastive_group_sizes" in feature
+            if has_contrastive_metadata:
+                group_sizes = [
+                    int(size) for size in feature.get("contrastive_group_sizes", [])
+                ]
+                assay_ids = [
+                    str(value) for value in feature.get("contrastive_assay_ids", [])
+                ]
+                ranking_flags = [
+                    bool(value) for value in feature.get("ranking_group_flags", [])
+                ]
+            else:
+                # Backward-compatible path for legacy pair/list features.
+                group_sizes = [
+                    int(size) for size in feature.get("ranking_group_sizes", [])
+                ]
+                assay_ids = [
+                    str(value) for value in feature.get("ranking_assay_ids", [])
+                ]
+                ranking_flags = [True] * len(group_sizes)
+            if not (
+                len(group_sizes) == len(assay_ids) == len(ranking_flags)
+            ):
                 raise ValueError(
-                    "ranking_group_sizes and ranking_assay_ids must have the same length"
+                    "contrastive group sizes, assay ids, and ranking flags must "
+                    "have the same length"
                 )
-            ranked_count = sum(group_sizes)
-            if ranked_count > len(rows):
-                raise ValueError("ranking group sizes exceed the number of feature rows")
+            grouped_count = sum(group_sizes)
+            if grouped_count > len(rows):
+                raise ValueError("assay group sizes exceed the number of feature rows")
 
             local_ranking_ids: list[int] = []
-            for group_size, assay_id in zip(group_sizes, assay_ids):
-                if group_size < MIN_LISTWISE_LIGANDS:
+            local_contrastive_ids: list[int] = []
+            for group_size, assay_id, ranking_eligible in zip(
+                group_sizes,
+                assay_ids,
+                ranking_flags,
+            ):
+                if group_size <= 0:
+                    raise ValueError("contrastive assay lists must be non-empty")
+                local_contrastive_ids.extend(
+                    [next_contrastive_group_id] * group_size
+                )
+                next_contrastive_group_id += 1
+                if ranking_eligible and group_size < MIN_LISTWISE_LIGANDS:
                     raise ValueError(
                         "ranking lists must contain at least three observations"
                     )
-                local_ranking_ids.extend([next_group_id] * group_size)
-                ranking_assay_ids.append(assay_id)
-                next_group_id += 1
-            local_ranking_ids.extend([-1] * (len(rows) - ranked_count))
+                if ranking_eligible:
+                    local_ranking_ids.extend(
+                        [next_ranking_group_id] * group_size
+                    )
+                    ranking_assay_ids.append(assay_id)
+                    next_ranking_group_id += 1
+                else:
+                    local_ranking_ids.extend([-1] * group_size)
+            ungrouped_count = len(rows) - grouped_count
+            local_contrastive_ids.extend([-1] * ungrouped_count)
+            local_ranking_ids.extend([-1] * ungrouped_count)
+            contrastive_group_ids.extend(local_contrastive_ids)
             ranking_group_ids.extend(local_ranking_ids)
 
             feature_eval_groups = feature.get("evaluation_group_indices")
@@ -1310,6 +1581,10 @@ class RewardAssayListCollator(RewardPairCollator):
                 [float(row["pchembl_value"]) for row in all_rows],
                 dtype=torch.float32,
             ),
+            "contrastive_group_ids": torch.tensor(
+                contrastive_group_ids,
+                dtype=torch.long,
+            ),
             "ranking_group_ids": torch.tensor(ranking_group_ids, dtype=torch.long),
             "evaluation_group_indices": torch.tensor(
                 evaluation_group_indices,
@@ -1321,7 +1596,18 @@ class RewardAssayListCollator(RewardPairCollator):
             ),
             "ranking_assay_ids": ranking_assay_ids,
             "num_examples": torch.tensor(len(all_rows), dtype=torch.long),
-            "num_ranking_lists": torch.tensor(next_group_id, dtype=torch.long),
+            "num_contrastive_lists": torch.tensor(
+                next_contrastive_group_id,
+                dtype=torch.long,
+            ),
+            "num_contrastive_examples": torch.tensor(
+                sum(group_id >= 0 for group_id in contrastive_group_ids),
+                dtype=torch.long,
+            ),
+            "num_ranking_lists": torch.tensor(
+                next_ranking_group_id,
+                dtype=torch.long,
+            ),
             "num_ranked_examples": torch.tensor(ranked_examples, dtype=torch.long),
         }
         contrastive_target_ids = self._collate_identity_ids(

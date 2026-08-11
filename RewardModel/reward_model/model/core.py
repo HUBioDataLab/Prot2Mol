@@ -306,12 +306,12 @@ class RewardModel(nn.Module):
         normalized_protein_embedding: torch.Tensor,
         normalized_molecule_embedding: torch.Tensor,
         pchembl_values: torch.Tensor,
-        ranking_group_ids: torch.Tensor,
+        contrastive_group_ids: torch.Tensor,
         contrastive_target_ids: torch.Tensor,
         contrastive_molecule_ids: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build LigUnity's shared assay-by-ligand score matrix from pair rows."""
-        group_ids = ranking_group_ids.reshape(-1).to(
+        group_ids = contrastive_group_ids.reshape(-1).to(
             device=normalized_protein_embedding.device,
             dtype=torch.long,
         )
@@ -518,6 +518,7 @@ class RewardModel(nn.Module):
         activity_labels: Optional[torch.Tensor] = None,
         pchembl_values: Optional[torch.Tensor] = None,
         ranking_group_ids: Optional[torch.Tensor] = None,
+        contrastive_group_ids: Optional[torch.Tensor] = None,
         contrastive_target_ids: Optional[torch.Tensor] = None,
         contrastive_molecule_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
@@ -628,9 +629,10 @@ class RewardModel(nn.Module):
             total_loss = classification_loss * self._config.classification_loss_weight
 
         if self._config.contrastive_loss_weight > 0.0:
-            if pchembl_values is None or ranking_group_ids is None:
+            if pchembl_values is None or contrastive_group_ids is None:
                 raise ValueError(
-                    "contrastive learning requires pchembl_values and ranking_group_ids"
+                    "contrastive learning requires pchembl_values and "
+                    "contrastive_group_ids"
                 )
             if contrastive_target_ids is None or contrastive_molecule_ids is None:
                 raise ValueError(
@@ -651,7 +653,7 @@ class RewardModel(nn.Module):
                 normalized_protein_embedding,
                 normalized_molecule_embedding,
                 pchembl_values,
-                ranking_group_ids,
+                contrastive_group_ids,
                 contrastive_target_ids,
                 contrastive_molecule_ids,
             )
@@ -731,6 +733,7 @@ class RewardModel(nn.Module):
         activity_labels: Optional[torch.Tensor] = None,
         pchembl_values: Optional[torch.Tensor] = None,
         ranking_group_ids: Optional[torch.Tensor] = None,
+        contrastive_group_ids: Optional[torch.Tensor] = None,
         contrastive_target_ids: Optional[torch.Tensor] = None,
         contrastive_molecule_ids: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
@@ -752,6 +755,8 @@ class RewardModel(nn.Module):
             pchembl_values = pchembl_values.to(target_device)
         if ranking_group_ids is not None:
             ranking_group_ids = ranking_group_ids.to(target_device)
+        if contrastive_group_ids is not None:
+            contrastive_group_ids = contrastive_group_ids.to(target_device)
         if contrastive_target_ids is not None:
             contrastive_target_ids = contrastive_target_ids.to(target_device)
         if contrastive_molecule_ids is not None:
@@ -769,6 +774,7 @@ class RewardModel(nn.Module):
             activity_labels=activity_labels,
             pchembl_values=pchembl_values,
             ranking_group_ids=ranking_group_ids,
+            contrastive_group_ids=contrastive_group_ids,
             contrastive_target_ids=contrastive_target_ids,
             contrastive_molecule_ids=contrastive_molecule_ids,
             positive_indices=positive_indices,

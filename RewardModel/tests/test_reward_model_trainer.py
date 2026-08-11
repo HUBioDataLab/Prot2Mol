@@ -573,6 +573,7 @@ def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
         ),
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        fixed_train_eval_dataset=eval_dataset,
         data_collator=RewardAssayListCollator(),
     )
 
@@ -596,11 +597,29 @@ def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
         "eval_spearman",
         "eval_pearson",
         "eval_pair_accuracy",
+        "train_eval_loss",
+        "train_eval_spearman",
+        "train_eval_pearson",
+        "train_eval_pair_accuracy",
     }
     assert eval_metrics["eval_loss"] == pytest.approx(
         0.5 * eval_metrics["eval_ranking_loss"]
         + 0.5 * eval_metrics["eval_contrastive_loss"]
     )
+    assert eval_metrics["train_eval_loss"] == pytest.approx(
+        eval_metrics["eval_loss"]
+    )
+    diagnostic_records = [
+        json.loads(line)
+        for line in (
+            tmp_path
+            / "contrastive_trainer_output"
+            / "ranking_score_diagnostics.jsonl"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert "train_eval" in {record["split"] for record in diagnostic_records}
 
 
 def test_create_training_arguments_uses_step_based_schedule_when_eval_steps_is_set(tmp_path):
@@ -791,6 +810,8 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
         ranking_loss=torch.tensor(3.0),
         classification_loss=torch.tensor(0.6),
         num_examples=torch.tensor(3),
+        num_contrastive_lists=torch.tensor(1),
+        num_contrastive_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
         activity_logits=torch.tensor([1.0, -1.0, 1.0]),
@@ -803,6 +824,8 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
         ranking_loss=torch.tensor(2.0),
         classification_loss=torch.tensor(0.4),
         num_examples=torch.tensor(3),
+        num_contrastive_lists=torch.tensor(1),
+        num_contrastive_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
         activity_logits=torch.tensor([-1.0, 1.0, -1.0]),
@@ -840,6 +863,8 @@ def test_ranking_metrics_profile_keeps_training_logs_slim():
         ranking_loss=torch.tensor(1.25),
         classification_loss=torch.tensor(0.75),
         num_examples=torch.tensor(3),
+        num_contrastive_lists=torch.tensor(1),
+        num_contrastive_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
         activity_logits=torch.tensor([-0.3, 0.0, 0.3]),
@@ -853,6 +878,8 @@ def test_ranking_metrics_profile_keeps_training_logs_slim():
         ranking_loss=torch.tensor(1.5),
         classification_loss=torch.tensor(0.5),
         num_examples=torch.tensor(5),
+        num_contrastive_lists=torch.tensor(1),
+        num_contrastive_examples=torch.tensor(5),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(5),
         activity_logits=torch.tensor([0.5, 0.25, 0.0, -0.25, -0.5]),
@@ -895,6 +922,8 @@ def test_contrastive_ranking_profile_adds_only_objective_component_losses():
         contrastive_loss=torch.tensor(2.75),
         classification_loss=None,
         num_examples=torch.tensor(3),
+        num_contrastive_lists=torch.tensor(1),
+        num_contrastive_examples=torch.tensor(3),
         num_ranking_lists=torch.tensor(1),
         num_ranked_examples=torch.tensor(3),
         activity_logits=torch.tensor([-0.3, 0.0, 0.3]),
@@ -917,6 +946,92 @@ def test_contrastive_ranking_profile_adds_only_objective_component_losses():
     }
     assert logs["ranking_loss"] == pytest.approx(1.25)
     assert logs["contrastive_loss"] == pytest.approx(2.75)
+
+
+@pytest.mark.parametrize(
+    ("ranking_weight", "expected_ranking_positive"),
+    [(0.5, True), (0.0, False)],
+)
+def test_objective_gradient_diagnostics_measure_weighted_embedding_gradients(
+    ranking_weight,
+    expected_ranking_positive,
+):
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(
+        reward_objective_gradient_diagnostics_steps=1,
+    )
+    trainer.state = SimpleNamespace(global_step=0)
+    trainer.model = SimpleNamespace(
+        config=SimpleNamespace(
+            ranking_loss_weight=ranking_weight,
+            contrastive_loss_weight=1.0,
+        )
+    )
+    trainer._last_objective_gradient_diagnostic_step = None
+    trainer._pending_objective_gradient_logs = {}
+    protein = torch.tensor(
+        [[0.8, 0.2], [0.1, 0.9]],
+        requires_grad=True,
+    )
+    molecule = torch.tensor(
+        [[0.7, 0.3], [0.4, 0.6]],
+        requires_grad=True,
+    )
+    outputs = SimpleNamespace(
+        ranking_loss=(protein * molecule).sum(),
+        contrastive_loss=(protein - molecule).square().sum(),
+        normalized_protein_embedding=protein,
+        normalized_molecule_embedding=molecule,
+    )
+
+    trainer._record_objective_gradient_diagnostics(outputs)
+    logs = trainer._pending_objective_gradient_logs
+
+    assert set(logs) == {
+        "ranking_embedding_grad_norm",
+        "contrastive_embedding_grad_norm",
+        "ranking_contrastive_embedding_grad_cosine",
+    }
+    assert all(math.isfinite(value) for value in logs.values())
+    assert (logs["ranking_embedding_grad_norm"] > 0.0) is expected_ranking_positive
+    assert logs["contrastive_embedding_grad_norm"] > 0.0
+    if not expected_ranking_positive:
+        assert logs["ranking_contrastive_embedding_grad_cosine"] == pytest.approx(0.0)
+
+    previous = dict(logs)
+    trainer._record_objective_gradient_diagnostics(outputs)
+    assert trainer._pending_objective_gradient_logs == previous
+
+
+def test_objective_gradient_diagnostics_align_with_upcoming_optimizer_step():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(
+        reward_objective_gradient_diagnostics_steps=100,
+    )
+    trainer.state = SimpleNamespace(global_step=98)
+    trainer.model = SimpleNamespace(
+        config=SimpleNamespace(
+            ranking_loss_weight=0.5,
+            contrastive_loss_weight=0.5,
+        )
+    )
+    trainer._last_objective_gradient_diagnostic_step = None
+    trainer._pending_objective_gradient_logs = {}
+    protein = torch.tensor([[0.8, 0.2]], requires_grad=True)
+    molecule = torch.tensor([[0.4, 0.6]], requires_grad=True)
+    outputs = SimpleNamespace(
+        ranking_loss=(protein * molecule).sum(),
+        contrastive_loss=(protein - molecule).square().sum(),
+        normalized_protein_embedding=protein,
+        normalized_molecule_embedding=molecule,
+    )
+
+    trainer._record_objective_gradient_diagnostics(outputs)
+    assert trainer._pending_objective_gradient_logs == {}
+    trainer.state.global_step = 99
+    trainer._record_objective_gradient_diagnostics(outputs)
+    assert trainer._last_objective_gradient_diagnostic_step == 100
+    assert trainer._pending_objective_gradient_logs
 
 
 def test_create_training_arguments_supports_fused_adamw(tmp_path):
@@ -1293,6 +1408,7 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
     assert config.model.fusion_hidden_dim == 128
     assert config.model.projection_type == "nonlinear"
     assert config.model.pooling_type == "cls"
+    assert config.model.protein_max_length == 1024
     assert config.model.ranking_temperature == pytest.approx(1.0 / 13.0)
     assert config.model.ranking_loss_weight == pytest.approx(0.5)
     assert config.model.contrastive_loss_weight == pytest.approx(0.5)
@@ -1304,9 +1420,42 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
     assert config.training.max_grad_norm == pytest.approx(1.0)
     assert config.training.per_device_train_batch_size == 12
     assert config.training.training_mode == "multi_gpu"
+    assert config.training.objective_gradient_diagnostics_steps == 100
+    assert config.training.fixed_train_eval_assays == 1000
     assert "scale13" in config.training.output_dir
+    assert "all_assays_truncated1024" in config.training.output_dir
     assert "cls_nonlinear128" in config.training.output_dir
     assert "lr1e4_all_batch12_clip1_warmup006" in config.training.output_dir
+
+
+def test_scale13_batch24_config_preserves_mmseqs50_and_enables_new_diagnostics():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale13_contrastive_lr1e4_batch24_4gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert "protein_cluster_50_activity_balanced/train.parquet" in (
+        config.data.train_parquet_path
+    )
+    assert "protein_cluster_50_activity_balanced/val.parquet" in (
+        config.data.val_parquet_path
+    )
+    assert "protein_cluster_50_activity_balanced/test.parquet" in (
+        config.data.test_parquet_path
+    )
+    assert "chembl_37_mmseqs50_activity_balanced" in (
+        config.data.tokenized_dataset_dir
+    )
+    assert config.model.protein_max_length == 1024
+    assert config.model.molecule_max_length == 256
+    assert config.model.ranking_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.training.per_device_train_batch_size == 24
+    assert config.training.objective_gradient_diagnostics_steps == 100
+    assert config.training.fixed_train_eval_assays == 1000
+    assert "all_assays_truncated1024" in config.training.output_dir
 
 
 def test_scale13_contrastive_only_batch24_config_disables_ranking_objective():
@@ -1320,6 +1469,7 @@ def test_scale13_contrastive_only_batch24_config_disables_ranking_objective():
     assert config.model.ranking_loss_weight == pytest.approx(0.0)
     assert config.model.contrastive_loss_weight == pytest.approx(1.0)
     assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.model.protein_max_length == 1024
     assert config.model.protein_hidden_dropout_prob == pytest.approx(0.0)
     assert config.model.protein_attention_probs_dropout_prob == pytest.approx(0.0)
     assert config.model.molecule_hidden_dropout_prob == pytest.approx(0.1)
@@ -1328,6 +1478,7 @@ def test_scale13_contrastive_only_batch24_config_disables_ranking_objective():
     assert config.training.per_device_train_batch_size == 24
     assert config.training.training_mode == "multi_gpu"
     assert "contrastive_only" in config.training.output_dir
+    assert "all_assays_truncated1024" in config.training.output_dir
     assert "batch24" in config.training.output_dir
 
 
@@ -1622,6 +1773,7 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
                 "  per_device_train_batch_size: 2",
                 "  per_device_eval_batch_size: 2",
                 "  logging_steps: 1",
+                "  fixed_train_eval_assays: 1",
                 "  fp16: false",
             ]
         ),
@@ -1641,12 +1793,14 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
             eval_dataset,
             data_collator,
             val2_eval_dataset=None,
+            fixed_train_eval_dataset=None,
         ):
             captured["train_dataset_len"] = len(train_dataset)
             captured["eval_dataset_len"] = len(eval_dataset)
             captured["train_dataset"] = train_dataset
             captured["eval_dataset"] = eval_dataset
             captured["val2_eval_dataset"] = val2_eval_dataset
+            captured["fixed_train_eval_dataset"] = fixed_train_eval_dataset
             captured["data_collator"] = data_collator
 
         def train(self):
@@ -1692,6 +1846,7 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
     assert captured["eval_dataset"].ranking_num_partitions == 3
     assert captured["eval_dataset"].ranking_partition_seed == 42
     assert captured["val2_eval_dataset"] is None
+    assert len(captured["fixed_train_eval_dataset"]) == 3
     assert captured["init_from_checkpoint"] == str(warm_start.resolve())
     assert isinstance(captured["data_collator"], RewardAssayListCollator)
     assert summary["train_examples"] == 3
@@ -1700,6 +1855,8 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
     assert summary["train_ranking_lists"] == 1
     assert summary["train_ranked_examples"] == 3
     assert summary["train_classification_examples"] == 3
+    assert summary["fixed_train_eval_assays"] == 1
+    assert summary["fixed_train_eval_examples"] == 3
     assert summary["init_from_checkpoint"] == str(warm_start.resolve())
     assert summary["optimizer_state_restored"] is False
     assert summary["test_metrics"]["test_loss"] == pytest.approx(0.5)
@@ -1793,6 +1950,7 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
             eval_dataset,
             data_collator,
             val2_eval_dataset=None,
+            fixed_train_eval_dataset=None,
         ):
             captured["val2_eval_dataset_len"] = len(val2_eval_dataset)
 

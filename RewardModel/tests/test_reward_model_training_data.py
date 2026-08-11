@@ -18,13 +18,56 @@ from reward_model.training import (
     load_tokenized_example_dataset,
     prepare_tokenized_split_datasets,
     save_pair_dataset_from_example_dataset,
+    validate_tokenized_split_cardinality,
 )
 from reward_model.training.data import (
     TOKENIZED_DATASET_COLUMNS,
+    _tokenize_and_pad_texts,
     is_valid_negative_for_positive,
     required_fold_change_for_positive_pchembl,
     required_pchembl_margin_for_positive,
 )
+
+
+class SpecialTokenPreservingTokenizer:
+    pad_token_id = 0
+    cls_token_id = 101
+    eos_token_id = 102
+    padding_side = "right"
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(
+        self,
+        texts,
+        *,
+        add_special_tokens,
+        padding,
+        truncation,
+        max_length,
+        return_attention_mask,
+        return_tensors,
+    ):
+        self.calls.append(
+            {
+                "add_special_tokens": add_special_tokens,
+                "padding": padding,
+                "truncation": truncation,
+                "max_length": max_length,
+            }
+        )
+        rows = []
+        for text in texts:
+            content = list(range(1, len(str(text)) + 1))
+            row = [self.cls_token_id, *content, self.eos_token_id]
+            if truncation and len(row) > max_length:
+                row = [self.cls_token_id, *content[: max_length - 2], self.eos_token_id]
+            rows.append(row)
+        return {
+            "input_ids": rows,
+            "attention_mask": [[1] * len(row) for row in rows],
+        }
 
 
 def _write_split_parquet(path, rows):
@@ -399,8 +442,10 @@ def test_prepare_tokenized_split_datasets_uses_smiles_with_molformer_tokenizer(
     total_examples = sum(len(rows) for rows in split_rows.values())
     assert sum(len(call["texts"]) for call in protein_tokenizer.calls) == total_examples
     assert sum(len(call["texts"]) for call in molecule_tokenizer.calls) == total_examples
-    assert all(call["truncation"] is False for call in protein_tokenizer.calls)
-    assert all(call["truncation"] is False for call in molecule_tokenizer.calls)
+    assert all(call["truncation"] is True for call in protein_tokenizer.calls)
+    assert all(call["truncation"] is True for call in molecule_tokenizer.calls)
+    assert all(call["max_length"] == 16 for call in protein_tokenizer.calls)
+    assert all(call["max_length"] == 16 for call in molecule_tokenizer.calls)
     assert all(call["padding"] is False for call in protein_tokenizer.calls)
     assert all(call["padding"] is False for call in molecule_tokenizer.calls)
 
@@ -454,7 +499,7 @@ def test_prepare_tokenized_split_datasets_passes_configured_process_count(
     )
 
     assert observed_map_process_counts == [8, 8, 8]
-    assert observed_filter_process_counts == [8, 8, 8]
+    assert observed_filter_process_counts == []
 
 
 def test_reward_training_data_config_rejects_invalid_tokenization_process_count():
@@ -497,7 +542,10 @@ def test_prepare_tokenized_split_datasets_rejects_labels_inconsistent_with_thres
         )
 
 
-def test_prepare_tokenized_split_datasets_drops_rows_exceeding_token_limits(tmp_path, monkeypatch):
+def test_prepare_tokenized_split_datasets_retains_and_truncates_overlength_rows(
+    tmp_path,
+    monkeypatch,
+):
     split_rows = {
         "train": [
             {
@@ -594,13 +642,132 @@ def test_prepare_tokenized_split_datasets_drops_rows_exceeding_token_limits(tmp_
     split_paths = get_tokenized_split_dataset_paths(artifacts.base_dir)
     train_dataset = load_tokenized_example_dataset(split_paths["train"])
 
-    assert len(train_dataset) == 1
-    assert artifacts.train_examples == 1
-    assert artifacts.train_groups == 1
-    assert train_dataset["compound_id"] == ["KEEP"]
-    assert train_dataset["example_id"] == [0]
-    assert len(train_dataset[0]["protein_input_ids"]) == 6
-    assert len(train_dataset[0]["molecule_input_ids"]) == 8
+    assert len(train_dataset) == 3
+    assert artifacts.train_examples == 3
+    assert artifacts.train_groups == 2
+    assert train_dataset["compound_id"] == ["KEEP", "DROP_MOL", "DROP_PROT"]
+    assert train_dataset["example_id"] == [0, 1, 2]
+    assert train_dataset["protein_length"] == [5, 5, 6]
+    assert train_dataset["molecule_length"] == [3, 8, 3]
+    assert all(len(row) == 6 for row in train_dataset["protein_input_ids"])
+    assert all(len(row) == 8 for row in train_dataset["molecule_input_ids"])
+
+
+def test_tokenizer_owned_truncation_preserves_terminal_special_token():
+    tokenizer = SpecialTokenPreservingTokenizer()
+
+    encoded = _tokenize_and_pad_texts(
+        tokenizer,
+        ["A" * 20, "ABC"],
+        max_length=8,
+    )
+
+    assert tokenizer.calls == [
+        {
+            "add_special_tokens": True,
+            "padding": False,
+            "truncation": True,
+            "max_length": 8,
+        }
+    ]
+    assert encoded["length"] == [8, 5]
+    assert encoded["input_ids"][0][0] == tokenizer.cls_token_id
+    assert encoded["input_ids"][0][7] == tokenizer.eos_token_id
+    assert encoded["input_ids"][1][4] == tokenizer.eos_token_id
+    assert encoded["input_ids"][1][5:] == [tokenizer.pad_token_id] * 3
+
+
+def test_validate_tokenized_split_cardinality_rejects_stale_drop_policy_cache(
+    tmp_path,
+):
+    rows = _split_parquet_rows()["train"]
+    source_path = tmp_path / "train.parquet"
+    _write_split_parquet(source_path, rows)
+    stale_dataset = Dataset.from_list(rows[:1])
+
+    with pytest.raises(ValueError, match="obsolete drop-overlength policy"):
+        validate_tokenized_split_cardinality(
+            RewardTrainingDataConfig(
+                train_parquet_path=str(source_path),
+                val_parquet_path=str(tmp_path / "missing_val.parquet"),
+                test_parquet_path=str(tmp_path / "missing_test.parquet"),
+                tokenized_dataset_dir=str(tmp_path / "tokenized"),
+            ),
+            RewardModelConfig(
+                protein_model_name_or_path="dummy/protein",
+                molecule_model_name_or_path="dummy/molecule",
+            ),
+            {"train": stale_dataset},
+        )
+
+
+def test_validate_tokenized_split_cardinality_rejects_stale_token_limit(
+    tmp_path,
+):
+    rows = _split_parquet_rows()["train"]
+    source_path = tmp_path / "train.parquet"
+    _write_split_parquet(source_path, rows)
+    stale_dataset = Dataset.from_dict(
+        {
+            "protein_length": [9] * len(rows),
+            "molecule_length": [4] * len(rows),
+        }
+    )
+
+    with pytest.raises(ValueError, match="exceeds the configured token limits"):
+        validate_tokenized_split_cardinality(
+            RewardTrainingDataConfig(
+                train_parquet_path=str(source_path),
+                val_parquet_path=str(tmp_path / "missing_val.parquet"),
+                test_parquet_path=str(tmp_path / "missing_test.parquet"),
+                tokenized_dataset_dir=str(tmp_path / "tokenized"),
+            ),
+            RewardModelConfig(
+                protein_model_name_or_path="dummy/protein",
+                molecule_model_name_or_path="dummy/molecule",
+                protein_max_length=8,
+                molecule_max_length=8,
+            ),
+            {"train": stale_dataset},
+        )
+
+
+def test_validate_tokenized_split_cardinality_rejects_stale_token_width(
+    tmp_path,
+):
+    rows = _split_parquet_rows()["train"]
+    source_path = tmp_path / "train.parquet"
+    _write_split_parquet(source_path, rows)
+    stale_width = 8
+    configured_width = 10
+    molecule_width = 6
+    stale_dataset = Dataset.from_dict(
+        {
+            "protein_length": [stale_width] * len(rows),
+            "molecule_length": [molecule_width] * len(rows),
+            "protein_input_ids": [[1] * stale_width for _ in rows],
+            "protein_attention_mask": [[1] * stale_width for _ in rows],
+            "molecule_input_ids": [[1] * molecule_width for _ in rows],
+            "molecule_attention_mask": [[1] * molecule_width for _ in rows],
+        }
+    )
+
+    with pytest.raises(ValueError, match="token array widths do not match"):
+        validate_tokenized_split_cardinality(
+            RewardTrainingDataConfig(
+                train_parquet_path=str(source_path),
+                val_parquet_path=str(tmp_path / "missing_val.parquet"),
+                test_parquet_path=str(tmp_path / "missing_test.parquet"),
+                tokenized_dataset_dir=str(tmp_path / "tokenized"),
+            ),
+            RewardModelConfig(
+                protein_model_name_or_path="dummy/protein",
+                molecule_model_name_or_path="dummy/molecule",
+                protein_max_length=configured_width,
+                molecule_max_length=molecule_width,
+            ),
+            {"train": stale_dataset},
+        )
 
 
 def test_build_pair_records_creates_all_valid_pairs_and_skips_ties():
