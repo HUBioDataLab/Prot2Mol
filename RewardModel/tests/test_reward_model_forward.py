@@ -356,6 +356,39 @@ def test_simple_cosine_shares_one_scaled_matrix_between_ranking_and_contrastive(
         assert parameter.grad.abs().sum() > 0.0
 
 
+def test_contrastive_only_objective_excludes_ranking_loss_from_total():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        classification_loss_weight=0.0,
+        ranking_loss_weight=0.0,
+        contrastive_loss_weight=1.0,
+        ranking_temperature=0.1,
+    )
+    protein_input_ids = torch.tensor(
+        [[1, 2, 0], [1, 2, 0], [1, 2, 0], [3, 4, 0], [3, 4, 0], [3, 4, 0]],
+        dtype=torch.long,
+    )
+    molecule_input_ids = torch.tensor(
+        [[5, 1, 0], [6, 1, 0], [7, 1, 0], [8, 1, 0], [9, 1, 0], [2, 1, 0]],
+        dtype=torch.long,
+    )
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        protein_attention_mask=protein_input_ids.ne(0).long(),
+        molecule_input_ids=molecule_input_ids,
+        molecule_attention_mask=molecule_input_ids.ne(0).long(),
+        pchembl_values=torch.tensor([8.0, 7.0, 4.5, 8.5, 6.5, 5.5]),
+        ranking_group_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
+        contrastive_target_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
+        contrastive_molecule_ids=torch.arange(6),
+    )
+
+    assert outputs.ranking_loss is not None
+    assert outputs.contrastive_loss is not None
+    assert torch.equal(outputs.loss, outputs.contrastive_loss)
+
+
 def test_contrastive_objective_requires_identity_metadata():
     model = _build_model(
         pair_scoring_mode="cosine",

@@ -1309,6 +1309,28 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
     assert "lr1e4_all_batch12_clip1_warmup006" in config.training.output_dir
 
 
+def test_scale13_contrastive_only_batch24_config_disables_ranking_objective():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale13_contrastive_only_lr1e4_batch24_4gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.ranking_loss_weight == pytest.approx(0.0)
+    assert config.model.contrastive_loss_weight == pytest.approx(1.0)
+    assert config.model.classification_loss_weight == pytest.approx(0.0)
+    assert config.model.protein_hidden_dropout_prob == pytest.approx(0.0)
+    assert config.model.protein_attention_probs_dropout_prob == pytest.approx(0.0)
+    assert config.model.molecule_hidden_dropout_prob == pytest.approx(0.1)
+    assert config.model.molecule_attention_probs_dropout_prob == pytest.approx(0.1)
+    assert config.model.dropout == pytest.approx(0.0)
+    assert config.training.per_device_train_batch_size == 24
+    assert config.training.training_mode == "multi_gpu"
+    assert "contrastive_only" in config.training.output_dir
+    assert "batch24" in config.training.output_dir
+
+
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():
     config_dir = Path(__file__).parents[1] / "configs" / "overfit_grid"
     config_paths = sorted(config_dir.glob("*.yaml"))
