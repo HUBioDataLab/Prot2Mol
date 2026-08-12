@@ -13,7 +13,9 @@ from reward_model.analysis.checkpoint_stability import (
     analyze_checkpoint_optimizer_state,
     analyze_model_stability,
     compare_optimizer_state_reports,
+    compare_encoder_layer_snapshots,
     compare_parameter_snapshots,
+    compare_representation_reports,
     compare_stability_reports,
     json_safe,
     prepare_diagnostic_feature_batches,
@@ -79,6 +81,7 @@ def main() -> None:
     checkpoint_reports = {}
     best_parameters = None
     parameter_drift = None
+    parameter_layer_drift = None
     for label, checkpoint in (("best", checkpoints.best), ("last", checkpoints.last)):
         model = load_reward_model(checkpoint, device=device)
         mode_reports = {}
@@ -111,12 +114,23 @@ def main() -> None:
                 best_parameters,
                 parameters,
             )
+            parameter_layer_drift = compare_encoder_layer_snapshots(
+                best_parameters,
+                parameters,
+            )
         del model
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
     comparisons = {
         mode: compare_stability_reports(
+            checkpoint_reports["best"]["modes"][mode],
+            checkpoint_reports["last"]["modes"][mode],
+        )
+        for mode in args.modes
+    }
+    representation_comparisons = {
+        mode: compare_representation_reports(
             checkpoint_reports["best"]["modes"][mode],
             checkpoint_reports["last"]["modes"][mode],
         )
@@ -138,8 +152,10 @@ def main() -> None:
             "selection": selection,
             "checkpoint_reports": checkpoint_reports,
             "comparisons": comparisons,
+            "representation_comparisons": representation_comparisons,
             "optimizer_comparison": optimizer_comparison,
             "parameter_drift": parameter_drift,
+            "parameter_layer_drift": parameter_layer_drift,
         }
     )
     output_path = os.path.abspath(args.output)
@@ -160,11 +176,31 @@ def main() -> None:
                         "analyzed_batches",
                     )
                 },
-                "comparisons": report["comparisons"],
-                "optimizer_comparison": report["optimizer_comparison"],
+                "stability_flags": {
+                    mode: comparison["flags"]
+                    for mode, comparison in report["comparisons"].items()
+                },
+                "representation_flags": {
+                    mode: comparison["flags"]
+                    for mode, comparison in report[
+                        "representation_comparisons"
+                    ].items()
+                },
+                "contrastive_retrieval": {
+                    mode: comparison["contrastive_retrieval"]
+                    for mode, comparison in report[
+                        "representation_comparisons"
+                    ].items()
+                },
+                "optimizer_flags": report["optimizer_comparison"].get(
+                    "flags", {}
+                ),
                 "last_optimizer_top_exp_avg_sq": report["checkpoint_reports"]
                 ["last"]["optimizer"].get("top_exp_avg_sq", [])[:5],
                 "parameter_drift": report["parameter_drift"],
+                "largest_molecule_encoder_layer_drift": report[
+                    "parameter_layer_drift"
+                ]["molecule_encoder"]["largest_absolute_drift"][:5],
             },
             indent=2,
             sort_keys=True,

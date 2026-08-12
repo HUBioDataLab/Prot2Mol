@@ -11,9 +11,13 @@ from datasets import Dataset
 from conftest import DummyEncoder, DummyTokenizer
 from reward_model.analysis.checkpoint_stability import (
     _optimizer_state_parameter_names,
+    analyze_contrastive_retrieval,
+    analyze_embedding_matrix,
     analyze_model_stability,
+    compare_encoder_layer_snapshots,
     compare_optimizer_state_reports,
     compare_parameter_snapshots,
+    compare_representation_reports,
     compare_stability_reports,
     prepare_diagnostic_feature_batches,
     resolve_checkpoint_pair,
@@ -162,6 +166,16 @@ def test_analyze_model_stability_reports_projection_and_module_gradients():
     assert batch["molecule_projection_grad_norm"] > 0.0
     assert 0.0 < batch["protein_relu_positive_fraction"] < 1.0
     assert 0.0 < batch["molecule_relu_positive_fraction"] < 1.0
+    assert "molecule_encoder_pooled" in report["representations"]
+    assert "molecule_linear1" in report["representations"]
+    assert "molecule_relu" in report["representations"]
+    assert "molecule_raw" in report["representations"]
+    assert "molecule_normalized" in report["representations"]
+    retrieval = report["contrastive_retrieval"]["aggregate"]
+    assert retrieval["num_groups"] == 3
+    assert retrieval["num_ligands"] == 9
+    assert retrieval["protein_to_molecule"]["queries"] == 9
+    assert retrieval["molecule_to_protein"]["queries"] == 9
 
 
 def test_prepare_diagnostic_feature_batches_is_seeded_and_bounded(tmp_path):
@@ -366,3 +380,130 @@ def test_optimizer_parameter_mapping_matches_trainer_group_order(tmp_path):
     ]
 
     assert mapped_names == actual_names
+
+
+def test_embedding_matrix_exposes_directional_collapse():
+    diverse = analyze_embedding_matrix(torch.eye(4))
+    collapsed = analyze_embedding_matrix(
+        torch.tensor([[3.0, 4.0]]).repeat(4, 1),
+        identity_ids=["A", "A", "B", "B"],
+    )
+
+    assert diverse["effective_rank_centered"] > 2.0
+    assert diverse["mean_pairwise_cosine"] == pytest.approx(0.0)
+    assert collapsed["effective_rank_centered"] == pytest.approx(0.0)
+    assert collapsed["variance_trace"] == pytest.approx(0.0)
+    assert collapsed["mean_pairwise_cosine"] == pytest.approx(1.0)
+    assert collapsed["exact_unique_ratio"] == pytest.approx(0.25)
+    assert collapsed["identity_count"] == 2
+    assert collapsed["identity_deduplicated"]["num_vectors"] == 2
+    assert collapsed["within_identity_rms_radius"] == pytest.approx(0.0)
+
+
+def test_contrastive_retrieval_reports_strict_top1_and_margin():
+    protein = torch.eye(2)
+    molecule = torch.eye(2)
+    batch = {
+        "contrastive_group_ids": torch.tensor([0, 1]),
+        "pchembl_values": torch.tensor([7.0, 7.0]),
+        "contrastive_target_ids": torch.tensor([0, 1]),
+        "contrastive_molecule_ids": torch.tensor([0, 1]),
+    }
+    rows = [
+        {"group_id": "A0", "compound_id": "C0"},
+        {"group_id": "A1", "compound_id": "C1"},
+    ]
+
+    perfect = analyze_contrastive_retrieval(
+        protein,
+        molecule,
+        batch,
+        temperature=0.1,
+        active_threshold=5.0,
+        row_metadata=rows,
+    )
+    reversed_report = analyze_contrastive_retrieval(
+        protein,
+        molecule.flip(0),
+        batch,
+        temperature=0.1,
+        active_threshold=5.0,
+        row_metadata=rows,
+    )
+
+    for direction in ("protein_to_molecule", "molecule_to_protein"):
+        assert perfect[direction]["strict_top1_accuracy"] == pytest.approx(1.0)
+        assert perfect[direction]["margin"]["mean"] == pytest.approx(10.0)
+        assert reversed_report[direction]["strict_top1_accuracy"] == pytest.approx(
+            0.0
+        )
+        assert reversed_report[direction]["margin"]["mean"] == pytest.approx(
+            -10.0
+        )
+
+
+def test_encoder_layer_drift_is_attributed_to_exact_layer():
+    best = {
+        "molecule_encoder.embeddings.weight": torch.ones(2),
+        "molecule_encoder.encoder.layer.0.attention.weight": torch.ones(2),
+        "molecule_encoder.encoder.layer.1.attention.weight": torch.ones(2),
+        "protein_encoder.encoder.layer.0.attention.weight": torch.ones(2),
+    }
+    last = {name: value.clone() for name, value in best.items()}
+    last["molecule_encoder.encoder.layer.1.attention.weight"].add_(4.0)
+
+    report = compare_encoder_layer_snapshots(best, last)
+
+    molecule = report["molecule_encoder"]
+    assert molecule["regions"]["encoder_layer_00"]["delta_norm"] == 0.0
+    assert molecule["regions"]["encoder_layer_01"]["delta_norm"] > 0.0
+    assert molecule["largest_absolute_drift"][0]["region"] == "encoder_layer_01"
+    assert report["protein_encoder"]["regions"]["encoder_layer_00"][
+        "delta_norm"
+    ] == 0.0
+
+
+def test_representation_comparison_flags_norm_and_variance_collapse():
+    def report(norm: float, variance: float, accuracy: float) -> dict:
+        boundary = {
+            "norm": {"median": norm},
+            "variance_trace": variance,
+            "rms_radius": variance**0.5,
+            "centroid_norm": norm,
+            "radius_to_centroid_norm": variance**0.5 / norm,
+            "mean_pairwise_cosine": 0.5,
+            "exact_unique_ratio": 1.0,
+            "normalized_unique_ratio_1e4": 1.0,
+            "active_variance_dimension_fraction": 1.0,
+            "effective_rank_centered": 4.0,
+            "stable_rank_centered": 2.0,
+            "identity_deduplicated": {
+                "variance_trace": variance,
+                "rms_radius": variance**0.5,
+                "mean_pairwise_cosine": 0.5,
+                "effective_rank_centered": 4.0,
+                "stable_rank_centered": 2.0,
+            },
+        }
+        retrieval = {
+            direction: {
+                "strict_top1_accuracy": accuracy,
+                "mean_margin": accuracy - 0.5,
+                "mean_cosine_margin": accuracy - 0.5,
+            }
+            for direction in ("protein_to_molecule", "molecule_to_protein")
+        }
+        return {
+            "mode": "eval",
+            "representations": {"molecule_raw": boundary},
+            "contrastive_retrieval": {"aggregate": retrieval},
+        }
+
+    comparison = compare_representation_reports(
+        report(10.0, 5.0, 0.8),
+        report(100.0, 0.01, 0.1),
+    )
+
+    assert comparison["flags"]["molecule_projection_norm_explosion"] is True
+    assert comparison["flags"]["molecule_boundary_variance_collapse"] is True
+    assert comparison["flags"]["contrastive_retrieval_accuracy_collapse"] is True
