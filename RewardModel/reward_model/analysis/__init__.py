@@ -1,3 +1,15 @@
+from .checkpoint_stability import (
+    CheckpointPair,
+    analyze_checkpoint_optimizer_state,
+    analyze_model_stability,
+    compare_optimizer_state_reports,
+    compare_parameter_snapshots,
+    compare_stability_reports,
+    prepare_diagnostic_feature_batches,
+    resolve_checkpoint_pair,
+    snapshot_parameters,
+    summarize_optimizer_state,
+)
 from .ranking_head import (
     ActivationCollector,
     analyze_predictions,
@@ -13,12 +25,22 @@ from .ranking_head import (
 
 __all__ = [
     "ActivationCollector",
+    "CheckpointPair",
+    "analyze_checkpoint_optimizer_state",
+    "analyze_model_stability",
     "analyze_predictions",
+    "compare_parameter_snapshots",
+    "compare_optimizer_state_reports",
+    "compare_stability_reports",
     "capture_head_activations",
     "load_assay_manifest",
+    "prepare_diagnostic_feature_batches",
+    "resolve_checkpoint_pair",
     "run_input_sensitivity",
     "score_dataset_pairs",
     "select_complete_assays",
+    "snapshot_parameters",
+    "summarize_optimizer_state",
     "write_assay_manifest",
     "write_prediction_analysis",
     "write_sensitivity_analysis",
