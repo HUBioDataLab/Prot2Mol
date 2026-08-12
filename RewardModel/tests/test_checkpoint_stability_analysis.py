@@ -348,7 +348,8 @@ def test_optimizer_parameter_mapping_matches_trainer_group_order(tmp_path):
     trainer_config = RewardTrainerConfig(
         output_dir=str(tmp_path / "output"),
         learning_rate=1.0e-4,
-        encoder_learning_rate=1.0e-5,
+        protein_encoder_learning_rate=1.0e-5,
+        molecule_encoder_learning_rate=3.0e-6,
         projection_learning_rate=1.0e-3,
         optim="adamw_torch",
     )

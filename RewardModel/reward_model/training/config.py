@@ -75,6 +75,8 @@ class RewardTrainerConfig:
     eval_steps: Optional[int] = None
     learning_rate: float = 1e-5
     encoder_learning_rate: Optional[float] = None
+    protein_encoder_learning_rate: Optional[float] = None
+    molecule_encoder_learning_rate: Optional[float] = None
     projection_learning_rate: Optional[float] = None
     weight_decay: float = 0.01
     warmup_ratio: float = 0.0
@@ -129,6 +131,20 @@ class RewardTrainerConfig:
             and self.encoder_learning_rate <= 0.0
         ):
             raise ValueError("encoder_learning_rate must be > 0 when provided")
+        if (
+            self.protein_encoder_learning_rate is not None
+            and self.protein_encoder_learning_rate <= 0.0
+        ):
+            raise ValueError(
+                "protein_encoder_learning_rate must be > 0 when provided"
+            )
+        if (
+            self.molecule_encoder_learning_rate is not None
+            and self.molecule_encoder_learning_rate <= 0.0
+        ):
+            raise ValueError(
+                "molecule_encoder_learning_rate must be > 0 when provided"
+            )
         if (
             self.projection_learning_rate is not None
             and self.projection_learning_rate <= 0.0

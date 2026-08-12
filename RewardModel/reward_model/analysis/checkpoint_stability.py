@@ -1163,6 +1163,16 @@ def _optimizer_parameter_groups(
 ) -> list[list[str]]:
     """Reproduce the exact parameter grouping order used by RewardModelTrainer."""
     training = training_config.training
+    protein_encoder_learning_rate = getattr(
+        training,
+        "protein_encoder_learning_rate",
+        None,
+    )
+    molecule_encoder_learning_rate = getattr(
+        training,
+        "molecule_encoder_learning_rate",
+        None,
+    )
     forbidden_name_patterns = [
         r"bias",
         r"layernorm",
@@ -1184,6 +1194,8 @@ def _optimizer_parameter_groups(
     ]
     if (
         training.encoder_learning_rate is None
+        and protein_encoder_learning_rate is None
+        and molecule_encoder_learning_rate is None
         and training.projection_learning_rate is None
     ):
         return [
@@ -1193,9 +1205,17 @@ def _optimizer_parameter_groups(
 
     grouped: dict[tuple[float, float], list[str]] = {}
     for name, _ in trainable:
-        if name.startswith(("protein_encoder.", "molecule_encoder.")):
+        if name.startswith("protein_encoder."):
             learning_rate = float(
-                training.encoder_learning_rate or training.learning_rate
+                protein_encoder_learning_rate
+                or training.encoder_learning_rate
+                or training.learning_rate
+            )
+        elif name.startswith("molecule_encoder."):
+            learning_rate = float(
+                molecule_encoder_learning_rate
+                or training.encoder_learning_rate
+                or training.learning_rate
             )
         elif name.startswith(("protein_projection.", "molecule_projection.")):
             learning_rate = float(

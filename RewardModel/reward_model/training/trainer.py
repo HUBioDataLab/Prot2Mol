@@ -249,10 +249,22 @@ class RewardModelTrainer(Trainer):
         *,
         default_learning_rate: float,
         encoder_learning_rate: Optional[float],
+        protein_encoder_learning_rate: Optional[float],
+        molecule_encoder_learning_rate: Optional[float],
         projection_learning_rate: Optional[float],
     ) -> float:
-        if parameter_name.startswith(("protein_encoder.", "molecule_encoder.")):
-            return float(encoder_learning_rate or default_learning_rate)
+        if parameter_name.startswith("protein_encoder."):
+            return float(
+                protein_encoder_learning_rate
+                or encoder_learning_rate
+                or default_learning_rate
+            )
+        if parameter_name.startswith("molecule_encoder."):
+            return float(
+                molecule_encoder_learning_rate
+                or encoder_learning_rate
+                or default_learning_rate
+            )
         if parameter_name.startswith(
             ("protein_projection.", "molecule_projection.")
         ):
@@ -266,12 +278,27 @@ class RewardModelTrainer(Trainer):
             "reward_encoder_learning_rate",
             None,
         )
+        protein_encoder_learning_rate = getattr(
+            self.args,
+            "reward_protein_encoder_learning_rate",
+            None,
+        )
+        molecule_encoder_learning_rate = getattr(
+            self.args,
+            "reward_molecule_encoder_learning_rate",
+            None,
+        )
         projection_learning_rate = getattr(
             self.args,
             "reward_projection_learning_rate",
             None,
         )
-        if encoder_learning_rate is None and projection_learning_rate is None:
+        if (
+            encoder_learning_rate is None
+            and protein_encoder_learning_rate is None
+            and molecule_encoder_learning_rate is None
+            and projection_learning_rate is None
+        ):
             parent_create_optimizer = super().create_optimizer
             if "model" in inspect.signature(parent_create_optimizer).parameters:
                 return parent_create_optimizer(model=model)
@@ -290,6 +317,8 @@ class RewardModelTrainer(Trainer):
                 parameter_name,
                 default_learning_rate=float(self.args.learning_rate),
                 encoder_learning_rate=encoder_learning_rate,
+                protein_encoder_learning_rate=protein_encoder_learning_rate,
+                molecule_encoder_learning_rate=molecule_encoder_learning_rate,
                 projection_learning_rate=projection_learning_rate,
             )
             weight_decay = (
@@ -1260,6 +1289,12 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
             config.protein_shuffle_sensitivity
         )
         training_args.reward_encoder_learning_rate = config.encoder_learning_rate
+        training_args.reward_protein_encoder_learning_rate = (
+            config.protein_encoder_learning_rate
+        )
+        training_args.reward_molecule_encoder_learning_rate = (
+            config.molecule_encoder_learning_rate
+        )
         training_args.reward_projection_learning_rate = (
             config.projection_learning_rate
         )

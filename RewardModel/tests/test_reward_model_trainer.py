@@ -673,6 +673,25 @@ def test_create_training_arguments_preserves_component_learning_rates(tmp_path):
     assert args.warmup_ratio == pytest.approx(0.06)
 
 
+def test_create_training_arguments_preserves_encoder_specific_learning_rates(
+    tmp_path,
+):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            encoder_learning_rate=5.0e-5,
+            protein_encoder_learning_rate=1.0e-4,
+            molecule_encoder_learning_rate=3.0e-6,
+            projection_learning_rate=1.0e-4,
+        )
+    )
+
+    assert args.reward_encoder_learning_rate == pytest.approx(5.0e-5)
+    assert args.reward_protein_encoder_learning_rate == pytest.approx(1.0e-4)
+    assert args.reward_molecule_encoder_learning_rate == pytest.approx(3.0e-6)
+    assert args.reward_projection_learning_rate == pytest.approx(1.0e-4)
+
+
 @pytest.mark.parametrize("warmup_ratio", [-0.01, 1.01, float("nan")])
 def test_reward_trainer_config_rejects_invalid_warmup_ratio(
     tmp_path,
@@ -682,6 +701,21 @@ def test_reward_trainer_config_rejects_invalid_warmup_ratio(
         RewardTrainerConfig(
             output_dir=str(tmp_path / "trainer_output"),
             warmup_ratio=warmup_ratio,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("protein_encoder_learning_rate", "molecule_encoder_learning_rate"),
+)
+def test_reward_trainer_config_rejects_invalid_specific_encoder_lr(
+    tmp_path,
+    field_name,
+):
+    with pytest.raises(ValueError, match=field_name):
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            **{field_name: 0.0},
         )
 
 
@@ -717,6 +751,42 @@ def test_reward_trainer_builds_encoder_and_projection_lr_groups(tmp_path):
     }
     for name, parameter in model.named_parameters():
         expected = 1.0e-5 if "encoder" in name else 1.0e-3
+        assert lr_by_parameter_id[id(parameter)] == pytest.approx(expected)
+
+
+def test_reward_trainer_builds_modality_specific_encoder_lr_groups(tmp_path):
+    class ComponentModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.protein_encoder = torch.nn.Linear(2, 2)
+            self.molecule_encoder = torch.nn.Linear(2, 2)
+            self.protein_projection = torch.nn.Linear(2, 2)
+            self.molecule_projection = torch.nn.Linear(2, 2)
+
+    model = ComponentModel()
+    trainer = RewardModelTrainer(
+        model=model,
+        eval_dataset=[0],
+        args=create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "trainer_output"),
+                learning_rate=1.0e-4,
+                protein_encoder_learning_rate=1.0e-4,
+                molecule_encoder_learning_rate=3.0e-6,
+                projection_learning_rate=1.0e-4,
+                optim="adamw_torch",
+            )
+        ),
+    )
+
+    optimizer = trainer.create_optimizer()
+    lr_by_parameter_id = {
+        id(parameter): group["lr"]
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    for name, parameter in model.named_parameters():
+        expected = 3.0e-6 if name.startswith("molecule_encoder.") else 1.0e-4
         assert lr_by_parameter_id[id(parameter)] == pytest.approx(expected)
 
 
@@ -1426,6 +1496,38 @@ def test_scale13_contrastive_config_matches_ligunity_optimization_settings():
     assert "all_assays_truncated1024" in config.training.output_dir
     assert "cls_nonlinear128" in config.training.output_dir
     assert "lr1e4_all_batch12_clip1_warmup006" in config.training.output_dir
+
+
+def test_scale13_molecule_lr3e6_config_preserves_effective_global_batch():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale13_contrastive_molecule_lr3e6_2gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.protein_model_name_or_path == (
+        "facebook/esm2_t12_35M_UR50D"
+    )
+    assert config.model.molecule_model_name_or_path == "HUBioDataLab/SELFormer"
+    assert config.model.protein_max_length == 1024
+    assert config.model.ranking_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.training.encoder_learning_rate is None
+    assert config.training.protein_encoder_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.molecule_encoder_learning_rate == pytest.approx(3.0e-6)
+    assert config.training.projection_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.per_device_train_batch_size == 12
+    assert config.training.gradient_accumulation_steps == 2
+    assert (
+        config.training.per_device_train_batch_size
+        * 2
+        * config.training.gradient_accumulation_steps
+        == 48
+    )
+    assert config.training.training_mode == "multi_gpu"
+    assert "moleculelr3e6" in config.training.output_dir
+    assert "2gpu_100_epochs" in config.training.output_dir
 
 
 def test_scale13_batch24_config_preserves_mmseqs50_and_enables_new_diagnostics():
