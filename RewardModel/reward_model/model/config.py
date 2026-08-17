@@ -50,7 +50,9 @@ class RewardModelConfig:
     ranking_loss_weight: float = 1.0
     contrastive_loss_weight: float = 0.0
     contrastive_active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD
+    contrastive_strict_active_only: bool = False
     classification_loss_weight: float = 1.0
+    cosine_classification_mlp: bool = False
     ranking_temperature: float = 1.0
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
@@ -152,6 +154,8 @@ class RewardModelConfig:
             raise ValueError("contrastive_loss_weight must be finite and >= 0")
         if not math.isfinite(float(self.contrastive_active_threshold)):
             raise ValueError("contrastive_active_threshold must be finite")
+        if not isinstance(self.contrastive_strict_active_only, bool):
+            raise ValueError("contrastive_strict_active_only must be a boolean")
         if (
             self.contrastive_loss_weight > 0.0
             and self.pair_scoring_mode != "cosine"
@@ -170,6 +174,12 @@ class RewardModelConfig:
             )
         if self.classification_loss_weight < 0.0:
             raise ValueError("classification_loss_weight must be >= 0")
+        if not isinstance(self.cosine_classification_mlp, bool):
+            raise ValueError("cosine_classification_mlp must be a boolean")
+        if self.cosine_classification_mlp and self.pair_scoring_mode != "cosine":
+            raise ValueError(
+                "cosine_classification_mlp=true requires pair_scoring_mode='cosine'"
+            )
         if self.ranking_temperature <= 0.0:
             raise ValueError("ranking_temperature must be > 0")
         if self.ranking_affinity_margin < 0.0 or not math.isfinite(

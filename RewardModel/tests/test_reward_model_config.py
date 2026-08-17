@@ -110,11 +110,14 @@ def test_reward_model_config_validates_ligunity_contrastive_settings():
     )
     assert config.contrastive_loss_weight == pytest.approx(0.5)
     assert config.contrastive_active_threshold == pytest.approx(5.0)
+    assert config.contrastive_strict_active_only is False
 
     with pytest.raises(ValueError, match="contrastive_loss_weight"):
         RewardModelConfig(contrastive_loss_weight=-0.1)
     with pytest.raises(ValueError, match="contrastive_active_threshold"):
         RewardModelConfig(contrastive_active_threshold=float("nan"))
+    with pytest.raises(ValueError, match="contrastive_strict_active_only"):
+        RewardModelConfig(contrastive_strict_active_only="true")
     with pytest.raises(ValueError, match="pair_scoring_mode='cosine'"):
         RewardModelConfig(
             pair_scoring_mode="mlp",
@@ -125,6 +128,22 @@ def test_reward_model_config_validates_ligunity_contrastive_settings():
             pair_scoring_mode="cosine",
             contrastive_loss_weight=0.5,
             deduplicate_protein_inputs=False,
+        )
+
+
+def test_reward_model_config_validates_cosine_classification_mlp():
+    config = RewardModelConfig(
+        pair_scoring_mode="cosine",
+        cosine_classification_mlp=True,
+    )
+    assert config.cosine_classification_mlp is True
+
+    with pytest.raises(ValueError, match="cosine_classification_mlp"):
+        RewardModelConfig(cosine_classification_mlp="true")
+    with pytest.raises(ValueError, match="pair_scoring_mode='cosine'"):
+        RewardModelConfig(
+            pair_scoring_mode="scaled_cosine",
+            cosine_classification_mlp=True,
         )
 
 

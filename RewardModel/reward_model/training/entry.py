@@ -37,6 +37,7 @@ _WARM_START_ARCHITECTURE_FIELDS = (
     "fusion_residual",
     "pooling_type",
     "pair_scoring_mode",
+    "cosine_classification_mlp",
 )
 
 

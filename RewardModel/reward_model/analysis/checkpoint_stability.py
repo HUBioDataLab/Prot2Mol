@@ -489,6 +489,7 @@ def analyze_contrastive_retrieval(
     *,
     temperature: float,
     active_threshold: float,
+    strict_active_only: bool = False,
     row_metadata: Sequence[Mapping[str, Any]] | None = None,
     worst_query_limit: int = 20,
 ) -> dict[str, Any]:
@@ -562,10 +563,6 @@ def analyze_contrastive_retrieval(
     )
     p2m_hardest, p2m_hardest_indices = p2m_candidate_scores.max(dim=1)
     p2m_has_negative = torch.isfinite(p2m_hardest)
-    p2m_eligible = (
-        (group_sizes.index_select(0, owners) == 1)
-        | (pchembl.index_select(0, valid_indices) >= float(active_threshold))
-    ) & p2m_has_negative
     p2m_margin = positive_scores - p2m_hardest
 
     m2p_negative_mask = torch.ones_like(masked_scores, dtype=torch.bool)
@@ -575,6 +572,17 @@ def analyze_contrastive_retrieval(
     m2p_hardest, m2p_hardest_groups = m2p_candidate_scores.max(dim=0)
     m2p_has_negative = torch.isfinite(m2p_hardest)
     m2p_margin = positive_scores - m2p_hardest
+
+    active_ligands = pchembl.index_select(0, valid_indices) > float(active_threshold)
+    if strict_active_only:
+        p2m_eligible = active_ligands & p2m_has_negative
+        m2p_eligible = active_ligands & m2p_has_negative
+    else:
+        p2m_eligible = (
+            (group_sizes.index_select(0, owners) == 1)
+            | (pchembl.index_select(0, valid_indices) >= float(active_threshold))
+        ) & p2m_has_negative
+        m2p_eligible = m2p_has_negative
 
     metadata = list(row_metadata or [])
     valid_rows = [
@@ -685,7 +693,7 @@ def analyze_contrastive_retrieval(
             direction="protein_to_molecule",
         ),
         "molecule_to_protein": direction_report(
-            eligible=m2p_has_negative,
+            eligible=m2p_eligible,
             hardest_scores=m2p_hardest,
             margins=m2p_margin,
             hardest_indices=m2p_hardest_groups,
@@ -911,6 +919,9 @@ def analyze_model_stability(
                 batch,
                 temperature=float(model.config.ranking_temperature),
                 active_threshold=float(model.config.contrastive_active_threshold),
+                strict_active_only=bool(
+                    model.config.contrastive_strict_active_only
+                ),
                 row_metadata=_flatten_feature_rows(features),
             )
             retrieval["batch_index"] = int(batch_index)

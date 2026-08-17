@@ -127,10 +127,10 @@ class RewardModel(nn.Module):
                 dropout=self._config.dropout,
             )
 
+        head_input_dim = self._config.fusion_hidden_dim * 2
+        ranking_hidden_dims = (2048, 1024, 512, 256, 128)
+        classification_hidden_dims = (2048, 1024, 512, 256, 128)
         if self._config.pair_scoring_mode == "mlp":
-            head_input_dim = self._config.fusion_hidden_dim * 2
-            ranking_hidden_dims = (2048, 1024, 512, 256, 128)
-            classification_hidden_dims = (2048, 1024, 512, 256, 128)
             self.ranking_head = RewardMLPHead(
                 input_dim=head_input_dim,
                 hidden_dims=ranking_hidden_dims,
@@ -157,7 +157,15 @@ class RewardModel(nn.Module):
             )
         else:
             self.ranking_head = None
-            self.classification_head = None
+            self.classification_head = (
+                RewardMLPHead(
+                    input_dim=head_input_dim,
+                    hidden_dims=classification_hidden_dims,
+                    dropout=self._config.dropout,
+                )
+                if self._config.cosine_classification_mlp
+                else None
+            )
             self.logit_scale = None
             self.classification_logit_bias = None
 
@@ -393,6 +401,7 @@ class RewardModel(nn.Module):
             group_target_ids,
             molecule_ids.index_select(0, valid_indices),
             active_threshold=self._config.contrastive_active_threshold,
+            strict_active_only=self._config.contrastive_strict_active_only,
         )
 
     def _compute_legacy_pair_ranking_loss(
@@ -481,12 +490,18 @@ class RewardModel(nn.Module):
         cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
 
         if self._config.pair_scoring_mode == "cosine":
-            # activity_logits mirrors the score only to preserve the output
-            # contract used by evaluation. The ranking-only config assigns no
-            # classification loss to it.
+            normalized_joint_embedding = torch.cat(
+                [normalized_protein, normalized_molecule],
+                dim=-1,
+            )
+            activity_logits = (
+                self.classification_head(normalized_joint_embedding)
+                if self.classification_head is not None
+                else cosine_similarity
+            )
             return (
                 cosine_similarity,
-                cosine_similarity,
+                activity_logits,
                 cosine_similarity,
                 None,
                 normalized_protein,
@@ -673,19 +688,21 @@ class RewardModel(nn.Module):
                 raise ValueError(
                     "Use either listwise ranking inputs or legacy pair indices, not both"
                 )
-            ranking_loss = self._compute_ranking_loss(
-                ranking_score,
-                pchembl_values,
-                ranking_group_ids,
-            )
+            if self._config.ranking_loss_weight > 0.0:
+                ranking_loss = self._compute_ranking_loss(
+                    ranking_score,
+                    pchembl_values,
+                    ranking_group_ids,
+                )
         elif positive_indices is not None or negative_indices is not None:
             if positive_indices is None or negative_indices is None:
                 raise ValueError("positive_indices and negative_indices must be provided together")
-            ranking_loss = self._compute_legacy_pair_ranking_loss(
-                ranking_score,
-                positive_indices,
-                negative_indices,
-            )
+            if self._config.ranking_loss_weight > 0.0:
+                ranking_loss = self._compute_legacy_pair_ranking_loss(
+                    ranking_score,
+                    positive_indices,
+                    negative_indices,
+                )
 
         if ranking_loss is not None:
             weighted_ranking = ranking_loss * self._config.ranking_loss_weight

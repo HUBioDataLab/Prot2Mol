@@ -658,6 +658,19 @@ def test_create_training_arguments_defaults_to_no_reporters(tmp_path):
     assert "wandb" not in list(args.report_to)
 
 
+def test_create_training_arguments_supports_loss_based_checkpoint_selection(tmp_path):
+    args = create_training_arguments(
+        RewardTrainerConfig(
+            output_dir=str(tmp_path / "trainer_output"),
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+        )
+    )
+
+    assert args.metric_for_best_model == "eval_loss"
+    assert args.greater_is_better is False
+
+
 def test_create_training_arguments_preserves_component_learning_rates(tmp_path):
     args = create_training_arguments(
         RewardTrainerConfig(
@@ -1582,6 +1595,30 @@ def test_scale13_contrastive_only_batch24_config_disables_ranking_objective():
     assert "contrastive_only" in config.training.output_dir
     assert "all_assays_truncated1024" in config.training.output_dir
     assert "batch24" in config.training.output_dir
+
+
+def test_scale13_contrastive_classification_active6_config():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_simple_cosine_scale13_contrastive_classification_active6_molecule_lr1e5_2gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert config.model.pair_scoring_mode == "cosine"
+    assert config.model.cosine_classification_mlp is True
+    assert config.model.ranking_loss_weight == pytest.approx(0.0)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.model.classification_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_active_threshold == pytest.approx(6.0)
+    assert config.model.contrastive_strict_active_only is True
+    assert config.training.protein_encoder_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.molecule_encoder_learning_rate == pytest.approx(1.0e-5)
+    assert config.training.projection_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.metrics_profile == "full"
+    assert config.training.metric_for_best_model == "eval_loss"
+    assert config.training.greater_is_better is False
+    assert "contrastive_classification_active6" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():

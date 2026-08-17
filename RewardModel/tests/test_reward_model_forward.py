@@ -386,9 +386,67 @@ def test_contrastive_only_objective_excludes_ranking_loss_from_total():
         contrastive_molecule_ids=torch.arange(6),
     )
 
-    assert outputs.ranking_loss is not None
+    assert outputs.ranking_loss is None
     assert outputs.contrastive_loss is not None
     assert torch.equal(outputs.loss, outputs.contrastive_loss)
+
+
+def test_cosine_contrastive_and_mlp_classification_share_embeddings():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        cosine_classification_mlp=True,
+        classification_loss_weight=0.5,
+        ranking_loss_weight=0.0,
+        contrastive_loss_weight=0.5,
+        contrastive_active_threshold=6.0,
+        contrastive_strict_active_only=True,
+        ranking_temperature=1.0 / 13.0,
+    )
+    protein_input_ids = torch.tensor(
+        [[1, 2, 0], [1, 2, 0], [1, 2, 0], [3, 4, 0], [3, 4, 0], [3, 4, 0]],
+        dtype=torch.long,
+    )
+    molecule_input_ids = torch.tensor(
+        [[5, 1, 0], [6, 1, 0], [7, 1, 0], [8, 1, 0], [9, 1, 0], [2, 1, 0]],
+        dtype=torch.long,
+    )
+    pchembl = torch.tensor([8.0, 7.0, 4.5, 8.5, 6.0, 5.5])
+    group_ids = torch.tensor([0, 0, 0, 1, 1, 1])
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        protein_attention_mask=protein_input_ids.ne(0).long(),
+        molecule_input_ids=molecule_input_ids,
+        molecule_attention_mask=molecule_input_ids.ne(0).long(),
+        activity_labels=(pchembl >= 6.0).float(),
+        pchembl_values=pchembl,
+        ranking_group_ids=group_ids,
+        contrastive_group_ids=group_ids,
+        contrastive_target_ids=group_ids,
+        contrastive_molecule_ids=torch.arange(6),
+    )
+
+    normalized_joint = torch.cat(
+        [
+            outputs.normalized_protein_embedding,
+            outputs.normalized_molecule_embedding,
+        ],
+        dim=-1,
+    )
+    expected_logits = model.classification_head(normalized_joint)
+    assert model.classification_head is not None
+    assert torch.allclose(outputs.activity_logits, expected_logits)
+    assert outputs.ranking_loss is None
+    assert outputs.contrastive_loss is not None
+    assert outputs.classification_loss is not None
+    assert torch.allclose(
+        outputs.loss,
+        0.5 * outputs.contrastive_loss + 0.5 * outputs.classification_loss,
+    )
+
+    outputs.loss.backward()
+    assert model.classification_head.fc1.weight.grad is not None
+    assert model.classification_head.fc1.weight.grad.abs().sum() > 0.0
 
 
 def test_contrastive_objective_requires_identity_metadata():

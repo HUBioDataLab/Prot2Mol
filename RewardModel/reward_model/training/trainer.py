@@ -992,6 +992,9 @@ class RewardModelTrainer(Trainer):
                 ),
                 temperature=model_config.ranking_temperature,
                 active_threshold=model_config.contrastive_active_threshold,
+                strict_active_only=(
+                    model_config.contrastive_strict_active_only
+                ),
                 assay_batch_size=int(
                     getattr(
                         self,
@@ -1252,8 +1255,8 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
         disable_tqdm=True,
         report_to=config.report_to,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_spearman",
-        greater_is_better=True,
+        metric_for_best_model=config.metric_for_best_model,
+        greater_is_better=config.greater_is_better,
     )
     if config.max_steps is not None:
         args_kwargs["max_steps"] = config.max_steps

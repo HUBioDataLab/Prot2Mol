@@ -83,16 +83,19 @@ def ligunity_bidirectional_contrastive_loss(
     molecule_identity_ids: torch.Tensor,
     *,
     active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
+    strict_active_only: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Mirror LigUnity's masked bidirectional in-batch retrieval objective.
 
     ``contrastive_scores`` is the shared, already-scaled cosine matrix with one
     protein/assay row and one column per sampled ligand. For protein-to-molecule
     retrieval, each measured active ligand competes against ligands from other
-    targets while the other ligands from its own assay are hidden. Following
-    LigUnity's released code, multi-ligand assay observations below pActivity 5
-    are skipped only in this direction. Molecule-to-protein retrieval uses every
-    sampled ligand.
+    targets while the other ligands from its own assay are hidden. By default,
+    this follows LigUnity's released code: multi-ligand assay observations below
+    the active threshold are skipped only in this direction, while
+    molecule-to-protein retrieval uses every sampled ligand. When
+    ``strict_active_only`` is enabled, both directions retain only observations
+    whose pChEMBL is strictly greater than ``active_threshold``.
 
     Cross-assay entries are masked when they have the same target identity or
     duplicate a molecule measured in the query assay. Directional losses use
@@ -104,6 +107,8 @@ def ligunity_bidirectional_contrastive_loss(
     """
     if not math.isfinite(float(active_threshold)):
         raise ValueError("active_threshold must be finite")
+    if not isinstance(strict_active_only, bool):
+        raise ValueError("strict_active_only must be a boolean")
 
     (
         scores,
@@ -165,9 +170,12 @@ def ligunity_bidirectional_contrastive_loss(
         ligand_positions,
         reduction="none",
     )
-    eligible_protein_to_molecule = (
-        group_sizes.index_select(0, owners) == 1
-    ) | (targets >= float(active_threshold))
+    if strict_active_only:
+        eligible_protein_to_molecule = targets > float(active_threshold)
+    else:
+        eligible_protein_to_molecule = (
+            group_sizes.index_select(0, owners) == 1
+        ) | (targets >= float(active_threshold))
     protein_to_molecule = (
         per_ligand_protein_to_molecule[eligible_protein_to_molecule]
         * ligand_weights[eligible_protein_to_molecule]
@@ -178,9 +186,15 @@ def ligunity_bidirectional_contrastive_loss(
         owners,
         reduction="none",
     )
-    molecule_to_protein = (
-        per_ligand_molecule_to_protein * ligand_weights
-    ).sum() / num_groups
+    if strict_active_only:
+        molecule_to_protein = (
+            per_ligand_molecule_to_protein[eligible_protein_to_molecule]
+            * ligand_weights[eligible_protein_to_molecule]
+        ).sum() / num_groups
+    else:
+        molecule_to_protein = (
+            per_ligand_molecule_to_protein * ligand_weights
+        ).sum() / num_groups
     return (
         protein_to_molecule + molecule_to_protein,
         protein_to_molecule,

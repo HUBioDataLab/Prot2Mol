@@ -187,6 +187,7 @@ def compute_contrastive_evaluation_loss(
     temperature: float,
     active_threshold: float,
     assay_batch_size: int,
+    strict_active_only: bool = False,
     ranking_max_ligands: int = 16,
     ranking_num_partitions: int = 3,
     ranking_partition_seed: int = 42,
@@ -234,6 +235,8 @@ def compute_contrastive_evaluation_loss(
         raise ValueError("temperature must be finite and > 0")
     if not math.isfinite(float(active_threshold)):
         raise ValueError("active_threshold must be finite")
+    if not isinstance(strict_active_only, bool):
+        raise ValueError("strict_active_only must be a boolean")
     if assay_batch_size <= 0:
         raise ValueError("assay_batch_size must be > 0")
 
@@ -323,6 +326,7 @@ def compute_contrastive_evaluation_loss(
                 group_target_ids,
                 molecule_ids.index_select(0, selected_indices),
                 active_threshold=active_threshold,
+                strict_active_only=strict_active_only,
             )
             batch_list_count = len(batch_members)
             weighted_partition_loss += batch_loss * batch_list_count

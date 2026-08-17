@@ -318,6 +318,40 @@ def test_ligunity_contrastive_active_filter_is_directionally_asymmetric():
     assert changed[2] != pytest.approx(baseline[2].item(), abs=1e-6)
 
 
+def test_strict_active_only_contrastive_filters_both_directions_above_threshold():
+    scores = torch.tensor(
+        [[1.0, -0.5, 0.3, 0.2], [0.1, 0.4, 1.2, -0.7]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    pchembl = torch.tensor([7.0, 6.0, 6.1, 5.9], dtype=torch.float64)
+    owners = torch.tensor([0, 0, 1, 1])
+    target_ids = torch.tensor([10, 20])
+    molecule_ids = torch.tensor([100, 101, 102, 103])
+
+    loss, protein_to_molecule, molecule_to_protein = (
+        ligunity_bidirectional_contrastive_loss(
+            scores,
+            pchembl,
+            owners,
+            target_ids,
+            molecule_ids,
+            active_threshold=6.0,
+            strict_active_only=True,
+        )
+    )
+    loss.backward()
+
+    assert loss.item() == pytest.approx(
+        (protein_to_molecule + molecule_to_protein).item()
+    )
+    assert scores.grad is not None
+    assert scores.grad[0, 0].abs().item() > 0.0
+    assert scores.grad[1, 2].abs().item() > 0.0
+    assert scores.grad[0, 1].item() == pytest.approx(0.0, abs=1e-15)
+    assert scores.grad[1, 3].item() == pytest.approx(0.0, abs=1e-15)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_ligunity_contrastive_promotes_low_precision_math(dtype):
     inputs = list(_contrastive_reference_inputs(requires_grad=True, dtype=dtype))
@@ -748,6 +782,47 @@ def test_contrastive_evaluation_matches_full_coverage_ligunity_loss():
         torch.tensor([0, 1]),
         molecule_ids,
         active_threshold=5.0,
+    )
+
+    assert actual == pytest.approx(expected.item())
+
+
+def test_contrastive_evaluation_propagates_strict_active_only_filter():
+    protein_embeddings = torch.tensor([[1.0, 0.0]] * 2 + [[0.0, 1.0]] * 2)
+    molecule_embeddings = torch.nn.functional.normalize(
+        torch.tensor([[1.0, 0.2], [0.8, 0.4], [0.2, 1.0], [0.4, 0.8]]),
+        dim=-1,
+    )
+    pchembl_values = torch.tensor([7.0, 6.0, 6.1, 5.5])
+    assay_ids = torch.tensor([0, 0, 1, 1])
+    target_ids = torch.tensor([0, 0, 1, 1])
+    molecule_ids = torch.arange(4)
+
+    actual = compute_contrastive_evaluation_loss(
+        normalized_protein_embeddings=protein_embeddings,
+        normalized_molecule_embeddings=molecule_embeddings,
+        pchembl_values=pchembl_values,
+        contrastive_group_ids=assay_ids,
+        target_identity_ids=target_ids,
+        molecule_identity_ids=molecule_ids,
+        temperature=0.1,
+        active_threshold=6.0,
+        assay_batch_size=2,
+        strict_active_only=True,
+        ranking_num_partitions=1,
+    )
+    expected, _, _ = ligunity_bidirectional_contrastive_loss(
+        torch.matmul(
+            protein_embeddings[[0, 2]],
+            molecule_embeddings.transpose(0, 1),
+        )
+        / 0.1,
+        pchembl_values,
+        assay_ids,
+        torch.tensor([0, 1]),
+        molecule_ids,
+        active_threshold=6.0,
+        strict_active_only=True,
     )
 
     assert actual == pytest.approx(expected.item())

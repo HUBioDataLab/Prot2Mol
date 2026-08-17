@@ -99,6 +99,8 @@ class RewardTrainerConfig:
     objective_gradient_diagnostics_steps: int = 0
     fixed_train_eval_assays: int = 0
     protein_shuffle_sensitivity: bool = True
+    metric_for_best_model: str = "eval_spearman"
+    greater_is_better: bool = True
 
     def __post_init__(self) -> None:
         if self.report_to is None:
@@ -198,6 +200,13 @@ class RewardTrainerConfig:
             raise ValueError("fixed_train_eval_assays must be >= 0")
         if not isinstance(self.protein_shuffle_sensitivity, bool):
             raise ValueError("protein_shuffle_sensitivity must be a boolean")
+        if (
+            not isinstance(self.metric_for_best_model, str)
+            or not self.metric_for_best_model
+        ):
+            raise ValueError("metric_for_best_model must be a non-empty string")
+        if not isinstance(self.greater_is_better, bool):
+            raise ValueError("greater_is_better must be a boolean")
 
 
 @dataclass(eq=True)
