@@ -328,6 +328,9 @@ def _tokenized_example_rows():
 def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_path, monkeypatch):
     split_rows = _split_parquet_rows()
     split_rows["train"][0]["activity_type"] = "Potency"
+    split_rows["val2"] = [dict(row) for row in split_rows["val"]]
+    for row in split_rows["val2"]:
+        row["split"] = "val2"
     for split_name, rows in split_rows.items():
         _write_split_parquet(tmp_path / f"{split_name}.parquet", rows)
 
@@ -338,6 +341,7 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
             train_parquet_path=str(tmp_path / "train.parquet"),
             val_parquet_path=str(tmp_path / "val.parquet"),
             test_parquet_path=str(tmp_path / "test.parquet"),
+            val2_parquet_path=str(tmp_path / "val2.parquet"),
             tokenized_dataset_dir=str(tmp_path / "tokenized_examples"),
             tokenization_batch_size=2,
         ),
@@ -352,17 +356,21 @@ def test_prepare_tokenized_split_datasets_writes_expected_minimal_columns(tmp_pa
     train_dataset = load_tokenized_example_dataset(split_paths["train"])
     val_dataset = load_tokenized_example_dataset(split_paths["val"])
     test_dataset = load_tokenized_example_dataset(split_paths["test"])
+    val2_dataset = load_tokenized_example_dataset(artifacts.val2_dataset_path)
 
     assert list(train_dataset.column_names) == list(TOKENIZED_DATASET_COLUMNS)
     assert list(val_dataset.column_names) == list(TOKENIZED_DATASET_COLUMNS)
     assert list(test_dataset.column_names) == list(TOKENIZED_DATASET_COLUMNS)
+    assert list(val2_dataset.column_names) == list(TOKENIZED_DATASET_COLUMNS)
 
     assert len(train_dataset) == 5
     assert len(val_dataset) == 2
     assert len(test_dataset) == 2
+    assert len(val2_dataset) == 2
     assert artifacts.train_groups == 2
     assert artifacts.val_groups == 1
     assert artifacts.test_groups == 1
+    assert artifacts.val2_groups == 1
 
     assert train_dataset[0]["group_id"] == "T1__A1"
     assert train_dataset[0]["compound_id"] == "M0"

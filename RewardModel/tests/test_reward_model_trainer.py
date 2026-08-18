@@ -546,6 +546,7 @@ def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
             fusion_hidden_dim=10,
             fusion_num_heads=2,
             pair_scoring_mode="cosine",
+            cosine_marginal_biases=True,
             ranking_temperature=0.1,
             ranking_loss_weight=0.5,
             contrastive_loss_weight=0.5,
@@ -590,6 +591,11 @@ def test_contrastive_reward_trainer_runs_one_step_and_logs_both_losses(
     assert objective_logs
     assert math.isfinite(objective_logs[-1]["ranking_loss"])
     assert objective_logs[-1]["contrastive_loss"] > 0.0
+    assert math.isfinite(objective_logs[-1]["molecule_bias_std"])
+    assert math.isfinite(objective_logs[-1]["scaled_cosine_std"])
+    assert math.isfinite(
+        objective_logs[-1]["molecule_bias_to_scaled_cosine_std_ratio"]
+    )
     assert set(eval_metrics) >= {
         "eval_loss",
         "eval_ranking_loss",
@@ -928,6 +934,34 @@ def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
     assert "total_loss" not in logs
     assert "ranking_pairwise_accuracy" not in logs
     assert "ranking_loss_per_ranked_example" not in logs
+
+
+def test_training_logs_marginal_bias_to_scaled_cosine_std_ratio():
+    trainer = object.__new__(RewardModelTrainer)
+    trainer._reset_train_component_accumulator()
+    trainer._record_train_components(
+        ranking_loss=None,
+        classification_loss=torch.tensor(0.4),
+        num_examples=torch.tensor(4),
+        num_contrastive_lists=torch.tensor(0),
+        num_contrastive_examples=torch.tensor(0),
+        num_ranking_lists=torch.tensor(0),
+        num_ranked_examples=torch.tensor(0),
+        activity_logits=torch.tensor([-1.0, 1.0, -1.0, 1.0]),
+        activity_labels=torch.tensor([0.0, 1.0, 0.0, 1.0]),
+        ranking_score=torch.tensor([-3.0, 3.0, -3.0, 3.0]),
+        pchembl_values=None,
+        ranking_group_ids=None,
+        molecule_bias=torch.tensor([-1.0, 1.0, -1.0, 1.0]),
+        scaled_cosine_score=torch.tensor([-2.0, 2.0, -2.0, 2.0]),
+    )
+
+    logs = trainer._consume_train_component_logs()
+
+    assert logs["molecule_bias_std"] == pytest.approx(1.0)
+    assert logs["scaled_cosine_std"] == pytest.approx(2.0)
+    assert logs["molecule_bias_to_scaled_cosine_std_ratio"] == pytest.approx(0.5)
+    assert math.isfinite(logs["molecule_bias_to_scaled_cosine_std_ratio"])
 
 
 def test_ranking_metrics_profile_keeps_training_logs_slim():
@@ -1606,18 +1640,24 @@ def test_scale13_contrastive_classification_active6_config():
     config = load_reward_training_config(str(config_path))
 
     assert config.model.pair_scoring_mode == "cosine"
-    assert config.model.cosine_classification_mlp is True
+    assert config.model.cosine_classification_mlp is False
+    assert config.model.cosine_marginal_biases is True
+    assert config.model.protein_pooling_type == "mean"
+    assert config.model.molecule_pooling_type == "cls"
     assert config.model.ranking_loss_weight == pytest.approx(0.0)
     assert config.model.contrastive_loss_weight == pytest.approx(0.5)
     assert config.model.classification_loss_weight == pytest.approx(0.5)
     assert config.model.contrastive_active_threshold == pytest.approx(6.0)
     assert config.model.contrastive_strict_active_only is True
-    assert config.training.protein_encoder_learning_rate == pytest.approx(1.0e-4)
+    assert config.training.protein_encoder_learning_rate == pytest.approx(1.0e-5)
     assert config.training.molecule_encoder_learning_rate == pytest.approx(1.0e-5)
     assert config.training.projection_learning_rate == pytest.approx(1.0e-4)
     assert config.training.metrics_profile == "full"
     assert config.training.metric_for_best_model == "eval_loss"
     assert config.training.greater_is_better is False
+    assert config.data.val2_parquet_path is not None
+    assert "seen_target/train.parquet" in config.data.train_parquet_path
+    assert "seen_target/val2.parquet" in config.data.val2_parquet_path
     assert "contrastive_classification_active6" in config.training.output_dir
 
 

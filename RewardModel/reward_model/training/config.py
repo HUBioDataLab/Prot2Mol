@@ -25,6 +25,7 @@ class RewardTrainingDataConfig:
     val_parquet_path: str
     test_parquet_path: str
     tokenized_dataset_dir: str
+    val2_parquet_path: Optional[str] = None
     val2_tokenized_dataset_dir: Optional[str] = None
     tokenization_batch_size: int = 64
     tokenization_num_proc: int = 1
@@ -237,6 +238,11 @@ def load_reward_training_config(config_path: str) -> RewardTrainingConfigBundle:
     data_section["val_parquet_path"] = _resolve_path(data_section["val_parquet_path"], base_dir)
     data_section["test_parquet_path"] = _resolve_path(data_section["test_parquet_path"], base_dir)
     data_section["tokenized_dataset_dir"] = _resolve_path(data_section["tokenized_dataset_dir"], base_dir)
+    if data_section.get("val2_parquet_path") is not None:
+        data_section["val2_parquet_path"] = _resolve_path(
+            data_section["val2_parquet_path"],
+            base_dir,
+        )
     if data_section.get("val2_tokenized_dataset_dir") is not None:
         data_section["val2_tokenized_dataset_dir"] = _resolve_path(
             data_section["val2_tokenized_dataset_dir"],

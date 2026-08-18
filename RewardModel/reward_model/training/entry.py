@@ -36,8 +36,11 @@ _WARM_START_ARCHITECTURE_FIELDS = (
     "fusion_num_heads",
     "fusion_residual",
     "pooling_type",
+    "protein_pooling_type",
+    "molecule_pooling_type",
     "pair_scoring_mode",
     "cosine_classification_mlp",
+    "cosine_marginal_biases",
 )
 
 
@@ -106,7 +109,7 @@ def _initialize_training_model(
 def prepare_training_examples_from_config(config_path: str) -> Dict[str, Any]:
     config = load_reward_training_config(config_path)
     artifacts = prepare_tokenized_split_datasets(config.data, config.model)
-    return {
+    summary = {
         "tokenized_dataset_dir": artifacts.base_dir,
         "train_dataset_path": artifacts.train_dataset_path,
         "val_dataset_path": artifacts.val_dataset_path,
@@ -118,6 +121,15 @@ def prepare_training_examples_from_config(config_path: str) -> Dict[str, Any]:
         "val_groups": artifacts.val_groups,
         "test_groups": artifacts.test_groups,
     }
+    if artifacts.val2_dataset_path is not None:
+        summary.update(
+            {
+                "val2_dataset_path": artifacts.val2_dataset_path,
+                "val2_examples": artifacts.val2_examples,
+                "val2_groups": artifacts.val2_groups,
+            }
+        )
+    return summary
 
 
 def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
@@ -276,9 +288,17 @@ def train_reward_model_from_config(
     )
     val2_eval_dataset = None
     val2_examples = None
-    if config.data.val2_tokenized_dataset_dir is not None:
+    val2_tokenized_dataset_dir = (
+        config.data.val2_tokenized_dataset_dir
+        or (
+            config.data.tokenized_dataset_dir
+            if config.data.val2_parquet_path is not None
+            else None
+        )
+    )
+    if val2_tokenized_dataset_dir is not None:
         val2_examples_path = _split_dataset_path(
-            config.data.val2_tokenized_dataset_dir,
+            val2_tokenized_dataset_dir,
             "val2",
             "examples",
         )
@@ -293,6 +313,20 @@ def train_reward_model_from_config(
                 f"Missing: {missing_val2_paths}."
             )
         val2_examples = load_tokenized_example_dataset(val2_examples_path)
+        validate_tokenized_split_cardinality(
+            config.data,
+            config.model,
+            {"val2": val2_examples},
+        )
+        if (
+            config.training.metrics_profile == "full"
+            and config.data.val2_parquet_path is not None
+            and "activity_type" not in val2_examples.column_names
+        ):
+            raise ValueError(
+                "Tokenized val2 examples do not contain activity_type. "
+                "Rerun prepare_reward_training_data.py."
+            )
         val2_eval_dataset = RewardEvaluationDataset(
             val2_examples,
             ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,

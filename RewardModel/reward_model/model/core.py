@@ -143,6 +143,8 @@ class RewardModel(nn.Module):
             )
             self.logit_scale = None
             self.classification_logit_bias = None
+            self.molecule_bias_head = None
+            self.protein_bias_head = None
         elif self._config.pair_scoring_mode == "scaled_cosine":
             # LigUnity initializes its log-space cosine scale at log(13). We
             # preserve that reference point, but allow both of our objectives
@@ -155,6 +157,8 @@ class RewardModel(nn.Module):
             self.classification_logit_bias = nn.Parameter(
                 torch.tensor(self._config.cosine_classification_bias_init)
             )
+            self.molecule_bias_head = None
+            self.protein_bias_head = None
         else:
             self.ranking_head = None
             self.classification_head = (
@@ -166,8 +170,26 @@ class RewardModel(nn.Module):
                 if self._config.cosine_classification_mlp
                 else None
             )
-            self.logit_scale = None
+            self.logit_scale = (
+                nn.Parameter(torch.tensor(math.log(self._config.cosine_scale_init)))
+                if self._config.cosine_marginal_biases
+                else None
+            )
             self.classification_logit_bias = None
+            self.molecule_bias_head = (
+                nn.Linear(self._config.fusion_hidden_dim, 1)
+                if self._config.cosine_marginal_biases
+                else None
+            )
+            self.protein_bias_head = (
+                nn.Linear(self._config.fusion_hidden_dim, 1)
+                if self._config.cosine_marginal_biases
+                else None
+            )
+            for bias_head in (self.molecule_bias_head, self.protein_bias_head):
+                if bias_head is not None:
+                    nn.init.zeros_(bias_head.weight)
+                    nn.init.zeros_(bias_head.bias)
 
     @property
     def config(self) -> RewardModelConfig:
@@ -301,7 +323,11 @@ class RewardModel(nn.Module):
             ranking_score,
             pchembl_values,
             ranking_group_ids,
-            temperature=self._config.ranking_temperature,
+            temperature=(
+                1.0
+                if self._config.cosine_marginal_biases
+                else self._config.ranking_temperature
+            ),
             # The dataset applies this threshold to the complete assay before
             # constructing non-overlapping sublists. Reapplying it to each
             # random sublist would silently discard valid assay opportunities.
@@ -317,6 +343,7 @@ class RewardModel(nn.Module):
         contrastive_group_ids: torch.Tensor,
         contrastive_target_ids: torch.Tensor,
         contrastive_molecule_ids: torch.Tensor,
+        score_scale: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build LigUnity's shared assay-by-ligand score matrix from pair rows."""
         group_ids = contrastive_group_ids.reshape(-1).to(
@@ -387,13 +414,15 @@ class RewardModel(nn.Module):
             0,
             valid_indices,
         )
-        # Ranking divides its diagonal scores by this same temperature. The
-        # matrix therefore supplies identical scaled cosine scores to both
-        # objectives, matching LigUnity's shared-score construction.
-        contrastive_scores = torch.matmul(
+        contrastive_cosines = torch.matmul(
             group_protein_embeddings.float(),
             ligand_molecule_embeddings.float().transpose(0, 1),
-        ) / float(self._config.ranking_temperature)
+        )
+        contrastive_scores = (
+            contrastive_cosines / float(self._config.ranking_temperature)
+            if score_scale is None
+            else contrastive_cosines * score_scale.float()
+        )
         return ligunity_bidirectional_contrastive_loss(
             contrastive_scores,
             pchembl.index_select(0, valid_indices),
@@ -490,6 +519,30 @@ class RewardModel(nn.Module):
         cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
 
         if self._config.pair_scoring_mode == "cosine":
+            if self._config.cosine_marginal_biases:
+                if (
+                    self.logit_scale is None
+                    or self.molecule_bias_head is None
+                    or self.protein_bias_head is None
+                ):
+                    raise RuntimeError(
+                        "Cosine marginal-bias parameters are not initialized"
+                    )
+                score_scale = self.logit_scale.clamp(
+                    max=math.log(self._config.cosine_scale_max)
+                ).exp()
+                molecule_bias = self.molecule_bias_head(normalized_molecule).squeeze(-1)
+                protein_bias = self.protein_bias_head(normalized_protein).squeeze(-1)
+                ranking_score = score_scale * cosine_similarity + molecule_bias
+                activity_logits = ranking_score + protein_bias
+                return (
+                    ranking_score,
+                    activity_logits,
+                    cosine_similarity,
+                    score_scale,
+                    normalized_protein,
+                    normalized_molecule,
+                )
             normalized_joint_embedding = torch.cat(
                 [normalized_protein, normalized_molecule],
                 dim=-1,
@@ -567,7 +620,8 @@ class RewardModel(nn.Module):
                     masked_pool(
                         protein_tokens,
                         protein_mask,
-                        self._config.pooling_type,
+                        self._config.protein_pooling_type
+                        or self._config.pooling_type,
                     )
                 )
             )
@@ -576,7 +630,8 @@ class RewardModel(nn.Module):
                     masked_pool(
                         molecule_tokens,
                         molecule_mask,
-                        self._config.pooling_type,
+                        self._config.molecule_pooling_type
+                        or self._config.pooling_type,
                     )
                 )
             )
@@ -596,12 +651,12 @@ class RewardModel(nn.Module):
             pooled_protein = masked_pool(
                 fused_protein,
                 protein_mask,
-                self._config.pooling_type,
+                self._config.protein_pooling_type or self._config.pooling_type,
             )
             pooled_molecule = masked_pool(
                 fused_molecule,
                 molecule_mask,
-                self._config.pooling_type,
+                self._config.molecule_pooling_type or self._config.pooling_type,
             )
         joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
 
@@ -671,6 +726,11 @@ class RewardModel(nn.Module):
                 contrastive_group_ids,
                 contrastive_target_ids,
                 contrastive_molecule_ids,
+                score_scale=(
+                    score_scale
+                    if self._config.cosine_marginal_biases
+                    else None
+                ),
             )
             weighted_contrastive = (
                 contrastive_loss * self._config.contrastive_loss_weight

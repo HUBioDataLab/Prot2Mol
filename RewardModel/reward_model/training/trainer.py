@@ -231,6 +231,10 @@ class RewardModelTrainer(Trainer):
             "num_ranked_examples": 0.0,
             "classification_correct": 0.0,
             "classification_count": 0.0,
+            "molecule_bias_std": 0.0,
+            "scaled_cosine_std": 0.0,
+            "molecule_bias_to_scaled_cosine_std_ratio": 0.0,
+            "marginal_bias_diagnostic_count": 0.0,
         }
         self._train_component_count = 0
         self._train_classification_probabilities: list[float] = []
@@ -477,22 +481,27 @@ class RewardModelTrainer(Trainer):
         if hasattr(self, "accelerator"):
             model = self.accelerator.unwrap_model(model)
         config = getattr(model, "config", None)
-        if getattr(config, "pair_scoring_mode", "mlp") != "scaled_cosine":
+        if (
+            getattr(config, "pair_scoring_mode", "mlp") != "scaled_cosine"
+            and not getattr(config, "cosine_marginal_biases", False)
+        ):
             return {}
         logit_scale = getattr(model, "logit_scale", None)
         classification_bias = getattr(model, "classification_logit_bias", None)
-        if logit_scale is None or classification_bias is None:
+        if logit_scale is None:
             return {}
         with torch.no_grad():
             scale = logit_scale.detach().float().clamp(
                 max=math.log(float(config.cosine_scale_max))
             ).exp()
-            return {
+            logs = {
                 "cosine_scale": float(scale.cpu().item()),
-                "classification_logit_bias": float(
-                    classification_bias.detach().float().cpu().item()
-                ),
             }
+            if classification_bias is not None:
+                logs["classification_logit_bias"] = float(
+                    classification_bias.detach().float().cpu().item()
+                )
+            return logs
 
     def _get_train_sampler(self, train_dataset=None):
         active_train_dataset = train_dataset if train_dataset is not None else self.train_dataset
@@ -554,6 +563,8 @@ class RewardModelTrainer(Trainer):
         ranking_group_ids: Optional[torch.Tensor],
         cosine_similarity: Optional[torch.Tensor] = None,
         contrastive_loss: Optional[torch.Tensor] = None,
+        molecule_bias: Optional[torch.Tensor] = None,
+        scaled_cosine_score: Optional[torch.Tensor] = None,
     ) -> None:
         ranking_loss_value = self._to_scalar(ranking_loss)
         num_ranking_lists_value = self._to_scalar(num_ranking_lists)
@@ -577,6 +588,37 @@ class RewardModelTrainer(Trainer):
             num_ranked_examples
         )
         with torch.no_grad():
+            if molecule_bias is not None and scaled_cosine_score is not None:
+                molecule_bias_std = (
+                    molecule_bias.detach().float().reshape(-1).std(unbiased=False)
+                )
+                scaled_cosine_std = (
+                    scaled_cosine_score.detach()
+                    .float()
+                    .reshape(-1)
+                    .std(unbiased=False)
+                )
+                ratio = molecule_bias_std / scaled_cosine_std.clamp_min(
+                    torch.finfo(scaled_cosine_std.dtype).eps
+                )
+                diagnostics = (
+                    molecule_bias_std,
+                    scaled_cosine_std,
+                    ratio,
+                )
+                if all(torch.isfinite(value).item() for value in diagnostics):
+                    self._train_component_sums["molecule_bias_std"] += float(
+                        molecule_bias_std.item()
+                    )
+                    self._train_component_sums["scaled_cosine_std"] += float(
+                        scaled_cosine_std.item()
+                    )
+                    self._train_component_sums[
+                        "molecule_bias_to_scaled_cosine_std_ratio"
+                    ] += float(ratio.item())
+                    self._train_component_sums[
+                        "marginal_bias_diagnostic_count"
+                    ] += 1.0
             logits = activity_logits.detach().reshape(-1)
             labels = activity_labels.detach().to(device=logits.device).reshape(-1)
             if not self._ranking_metrics_profile_enabled():
@@ -653,6 +695,20 @@ class RewardModelTrainer(Trainer):
         if self._train_component_count == 0:
             return {}
         denom = float(self._train_component_count)
+        marginal_bias_diagnostic_count = self._train_component_sums[
+            "marginal_bias_diagnostic_count"
+        ]
+        marginal_bias_logs = {}
+        if marginal_bias_diagnostic_count > 0.0:
+            marginal_bias_logs = {
+                key: self._train_component_sums[key]
+                / marginal_bias_diagnostic_count
+                for key in (
+                    "molecule_bias_std",
+                    "scaled_cosine_std",
+                    "molecule_bias_to_scaled_cosine_std_ratio",
+                )
+            }
         if self._ranking_metrics_profile_enabled():
             logs = {}
             if float(self.model.config.contrastive_loss_weight) > 0.0:
@@ -696,6 +752,7 @@ class RewardModelTrainer(Trainer):
                     .std(unbiased=False)
                     .item()
                 )
+            logs.update(marginal_bias_logs)
             self._reset_train_component_accumulator()
             return logs
 
@@ -737,6 +794,7 @@ class RewardModelTrainer(Trainer):
                 if self._train_ranking_diagnostic_counts.get(key, 0) > 0
             }
         )
+        logs.update(marginal_bias_logs)
         self._reset_train_component_accumulator()
         return logs
 
@@ -776,6 +834,17 @@ class RewardModelTrainer(Trainer):
             raise RuntimeError("RewardModel did not return a scalar loss")
 
         if getattr(model, "training", False):
+            molecule_bias = None
+            scaled_cosine_score = None
+            if self.model.config.cosine_marginal_biases:
+                if outputs.score_scale is None or outputs.cosine_similarity is None:
+                    raise RuntimeError(
+                        "Cosine marginal-bias diagnostics require cosine scores and scale"
+                    )
+                scaled_cosine_score = (
+                    outputs.score_scale * outputs.cosine_similarity
+                )
+                molecule_bias = outputs.ranking_score - scaled_cosine_score
             self._record_objective_gradient_diagnostics(outputs)
             self._record_train_components(
                 ranking_loss=outputs.ranking_loss,
@@ -794,6 +863,8 @@ class RewardModelTrainer(Trainer):
                 ranking_group_ids=inputs.get("ranking_group_ids"),
                 cosine_similarity=outputs.cosine_similarity,
                 contrastive_loss=outputs.contrastive_loss,
+                molecule_bias=molecule_bias,
+                scaled_cosine_score=scaled_cosine_score,
             )
 
         return (outputs.loss, outputs) if return_outputs else outputs.loss
@@ -1145,6 +1216,9 @@ class RewardModelTrainer(Trainer):
                     "pearson",
                     "ranking_loss",
                     "contrastive_loss",
+                    "molecule_bias_std",
+                    "scaled_cosine_std",
+                    "molecule_bias_to_scaled_cosine_std_ratio",
                     "train_loss",
                     "ranking_embedding_grad_norm",
                     "contrastive_embedding_grad_norm",

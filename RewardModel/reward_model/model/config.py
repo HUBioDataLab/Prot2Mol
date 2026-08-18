@@ -42,6 +42,8 @@ class RewardModelConfig:
     fusion_residual: bool = False
     dropout: float = 0.1
     pooling_type: str = "mean"
+    protein_pooling_type: Optional[str] = None
+    molecule_pooling_type: Optional[str] = None
     pair_scoring_mode: str = "mlp"
     cosine_scale_init: float = 13.0
     cosine_scale_max: float = 100.0
@@ -53,6 +55,7 @@ class RewardModelConfig:
     contrastive_strict_active_only: bool = False
     classification_loss_weight: float = 1.0
     cosine_classification_mlp: bool = False
+    cosine_marginal_biases: bool = False
     ranking_temperature: float = 1.0
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
@@ -121,6 +124,13 @@ class RewardModelConfig:
                 f"Unsupported pooling_type: {self.pooling_type}. "
                 f"Expected one of {sorted(_VALID_POOLING_TYPES)}"
             )
+        for field_name in ("protein_pooling_type", "molecule_pooling_type"):
+            value = getattr(self, field_name)
+            if value is not None and value not in _VALID_POOLING_TYPES:
+                raise ValueError(
+                    f"Unsupported {field_name}: {value}. "
+                    f"Expected None or one of {sorted(_VALID_POOLING_TYPES)}"
+                )
         if self.pair_scoring_mode not in _VALID_PAIR_SCORING_MODES:
             raise ValueError(
                 "pair_scoring_mode must be one of "
@@ -179,6 +189,16 @@ class RewardModelConfig:
         if self.cosine_classification_mlp and self.pair_scoring_mode != "cosine":
             raise ValueError(
                 "cosine_classification_mlp=true requires pair_scoring_mode='cosine'"
+            )
+        if not isinstance(self.cosine_marginal_biases, bool):
+            raise ValueError("cosine_marginal_biases must be a boolean")
+        if self.cosine_marginal_biases and self.pair_scoring_mode != "cosine":
+            raise ValueError(
+                "cosine_marginal_biases=true requires pair_scoring_mode='cosine'"
+            )
+        if self.cosine_marginal_biases and self.cosine_classification_mlp:
+            raise ValueError(
+                "cosine_marginal_biases and cosine_classification_mlp are mutually exclusive"
             )
         if self.ranking_temperature <= 0.0:
             raise ValueError("ranking_temperature must be > 0")

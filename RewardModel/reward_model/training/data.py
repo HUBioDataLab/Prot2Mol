@@ -89,6 +89,9 @@ class TokenizedSplitArtifacts:
     train_groups: int
     val_groups: int
     test_groups: int
+    val2_dataset_path: str | None = None
+    val2_examples: int = 0
+    val2_groups: int = 0
 
 
 @dataclass
@@ -417,6 +420,8 @@ def prepare_tokenized_split_datasets(
         "val": data_config.val_parquet_path,
         "test": data_config.test_parquet_path,
     }
+    if data_config.val2_parquet_path is not None:
+        source_paths["val2"] = data_config.val2_parquet_path
     for split_name, parquet_path in source_paths.items():
         prepared_rows = _prepare_split_rows(
             _load_split_parquet_rows(
@@ -438,7 +443,11 @@ def prepare_tokenized_split_datasets(
             protein_tokenizer=protein_tokenizer,
             molecule_tokenizer=molecule_tokenizer,
         )
-        tokenized.save_to_disk(split_paths[split_name])
+        split_dataset_path = split_paths.get(
+            split_name,
+            os.path.join(output_dir, f"{split_name}_examples"),
+        )
+        tokenized.save_to_disk(split_dataset_path)
         stats[split_name] = (len(tokenized), len(set(tokenized["group_id"])))
 
     return TokenizedSplitArtifacts(
@@ -452,6 +461,13 @@ def prepare_tokenized_split_datasets(
         train_groups=stats["train"][1],
         val_groups=stats["val"][1],
         test_groups=stats["test"][1],
+        val2_dataset_path=(
+            os.path.join(output_dir, "val2_examples")
+            if "val2" in stats
+            else None
+        ),
+        val2_examples=stats.get("val2", (0, 0))[0],
+        val2_groups=stats.get("val2", (0, 0))[1],
     )
 
 
@@ -469,6 +485,7 @@ def validate_tokenized_split_cardinality(
         "train": data_config.train_parquet_path,
         "val": data_config.val_parquet_path,
         "test": data_config.test_parquet_path,
+        "val2": data_config.val2_parquet_path,
     }
     for split_name, dataset in split_datasets.items():
         source_path = source_paths.get(split_name)

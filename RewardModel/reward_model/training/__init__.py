@@ -51,6 +51,10 @@ from .trainer import (
     RewardModelTrainer,
     create_training_arguments,
 )
+from .seen_target import (
+    split_seen_target_assay_holdout,
+    write_seen_target_assay_holdout,
+)
 
 __all__ = [
     "AssayListSamplingStats",
@@ -96,4 +100,6 @@ __all__ = [
     "select_fixed_ranking_evaluation_subset",
     "validate_tokenized_split_cardinality",
     "train_reward_model_from_config",
+    "split_seen_target_assay_holdout",
+    "write_seen_target_assay_holdout",
 ]

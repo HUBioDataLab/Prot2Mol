@@ -147,6 +147,27 @@ def test_reward_model_config_validates_cosine_classification_mlp():
         )
 
 
+def test_reward_model_config_validates_cosine_marginal_biases_and_pooling():
+    config = RewardModelConfig(
+        pair_scoring_mode="cosine",
+        cosine_marginal_biases=True,
+        protein_pooling_type="mean",
+        molecule_pooling_type="cls",
+    )
+    assert config.cosine_marginal_biases is True
+    assert config.protein_pooling_type == "mean"
+    assert config.molecule_pooling_type == "cls"
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        RewardModelConfig(
+            pair_scoring_mode="cosine",
+            cosine_marginal_biases=True,
+            cosine_classification_mlp=True,
+        )
+    with pytest.raises(ValueError, match="protein_pooling_type"):
+        RewardModelConfig(protein_pooling_type="invalid")
+
+
 def test_reward_model_config_validates_molecule_encoder_settings():
     with pytest.raises(ValueError, match="molecule_input_representation"):
         RewardModelConfig(molecule_input_representation="inchi")

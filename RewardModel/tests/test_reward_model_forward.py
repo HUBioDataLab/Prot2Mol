@@ -449,6 +449,117 @@ def test_cosine_contrastive_and_mlp_classification_share_embeddings():
     assert model.classification_head.fc1.weight.grad.abs().sum() > 0.0
 
 
+def test_cosine_marginal_biases_are_excluded_from_contrastive_retrieval():
+    torch.manual_seed(23)
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        cosine_marginal_biases=True,
+        cosine_scale_init=13.0,
+        protein_pooling_type="mean",
+        molecule_pooling_type="cls",
+        ranking_loss_weight=0.0,
+        contrastive_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_active_threshold=6.0,
+        contrastive_strict_active_only=True,
+    )
+    protein_input_ids = torch.tensor(
+        [[1, 2, 0], [1, 2, 0], [3, 4, 5], [3, 4, 5]],
+        dtype=torch.long,
+    )
+    protein_mask = protein_input_ids.ne(0).long()
+    molecule_input_ids = torch.tensor(
+        [[5, 1, 0], [6, 2, 0], [7, 3, 0], [8, 4, 0]],
+        dtype=torch.long,
+    )
+    molecule_mask = molecule_input_ids.ne(0).long()
+    pchembl = torch.tensor([8.0, 5.0, 7.0, 4.0])
+    inputs = {
+        "protein_input_ids": protein_input_ids,
+        "protein_attention_mask": protein_mask,
+        "molecule_input_ids": molecule_input_ids,
+        "molecule_attention_mask": molecule_mask,
+        "activity_labels": (pchembl >= 6.0).float(),
+        "pchembl_values": pchembl,
+        "ranking_group_ids": torch.tensor([0, 0, 1, 1]),
+        "contrastive_group_ids": torch.tensor([0, 0, 1, 1]),
+        "contrastive_target_ids": torch.tensor([0, 0, 1, 1]),
+        "contrastive_molecule_ids": torch.arange(4),
+    }
+
+    projection_inputs = {}
+    hooks = [
+        model.protein_projection.register_forward_pre_hook(
+            lambda _module, args: projection_inputs.update(
+                protein=args[0].detach().clone()
+            )
+        ),
+        model.molecule_projection.register_forward_pre_hook(
+            lambda _module, args: projection_inputs.update(
+                molecule=args[0].detach().clone()
+            )
+        ),
+    ]
+    try:
+        baseline = model(**inputs)
+    finally:
+        for hook in hooks:
+            hook.remove()
+
+    with torch.no_grad():
+        protein_tokens = model.encode_protein(protein_input_ids, protein_mask)
+        molecule_tokens = model.encode_molecule(molecule_input_ids, molecule_mask)
+        assert torch.allclose(
+            projection_inputs["protein"],
+            masked_pool(protein_tokens, protein_mask.bool(), "mean"),
+        )
+        assert torch.allclose(
+            projection_inputs["molecule"],
+            masked_pool(molecule_tokens, molecule_mask.bool(), "cls"),
+        )
+        model.molecule_bias_head.weight.fill_(0.25)
+        model.molecule_bias_head.bias.fill_(0.5)
+        model.protein_bias_head.weight.fill_(-0.2)
+        model.protein_bias_head.bias.fill_(-0.3)
+    biased = model(**inputs)
+
+    assert baseline.score_scale.item() == pytest.approx(13.0)
+    with torch.no_grad():
+        pooled_protein = model.protein_projection(projection_inputs["protein"])
+        pooled_molecule = model.molecule_projection(projection_inputs["molecule"])
+        expected_ranking = (
+            biased.score_scale * biased.cosine_similarity
+            + model.molecule_bias_head(
+                F.normalize(pooled_molecule, p=2, dim=-1, eps=1e-6)
+            ).squeeze(-1)
+        )
+        expected_classification = (
+            expected_ranking
+            + model.protein_bias_head(
+                F.normalize(pooled_protein, p=2, dim=-1, eps=1e-6)
+            ).squeeze(-1)
+        )
+    assert torch.allclose(biased.ranking_score, expected_ranking)
+    assert torch.allclose(biased.activity_logits, expected_classification)
+    assert not torch.allclose(baseline.ranking_score, biased.ranking_score)
+    assert not torch.allclose(baseline.activity_logits, biased.activity_logits)
+    assert torch.allclose(baseline.contrastive_loss, biased.contrastive_loss)
+    bias_gradients = torch.autograd.grad(
+        biased.contrastive_loss,
+        tuple(model.molecule_bias_head.parameters())
+        + tuple(model.protein_bias_head.parameters()),
+        allow_unused=True,
+        retain_graph=True,
+    )
+    assert all(gradient is None for gradient in bias_gradients)
+
+    biased.loss.backward()
+    assert model.molecule_bias_head.weight.grad is not None
+    assert model.molecule_bias_head.weight.grad.abs().sum() > 0.0
+    assert model.protein_bias_head.weight.grad is not None
+    assert model.protein_bias_head.weight.grad.abs().sum() > 0.0
+
+
 def test_contrastive_objective_requires_identity_metadata():
     model = _build_model(
         pair_scoring_mode="cosine",
