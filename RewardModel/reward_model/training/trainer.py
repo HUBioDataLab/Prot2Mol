@@ -28,6 +28,43 @@ from .evaluation import (
 
 RANKING_SCORE_DIAGNOSTICS_LOG_FILENAME = "ranking_score_diagnostics.jsonl"
 
+FULL_METRICS_PROFILE_TRAIN_REPORTER_KEYS = frozenset(
+    {
+        "loss",
+        "grad_norm",
+        "learning_rate",
+        "epoch",
+        "ranking_loss",
+        "contrastive_loss",
+        "classification_loss",
+        "classification_accuracy",
+        "classification_mcc",
+        "classification_f1",
+        "classification_auroc",
+        "cosine_scale",
+    }
+)
+
+FULL_METRICS_PROFILE_EVALUATION_REPORTER_SUFFIXES = frozenset(
+    {
+        "loss",
+        "total_loss",
+        "contrastive_loss",
+        "classification_loss",
+        "ranking_loss",
+        "cosine_scale",
+        "accuracy",
+        "mcc",
+        "f1",
+        "roc_auc",
+        "precision",
+        "recall",
+        "spearman",
+        "weighted_spearman",
+        "macro_spearman",
+    }
+)
+
 REQUIRED_DISTRIBUTED_ENV_VARS = (
     "WORLD_SIZE",
     "LOCAL_WORLD_SIZE",
@@ -1193,6 +1230,9 @@ class RewardModelTrainer(Trainer):
                 getattr(self, "_pending_objective_gradient_logs", {})
             )
             self._pending_objective_gradient_logs = {}
+        # Keep the complete diagnostic record on disk before reducing the
+        # scalar set forwarded to external reporters such as W&B.
+        self._append_ranking_score_diagnostics_log(logs)
         if self._ranking_metrics_profile_enabled():
             ranking_metric_suffixes = {
                 "loss",
@@ -1232,7 +1272,17 @@ class RewardModelTrainer(Trainer):
                     )
                 )
             }
-        self._append_ranking_score_diagnostics_log(logs)
+        else:
+            logs = {
+                key: value
+                for key, value in logs.items()
+                if key in FULL_METRICS_PROFILE_TRAIN_REPORTER_KEYS
+                or any(
+                    key == f"{split}_{suffix}"
+                    for split in ("eval", "test")
+                    for suffix in FULL_METRICS_PROFILE_EVALUATION_REPORTER_SUFFIXES
+                )
+            }
         parent_log = super().log
         if "start_time" in inspect.signature(parent_log).parameters:
             return parent_log(logs, start_time=start_time)

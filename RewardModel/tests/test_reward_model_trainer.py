@@ -483,12 +483,14 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         "classification_mcc",
         "classification_f1",
         "classification_auroc",
-        "ranking_cosine_std",
         "cosine_scale",
+    }.issubset(training_logs[-1])
+    assert {
+        "ranking_cosine_std",
         "classification_logit_bias",
         "ranking_list_normalized_entropy",
         "ranking_margin_pair_accuracy",
-    }.issubset(training_logs[-1])
+    }.isdisjoint(training_logs[-1])
     diagnostic_log_path = (
         tmp_path / "trainer_output" / "ranking_score_diagnostics.jsonl"
     )
@@ -508,7 +510,10 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         record for record in diagnostic_records if record["split"] == "eval"
     )
     assert "ranking_loss" in train_diagnostic_record["metrics"]
+    assert "ranking_cosine_std" in train_diagnostic_record["metrics"]
+    assert "classification_logit_bias" in train_diagnostic_record["metrics"]
     assert "eval_spearman" in eval_diagnostic_record["metrics"]
+    assert "eval_ranking_cosine_std" in eval_diagnostic_record["metrics"]
     assert os.path.exists(save_dir / "pytorch_model.bin")
     assert os.path.exists(save_dir / "config.json")
 
@@ -867,7 +872,81 @@ def test_ranking_metrics_profile_filters_reporter_only_fields(monkeypatch):
     }
 
 
-def test_reward_trainer_logs_scaled_cosine_parameters(monkeypatch):
+def test_full_metrics_profile_forwards_only_selected_train_eval_and_test_metrics(
+    monkeypatch,
+):
+    captured = {}
+
+    def _legacy_log(self, logs):
+        captured.update(logs)
+        return "logged"
+
+    monkeypatch.setattr(Trainer, "log", _legacy_log)
+    trainer = object.__new__(RewardModelTrainer)
+    trainer.args = SimpleNamespace(reward_metrics_profile="full")
+    trainer.model = torch.nn.Module()
+    trainer.model.config = RewardModelConfig(pair_scoring_mode="cosine")
+    trainer._consume_train_component_logs = lambda: {}
+    trainer._current_scaled_cosine_logs = lambda: {}
+    trainer._append_ranking_score_diagnostics_log = lambda logs: None
+
+    train_metrics = {
+        "loss",
+        "grad_norm",
+        "learning_rate",
+        "epoch",
+        "ranking_loss",
+        "contrastive_loss",
+        "classification_loss",
+        "classification_accuracy",
+        "classification_mcc",
+        "classification_f1",
+        "classification_auroc",
+        "cosine_scale",
+    }
+    evaluation_suffixes = {
+        "loss",
+        "total_loss",
+        "contrastive_loss",
+        "classification_loss",
+        "ranking_loss",
+        "cosine_scale",
+        "accuracy",
+        "mcc",
+        "f1",
+        "roc_auc",
+        "precision",
+        "recall",
+        "spearman",
+        "weighted_spearman",
+        "macro_spearman",
+    }
+    allowed_metrics = train_metrics | {
+        f"{split}_{suffix}"
+        for split in ("eval", "test")
+        for suffix in evaluation_suffixes
+    }
+    logs = {metric: float(index) for index, metric in enumerate(allowed_metrics)}
+    logs.update(
+        {
+            "num_examples": 48.0,
+            "molecule_bias_std": 0.1,
+            "train_runtime": 20.0,
+            "total_flos": 100.0,
+            "eval_num_examples": 12.0,
+            "eval_potency_qhts_accuracy": 0.8,
+            "eval_spearman_num_groups": 3.0,
+            "test_num_examples": 8.0,
+            "test_non_potency_mcc": 0.4,
+            "test_spearman_num_groups": 2.0,
+        }
+    )
+
+    assert trainer.log(logs) == "logged"
+    assert captured == {key: logs[key] for key in allowed_metrics}
+
+
+def test_reward_trainer_logs_only_allowed_scaled_cosine_parameter(monkeypatch):
     captured = {}
 
     def _legacy_log(self, logs):
@@ -889,7 +968,7 @@ def test_reward_trainer_logs_scaled_cosine_parameters(monkeypatch):
 
     assert trainer.log({"loss": 0.25}) == "logged"
     assert captured["cosine_scale"] == pytest.approx(13.0)
-    assert captured["classification_logit_bias"] == pytest.approx(-0.5)
+    assert "classification_logit_bias" not in captured
 
 
 def test_training_metrics_are_count_weighted_and_ranking_ties_are_excluded():
@@ -1659,6 +1738,35 @@ def test_scale13_contrastive_classification_active6_config():
     assert "seen_target/train.parquet" in config.data.train_parquet_path
     assert "seen_target/val2.parquet" in config.data.val2_parquet_path
     assert "contrastive_classification_active6" in config.training.output_dir
+
+
+def test_target_aware_random_assay_contrastive_classification_config():
+    config_path = (
+        Path(__file__).parents[1]
+        / "configs"
+        / "reward_train_target_aware_random_assay_contrastive_classification_active6_2gpu.yaml"
+    )
+    config = load_reward_training_config(str(config_path))
+
+    assert "target_aware_random_assay_activity_balanced/train.parquet" in (
+        config.data.train_parquet_path
+    )
+    assert "target_aware_random_assay_activity_balanced/val.parquet" in (
+        config.data.val_parquet_path
+    )
+    assert "target_aware_random_assay_activity_balanced/test.parquet" in (
+        config.data.test_parquet_path
+    )
+    assert config.data.val2_parquet_path is None
+    assert "target_aware_random_assay" in config.data.tokenized_dataset_dir
+    assert config.model.ranking_loss_weight == pytest.approx(0.0)
+    assert config.model.contrastive_loss_weight == pytest.approx(0.5)
+    assert config.model.classification_loss_weight == pytest.approx(0.5)
+    assert config.model.contrastive_active_threshold == pytest.approx(6.0)
+    assert config.model.contrastive_strict_active_only is True
+    assert config.training.training_mode == "multi_gpu"
+    assert config.training.metric_for_best_model == "eval_loss"
+    assert "random_assay_seen_target" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():
