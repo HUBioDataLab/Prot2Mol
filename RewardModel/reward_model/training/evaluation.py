@@ -497,7 +497,7 @@ def compute_joint_evaluation_metrics(
     metrics_profile: str = "full",
     contrastive_loss: torch.Tensor | float | None = None,
     contrastive_loss_weight: float = 0.0,
-) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
+) -> tuple[Dict[str, float], list[Dict[str, float | int | str | bool]]]:
     """Compute deterministic full-dataset losses and metrics from one scoring pass."""
     logits = activity_logits.reshape(-1).detach().cpu().float()
     scores = ranking_scores.reshape(-1).detach().cpu().float()
@@ -901,7 +901,59 @@ def compute_groupwise_rank_correlations(
         grouped_scores[str(group_id)].append(float(score))
         grouped_pchembl[str(group_id)].append(float(pchembl))
 
-    correlations: list[tuple[float, float, int]] = []
+    spearman_correlations: list[tuple[float, int]] = []
+    pearson_correlations: list[tuple[float, int]] = []
+    for group_id in sorted(grouped_scores):
+        scores = grouped_scores[group_id]
+        pchembls = grouped_pchembl[group_id]
+        if len(scores) < min_group_size:
+            continue
+        if len(set(pchembls)) == 1:
+            continue
+        if max(pchembls) - min(pchembls) < min_pchembl_span:
+            continue
+        if len(set(scores)) == 1:
+            continue
+        spearman_result = spearmanr(scores, pchembls)
+        pearson_result = pearsonr(scores, pchembls)
+        spearman = float(
+            getattr(spearman_result, "statistic", spearman_result[0])
+        )
+        pearson = float(
+            getattr(pearson_result, "statistic", pearson_result[0])
+        )
+        if math.isfinite(spearman):
+            spearman_correlations.append((spearman, len(scores)))
+        if math.isfinite(pearson):
+            pearson_correlations.append((pearson, len(scores)))
+
+    def _weighted_mean(correlations: Sequence[tuple[float, int]]) -> float:
+        if not correlations:
+            return float("nan")
+        total_size = sum(size for _, size in correlations)
+        return float(sum(value * size for value, size in correlations) / total_size)
+
+    return {
+        "spearman": _weighted_mean(spearman_correlations),
+        "pearson": _weighted_mean(pearson_correlations),
+    }
+
+
+def _compute_groupwise_spearman_with_records(
+    *,
+    group_ids: Sequence[str],
+    ranking_scores: Sequence[float],
+    pchembl_values: Sequence[float],
+    min_group_size: int = 3,
+    min_pchembl_span: float = 0.0,
+) -> tuple[Dict[str, float], list[Dict[str, float | int | str | bool]]]:
+    grouped_scores: Dict[str, list[float]] = defaultdict(list)
+    grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
+    for group_id, score, pchembl in zip(group_ids, ranking_scores, pchembl_values):
+        grouped_scores[str(group_id)].append(float(score))
+        grouped_pchembl[str(group_id)].append(float(pchembl))
+
+    assay_records: list[Dict[str, float | int | str | bool]] = []
     for group_id in sorted(grouped_scores):
         scores = grouped_scores[group_id]
         pchembls = grouped_pchembl[group_id]
@@ -913,58 +965,10 @@ def compute_groupwise_rank_correlations(
             continue
         if len(set(scores)) == 1:
             spearman = float("nan")
-            pearson = float("nan")
         else:
-            spearman_result = spearmanr(scores, pchembls)
-            pearson_result = pearsonr(scores, pchembls)
-            spearman = float(
-                getattr(spearman_result, "statistic", spearman_result[0])
-            )
-            pearson = float(
-                getattr(pearson_result, "statistic", pearson_result[0])
-            )
-        correlations.append((spearman, pearson, len(scores)))
-
-    if not correlations:
-        return {"spearman": float("nan"), "pearson": float("nan")}
-    total_size = sum(size for _, _, size in correlations)
-    return {
-        "spearman": float(
-            sum(spearman * size for spearman, _, size in correlations)
-            / total_size
-        ),
-        "pearson": float(
-            sum(pearson * size for _, pearson, size in correlations)
-            / total_size
-        ),
-    }
-
-
-def _compute_groupwise_spearman_with_records(
-    *,
-    group_ids: Sequence[str],
-    ranking_scores: Sequence[float],
-    pchembl_values: Sequence[float],
-    min_group_size: int = 3,
-    min_pchembl_span: float = 0.0,
-) -> tuple[Dict[str, float], list[Dict[str, float | int | str]]]:
-    grouped_scores: Dict[str, list[float]] = defaultdict(list)
-    grouped_pchembl: Dict[str, list[float]] = defaultdict(list)
-    for group_id, score, pchembl in zip(group_ids, ranking_scores, pchembl_values):
-        grouped_scores[str(group_id)].append(float(score))
-        grouped_pchembl[str(group_id)].append(float(pchembl))
-
-    assay_records: list[Dict[str, float | int | str]] = []
-    for group_id in sorted(grouped_scores):
-        scores = grouped_scores[group_id]
-        pchembls = grouped_pchembl[group_id]
-        if len(scores) < min_group_size:
-            continue
-        if len(set(pchembls)) == 1:
-            continue
-        if max(pchembls) - min(pchembls) < min_pchembl_span:
-            continue
-        result = spearmanr(scores, pchembls)
+            result = spearmanr(scores, pchembls)
+            spearman = float(getattr(result, "statistic", result[0]))
+        spearman_defined = math.isfinite(spearman)
         target_chembl_id, assay_id = _split_group_id(group_id)
         assay_records.append(
             {
@@ -972,29 +976,47 @@ def _compute_groupwise_spearman_with_records(
                 "target_chembl_id": target_chembl_id,
                 "assay_id": assay_id,
                 "num_examples": len(scores),
-                "spearman": float(getattr(result, "statistic", result[0])),
+                "spearman": spearman,
+                "spearman_defined": spearman_defined,
             }
         )
 
-    if not assay_records:
+    defined_records = [
+        record
+        for record in assay_records
+        if bool(record["spearman_defined"])
+    ]
+    num_eligible_groups = len(assay_records)
+    num_defined_groups = len(defined_records)
+    num_undefined_groups = num_eligible_groups - num_defined_groups
+    defined_fraction = (
+        float(num_defined_groups / num_eligible_groups)
+        if num_eligible_groups
+        else float("nan")
+    )
+
+    if not defined_records:
         return (
             {
                 "eval_spearman": float("nan"),
                 "eval_weighted_spearman": float("nan"),
                 "eval_macro_spearman": float("nan"),
-                "eval_spearman_num_groups": 0.0,
+                "eval_spearman_num_groups": float(num_eligible_groups),
+                "eval_spearman_num_defined_groups": float(num_defined_groups),
+                "eval_spearman_num_undefined_groups": float(num_undefined_groups),
+                "eval_spearman_defined_fraction": defined_fraction,
             },
             assay_records,
         )
 
     weighted_sum = sum(
         float(record["spearman"]) * int(record["num_examples"])
-        for record in assay_records
+        for record in defined_records
     )
-    total_weight = sum(int(record["num_examples"]) for record in assay_records)
+    total_weight = sum(int(record["num_examples"]) for record in defined_records)
     weighted_spearman = float(weighted_sum / total_weight)
     macro_spearman = float(
-        np.mean([float(record["spearman"]) for record in assay_records])
+        np.mean([float(record["spearman"]) for record in defined_records])
     )
     return (
         {
@@ -1002,7 +1024,10 @@ def _compute_groupwise_spearman_with_records(
             "eval_spearman": weighted_spearman,
             "eval_weighted_spearman": weighted_spearman,
             "eval_macro_spearman": macro_spearman,
-            "eval_spearman_num_groups": float(len(assay_records)),
+            "eval_spearman_num_groups": float(num_eligible_groups),
+            "eval_spearman_num_defined_groups": float(num_defined_groups),
+            "eval_spearman_num_undefined_groups": float(num_undefined_groups),
+            "eval_spearman_defined_fraction": defined_fraction,
         },
         assay_records,
     )
@@ -1011,7 +1036,7 @@ def _compute_groupwise_spearman_with_records(
 def _append_assay_spearman_log(
     trainer,
     metrics: Mapping[str, float],
-    assay_records: Sequence[Mapping[str, float | int | str]],
+    assay_records: Sequence[Mapping[str, float | int | str | bool]],
     *,
     metric_key_prefix: str,
 ) -> None:
@@ -1027,14 +1052,40 @@ def _append_assay_spearman_log(
     path = os.path.join(trainer.args.output_dir, filename)
     macro_spearman = metrics.get(f"{metric_key_prefix}_macro_spearman")
     if macro_spearman is None:
+        finite_spearman = [
+            float(record["spearman"])
+            for record in assay_records
+            if math.isfinite(float(record["spearman"]))
+        ]
         macro_spearman = (
-            float(np.mean([float(record["spearman"]) for record in assay_records]))
-            if assay_records
+            float(np.mean(finite_spearman))
+            if finite_spearman
             else float("nan")
         )
     num_eligible_groups = metrics.get(
         f"{metric_key_prefix}_spearman_num_groups",
         float(len(assay_records)),
+    )
+    num_defined_groups = metrics.get(
+        f"{metric_key_prefix}_spearman_num_defined_groups",
+        float(
+            sum(
+                math.isfinite(float(record["spearman"]))
+                for record in assay_records
+            )
+        ),
+    )
+    num_undefined_groups = metrics.get(
+        f"{metric_key_prefix}_spearman_num_undefined_groups",
+        float(num_eligible_groups - num_defined_groups),
+    )
+    defined_fraction = metrics.get(
+        f"{metric_key_prefix}_spearman_defined_fraction",
+        (
+            float(num_defined_groups / num_eligible_groups)
+            if num_eligible_groups
+            else float("nan")
+        ),
     )
     record = {
         "global_step": int(trainer.state.global_step),
@@ -1042,6 +1093,9 @@ def _append_assay_spearman_log(
         "weighted_spearman": metrics[f"{metric_key_prefix}_spearman"],
         "macro_spearman": macro_spearman,
         "num_eligible_groups": num_eligible_groups,
+        "num_defined_groups": num_defined_groups,
+        "num_undefined_groups": num_undefined_groups,
+        "defined_fraction": defined_fraction,
         "assays": list(assay_records),
     }
     with open(path, "a", encoding="utf-8") as handle:

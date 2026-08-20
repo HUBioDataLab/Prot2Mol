@@ -62,6 +62,10 @@ FULL_METRICS_PROFILE_EVALUATION_REPORTER_SUFFIXES = frozenset(
         "spearman",
         "weighted_spearman",
         "macro_spearman",
+        "spearman_num_groups",
+        "spearman_num_defined_groups",
+        "spearman_num_undefined_groups",
+        "spearman_defined_fraction",
     }
 )
 
@@ -1263,6 +1267,10 @@ class RewardModelTrainer(Trainer):
                 "pearson",
                 "cosine_std",
                 "pair_accuracy",
+                "spearman_num_groups",
+                "spearman_num_defined_groups",
+                "spearman_num_undefined_groups",
+                "spearman_defined_fraction",
             }
             logs = {
                 key: value

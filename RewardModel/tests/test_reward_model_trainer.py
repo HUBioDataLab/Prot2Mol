@@ -41,6 +41,11 @@ from reward_model.training.entry import (
     _resolve_warm_start_path,
     _validate_warm_start_architecture,
 )
+from reward_model.training.evaluation import (
+    _append_assay_spearman_log,
+    _compute_groupwise_spearman_with_records,
+    compute_groupwise_rank_correlations,
+)
 from reward_model.training.trainer import LengthBucketSampler
 from train_reward_model import parse_args
 
@@ -246,6 +251,102 @@ def test_metric_helpers_compute_expected_values():
     )
     assert spearman_metrics["eval_macro_spearman"] == pytest.approx(0.9)
     assert spearman_metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
+    assert spearman_metrics["eval_spearman_num_defined_groups"] == pytest.approx(2.0)
+    assert spearman_metrics["eval_spearman_num_undefined_groups"] == pytest.approx(0.0)
+    assert spearman_metrics["eval_spearman_defined_fraction"] == pytest.approx(1.0)
+
+
+def test_groupwise_spearman_excludes_constant_score_group_and_reports_coverage():
+    metrics, assay_records = _compute_groupwise_spearman_with_records(
+        group_ids=["T1__A1"] * 3 + ["T2__A2"] * 3,
+        ranking_scores=[1.0, 2.0, 3.0, 7.0, 7.0, 7.0],
+        pchembl_values=[4.0, 5.0, 6.0, 4.0, 5.0, 6.0],
+    )
+
+    assert metrics["eval_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_weighted_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_macro_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_spearman_num_groups"] == pytest.approx(2.0)
+    assert metrics["eval_spearman_num_defined_groups"] == pytest.approx(1.0)
+    assert metrics["eval_spearman_num_undefined_groups"] == pytest.approx(1.0)
+    assert metrics["eval_spearman_defined_fraction"] == pytest.approx(0.5)
+    assert len(assay_records) == 2
+    assert assay_records[0]["spearman_defined"] is True
+    assert assay_records[1]["spearman_defined"] is False
+    assert math.isnan(float(assay_records[1]["spearman"]))
+
+
+def test_groupwise_spearman_all_constant_scores_is_undefined_with_zero_coverage():
+    metrics = compute_groupwise_spearman(
+        group_ids=["T1__A1"] * 3,
+        ranking_scores=[7.0, 7.0, 7.0],
+        pchembl_values=[4.0, 5.0, 6.0],
+    )
+
+    assert math.isnan(metrics["eval_spearman"])
+    assert math.isnan(metrics["eval_weighted_spearman"])
+    assert math.isnan(metrics["eval_macro_spearman"])
+    assert metrics["eval_spearman_num_groups"] == pytest.approx(1.0)
+    assert metrics["eval_spearman_num_defined_groups"] == pytest.approx(0.0)
+    assert metrics["eval_spearman_num_undefined_groups"] == pytest.approx(1.0)
+    assert metrics["eval_spearman_defined_fraction"] == pytest.approx(0.0)
+
+
+def test_groupwise_spearman_without_eligible_groups_reports_empty_coverage():
+    metrics = compute_groupwise_spearman(
+        group_ids=["T1__A1"] * 3,
+        ranking_scores=[1.0, 2.0, 3.0],
+        pchembl_values=[5.0, 5.0, 5.0],
+    )
+
+    assert math.isnan(metrics["eval_spearman"])
+    assert metrics["eval_spearman_num_groups"] == pytest.approx(0.0)
+    assert metrics["eval_spearman_num_defined_groups"] == pytest.approx(0.0)
+    assert metrics["eval_spearman_num_undefined_groups"] == pytest.approx(0.0)
+    assert math.isnan(metrics["eval_spearman_defined_fraction"])
+
+
+def test_training_window_correlations_ignore_constant_score_groups():
+    metrics = compute_groupwise_rank_correlations(
+        group_ids=["T1__A1"] * 3 + ["T2__A2"] * 3,
+        ranking_scores=[1.0, 2.0, 3.0, 7.0, 7.0, 7.0],
+        pchembl_values=[4.0, 5.0, 6.0, 4.0, 5.0, 6.0],
+    )
+
+    assert metrics["spearman"] == pytest.approx(1.0)
+    assert metrics["pearson"] == pytest.approx(1.0)
+
+
+def test_assay_spearman_log_retains_undefined_assay_and_coverage(tmp_path):
+    metrics, assay_records = _compute_groupwise_spearman_with_records(
+        group_ids=["T1__A1"] * 3 + ["T2__A2"] * 3,
+        ranking_scores=[1.0, 2.0, 3.0, 7.0, 7.0, 7.0],
+        pchembl_values=[4.0, 5.0, 6.0, 4.0, 5.0, 6.0],
+    )
+    trainer = SimpleNamespace(
+        args=SimpleNamespace(output_dir=str(tmp_path)),
+        state=SimpleNamespace(global_step=12, epoch=1.5),
+        is_world_process_zero=lambda: True,
+    )
+
+    _append_assay_spearman_log(
+        trainer,
+        metrics,
+        assay_records,
+        metric_key_prefix="eval",
+    )
+
+    record = json.loads(
+        (tmp_path / "eval_assay_spearman.jsonl").read_text(encoding="utf-8")
+    )
+    assert record["num_eligible_groups"] == pytest.approx(2.0)
+    assert record["num_defined_groups"] == pytest.approx(1.0)
+    assert record["num_undefined_groups"] == pytest.approx(1.0)
+    assert record["defined_fraction"] == pytest.approx(0.5)
+    undefined = [assay for assay in record["assays"] if not assay["spearman_defined"]]
+    assert len(undefined) == 1
+    assert undefined[0]["group_id"] == "T2__A2"
+    assert math.isnan(undefined[0]["spearman"])
 
 
 def test_activity_type_metrics_separate_potency_and_non_potency_assays():
@@ -262,6 +363,12 @@ def test_activity_type_metrics_separate_potency_and_non_potency_assays():
     assert metrics["eval_potency_qhts_num_examples"] == 3
     assert metrics["eval_non_potency_num_examples"] == 3
     assert metrics["eval_potency_qhts_macro_spearman"] == pytest.approx(1.0)
+    assert metrics["eval_potency_qhts_spearman_num_defined_groups"] == pytest.approx(
+        1.0
+    )
+    assert metrics["eval_potency_qhts_spearman_num_undefined_groups"] == pytest.approx(
+        0.0
+    )
     assert metrics["eval_non_potency_macro_spearman"] == pytest.approx(-1.0)
 
 
@@ -456,6 +563,15 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
     assert latest_assay_log["num_eligible_groups"] == pytest.approx(
         eval_metrics["eval_spearman_num_groups"]
     )
+    assert latest_assay_log["num_defined_groups"] == pytest.approx(
+        eval_metrics["eval_spearman_num_defined_groups"]
+    )
+    assert latest_assay_log["num_undefined_groups"] == pytest.approx(
+        eval_metrics["eval_spearman_num_undefined_groups"]
+    )
+    assert latest_assay_log["defined_fraction"] == pytest.approx(
+        eval_metrics["eval_spearman_defined_fraction"]
+    )
     assert latest_assay_log["assays"]
     assert {
         "group_id",
@@ -463,6 +579,7 @@ def test_reward_model_trainer_runs_and_saves_checkpoint(tmp_path, monkeypatch):
         "assay_id",
         "num_examples",
         "spearman",
+        "spearman_defined",
     }.issubset(latest_assay_log["assays"][0])
     val2_assay_log_records = [
         json.loads(line)
@@ -922,6 +1039,10 @@ def test_full_metrics_profile_forwards_only_selected_train_eval_and_test_metrics
         "spearman",
         "weighted_spearman",
         "macro_spearman",
+        "spearman_num_groups",
+        "spearman_num_defined_groups",
+        "spearman_num_undefined_groups",
+        "spearman_defined_fraction",
     }
     allowed_metrics = train_metrics | {
         f"{split}_{suffix}"
