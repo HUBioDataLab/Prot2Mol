@@ -13,7 +13,13 @@ from .losses import (
 
 _VALID_POOLING_TYPES = {"cls", "mean", "mean_all_tok"}
 _VALID_FUSION_ATTENTION_BACKENDS = {"manual", "sdpa"}
-_VALID_PAIR_SCORING_MODES = {"cosine", "mlp", "scaled_cosine"}
+_VALID_PAIR_SCORING_MODES = {
+    "cosine",
+    "fusion_contrastive",
+    "mlp",
+    "scaled_cosine",
+}
+_CONTRASTIVE_PAIR_SCORING_MODES = {"cosine", "fusion_contrastive"}
 _VALID_PROJECTION_TYPES = {"linear", "nonlinear"}
 _VALID_MOLECULE_INPUT_REPRESENTATIONS = {"selfies", "smiles"}
 
@@ -168,11 +174,11 @@ class RewardModelConfig:
             raise ValueError("contrastive_strict_active_only must be a boolean")
         if (
             self.contrastive_loss_weight > 0.0
-            and self.pair_scoring_mode != "cosine"
+            and self.pair_scoring_mode not in _CONTRASTIVE_PAIR_SCORING_MODES
         ):
             raise ValueError(
-                "contrastive_loss_weight > 0 requires pair_scoring_mode='cosine' "
-                "so ranking and contrastive learning share one normalized score matrix"
+                "contrastive_loss_weight > 0 requires pair_scoring_mode to be "
+                "'cosine' or 'fusion_contrastive'"
             )
         if (
             self.contrastive_loss_weight > 0.0

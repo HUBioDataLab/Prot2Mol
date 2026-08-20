@@ -232,6 +232,123 @@ def test_simple_cosine_supports_ligunity_style_nonlinear_projection():
         assert projection.linear2.weight.grad.abs().sum() > 0.0
 
 
+def test_fusion_contrastive_uses_separate_projection_paths_and_fused_logits():
+    torch.manual_seed(29)
+    model = _build_model(
+        pair_scoring_mode="fusion_contrastive",
+        projection_type="nonlinear",
+        fusion_attention_backend="sdpa",
+        fusion_residual=True,
+        protein_pooling_type="mean",
+        molecule_pooling_type="cls",
+        ranking_loss_weight=0.0,
+        contrastive_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_active_threshold=6.0,
+        contrastive_strict_active_only=True,
+    )
+    protein_input_ids = torch.tensor(
+        [[1, 2, 0], [1, 2, 0], [3, 4, 5], [3, 4, 5]],
+        dtype=torch.long,
+    )
+    molecule_input_ids = torch.tensor(
+        [[5, 1, 0], [6, 2, 0], [7, 3, 0], [8, 4, 0]],
+        dtype=torch.long,
+    )
+    protein_mask = protein_input_ids.ne(0).long()
+    molecule_mask = molecule_input_ids.ne(0).long()
+    pchembl = torch.tensor([8.0, 5.0, 7.0, 4.0])
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        protein_attention_mask=protein_mask,
+        molecule_input_ids=molecule_input_ids,
+        molecule_attention_mask=molecule_mask,
+        activity_labels=(pchembl >= 6.0).float(),
+        pchembl_values=pchembl,
+        ranking_group_ids=torch.tensor([0, 0, 1, 1]),
+        contrastive_group_ids=torch.tensor([0, 0, 1, 1]),
+        contrastive_target_ids=torch.tensor([0, 0, 1, 1]),
+        contrastive_molecule_ids=torch.arange(4),
+        return_token_embeddings=True,
+    )
+
+    assert model.fusion is not None
+    assert model.fusion.attention_backend == "sdpa"
+    assert model.fusion.residual is True
+    assert model.contrastive_protein_projection is not model.protein_projection
+    assert model.contrastive_molecule_projection is not model.molecule_projection
+    assert model.classification_head.fc1.in_features == 20
+    assert model.classification_head.fc1.out_features == 128
+    assert len(model.classification_head.hidden_layers) == 0
+    assert model.classification_head.fc2.in_features == 128
+    assert model.classification_head.fc2.out_features == 1
+    assert model.molecule_bias_head is None
+    assert model.protein_bias_head is None
+    assert model.classification_logit_bias is None
+    assert outputs.fused_protein_tokens.shape == (4, 3, 10)
+    assert outputs.fused_molecule_tokens.shape == (4, 3, 10)
+    assert outputs.joint_embedding.shape == (4, 20)
+    assert torch.allclose(outputs.ranking_score, outputs.activity_logits)
+    assert outputs.score_scale.item() == pytest.approx(13.0)
+    assert torch.allclose(
+        outputs.normalized_protein_embedding.norm(dim=-1),
+        torch.ones(4),
+    )
+    assert torch.allclose(
+        outputs.normalized_molecule_embedding.norm(dim=-1),
+        torch.ones(4),
+    )
+    assert outputs.ranking_loss is None
+    assert outputs.contrastive_loss is not None
+    assert outputs.classification_loss is not None
+    assert torch.allclose(
+        outputs.loss,
+        0.5 * outputs.contrastive_loss + 0.5 * outputs.classification_loss,
+    )
+
+    classification_modules = (
+        model.protein_projection,
+        model.fusion,
+        model.classification_head,
+    )
+    contrastive_modules = (
+        model.contrastive_protein_projection,
+        model.contrastive_molecule_projection,
+    )
+
+    def module_grad_sum(loss, module):
+        parameters = (
+            (module,)
+            if isinstance(module, torch.nn.Parameter)
+            else tuple(module.parameters())
+        )
+        gradients = torch.autograd.grad(
+            loss,
+            parameters,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        return sum(
+            float(gradient.detach().abs().sum().item())
+            for gradient in gradients
+            if gradient is not None
+        )
+
+    for module in classification_modules:
+        assert module_grad_sum(outputs.classification_loss, module) > 0.0
+        assert module_grad_sum(outputs.contrastive_loss, module) == 0.0
+    for module in contrastive_modules:
+        assert module_grad_sum(outputs.classification_loss, module) == 0.0
+        assert module_grad_sum(outputs.contrastive_loss, module) > 0.0
+    assert module_grad_sum(outputs.classification_loss, model.protein_encoder) > 0.0
+    assert module_grad_sum(outputs.contrastive_loss, model.protein_encoder) > 0.0
+    assert module_grad_sum(outputs.classification_loss, model.molecule_encoder) > 0.0
+    assert module_grad_sum(outputs.contrastive_loss, model.molecule_encoder) > 0.0
+    assert module_grad_sum(outputs.classification_loss, model.logit_scale) == 0.0
+    assert module_grad_sum(outputs.contrastive_loss, model.logit_scale) > 0.0
+
+
 def test_simple_cosine_projection_dropout_is_train_only():
     model = _build_model(
         pair_scoring_mode="cosine",

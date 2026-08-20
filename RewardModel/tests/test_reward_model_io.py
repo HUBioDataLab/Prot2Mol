@@ -283,6 +283,47 @@ def test_simple_cosine_mlp_classifier_save_and_load_round_trip(tmp_path):
         assert torch.equal(value, reloaded.state_dict()[key]), key
 
 
+def test_fusion_contrastive_reward_model_save_and_load_round_trip(tmp_path):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    config = RewardModelConfig(
+        protein_model_name_or_path="protein/dummy",
+        molecule_model_name_or_path="molecule/dummy",
+        fusion_hidden_dim=10,
+        fusion_num_heads=2,
+        fusion_attention_backend="sdpa",
+        fusion_residual=True,
+        projection_type="nonlinear",
+        pair_scoring_mode="fusion_contrastive",
+        ranking_loss_weight=0.0,
+        contrastive_loss_weight=0.5,
+        classification_loss_weight=0.5,
+    )
+    model = RewardModel(
+        config=config,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    save_reward_model(model, str(tmp_path))
+    reloaded = load_reward_model(
+        str(tmp_path),
+        device=torch.device("cpu"),
+        strict=True,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    assert reloaded.config.pair_scoring_mode == "fusion_contrastive"
+    assert reloaded.fusion is not None
+    assert reloaded.classification_head.fc1.out_features == 128
+    assert reloaded.contrastive_protein_projection is not None
+    assert reloaded.contrastive_molecule_projection is not None
+    assert reloaded.molecule_bias_head is None
+    assert reloaded.protein_bias_head is None
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, reloaded.state_dict()[key]), key
+
+
 def test_weight_only_warm_start_unfreezes_encoders_with_fresh_optimizer(tmp_path):
     protein_bundle, molecule_bundle = _dummy_bundles()
     frozen_config = RewardModelConfig(

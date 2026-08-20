@@ -751,6 +751,8 @@ def test_reward_trainer_builds_encoder_and_projection_lr_groups(tmp_path):
             self.molecule_encoder = torch.nn.Linear(2, 2)
             self.protein_projection = torch.nn.Linear(2, 2)
             self.molecule_projection = torch.nn.Linear(2, 2)
+            self.contrastive_protein_projection = torch.nn.Linear(2, 2)
+            self.contrastive_molecule_projection = torch.nn.Linear(2, 2)
 
     model = ComponentModel()
     trainer = RewardModelTrainer(
@@ -1759,6 +1761,15 @@ def test_target_aware_random_assay_contrastive_classification_config():
     )
     assert config.data.val2_parquet_path is None
     assert "target_aware_random_assay" in config.data.tokenized_dataset_dir
+    assert config.model.pair_scoring_mode == "fusion_contrastive"
+    assert config.model.projection_type == "nonlinear"
+    assert config.model.fusion_hidden_dim == 128
+    assert config.model.fusion_num_heads == 8
+    assert config.model.fusion_attention_backend == "sdpa"
+    assert config.model.fusion_residual is True
+    assert config.model.cosine_marginal_biases is False
+    assert config.model.cosine_scale_init == pytest.approx(13.0)
+    assert config.model.ranking_temperature == pytest.approx(1.0)
     assert config.model.ranking_loss_weight == pytest.approx(0.0)
     assert config.model.contrastive_loss_weight == pytest.approx(0.5)
     assert config.model.classification_loss_weight == pytest.approx(0.5)
@@ -1766,7 +1777,7 @@ def test_target_aware_random_assay_contrastive_classification_config():
     assert config.model.contrastive_strict_active_only is True
     assert config.training.training_mode == "multi_gpu"
     assert config.training.metric_for_best_model == "eval_loss"
-    assert "random_assay_seen_target" in config.training.output_dir
+    assert "random_assay_seen_target_fusion_contrastive" in config.training.output_dir
 
 
 def test_overfit_grid_covers_all_lr_clip_and_temperature_combinations():
