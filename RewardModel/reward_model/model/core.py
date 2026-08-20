@@ -108,6 +108,18 @@ class RewardModel(nn.Module):
             self._config.molecule_hidden_size,
             self._config.fusion_hidden_dim,
         )
+        if self._config.pair_scoring_mode == "fusion_contrastive":
+            self.contrastive_protein_projection = projection_class(
+                self._config.protein_hidden_size,
+                self._config.fusion_hidden_dim,
+            )
+            self.contrastive_molecule_projection = projection_class(
+                self._config.molecule_hidden_size,
+                self._config.fusion_hidden_dim,
+            )
+        else:
+            self.contrastive_protein_projection = None
+            self.contrastive_molecule_projection = None
         if self._config.pair_scoring_mode == "cosine":
             # LigUnity-style cosine path: pool the encoder representation first,
             # then project the pooled vector and L2-normalize it for scoring.
@@ -157,6 +169,19 @@ class RewardModel(nn.Module):
             self.classification_logit_bias = nn.Parameter(
                 torch.tensor(self._config.cosine_classification_bias_init)
             )
+            self.molecule_bias_head = None
+            self.protein_bias_head = None
+        elif self._config.pair_scoring_mode == "fusion_contrastive":
+            self.ranking_head = None
+            self.classification_head = RewardMLPHead(
+                input_dim=head_input_dim,
+                hidden_dims=(128,),
+                dropout=self._config.dropout,
+            )
+            self.logit_scale = nn.Parameter(
+                torch.tensor(math.log(self._config.cosine_scale_init))
+            )
+            self.classification_logit_bias = None
             self.molecule_bias_head = None
             self.protein_bias_head = None
         else:
@@ -325,7 +350,10 @@ class RewardModel(nn.Module):
             ranking_group_ids,
             temperature=(
                 1.0
-                if self._config.cosine_marginal_biases
+                if (
+                    self._config.cosine_marginal_biases
+                    or self._config.pair_scoring_mode == "fusion_contrastive"
+                )
                 else self._config.ranking_temperature
             ),
             # The dataset applies this threshold to the complete assay before
@@ -518,6 +546,24 @@ class RewardModel(nn.Module):
         )
         cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
 
+        if self._config.pair_scoring_mode == "fusion_contrastive":
+            if self.logit_scale is None or self.classification_head is None:
+                raise RuntimeError(
+                    "Fusion-contrastive scoring modules are not initialized"
+                )
+            score_scale = self.logit_scale.clamp(
+                max=math.log(self._config.cosine_scale_max)
+            ).exp()
+            activity_logits = self.classification_head(joint_embedding)
+            return (
+                activity_logits,
+                activity_logits,
+                cosine_similarity,
+                score_scale,
+                normalized_protein,
+                normalized_molecule,
+            )
+
         if self._config.pair_scoring_mode == "cosine":
             if self._config.cosine_marginal_biases:
                 if (
@@ -635,6 +681,61 @@ class RewardModel(nn.Module):
                     )
                 )
             )
+            joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
+        elif self._config.pair_scoring_mode == "fusion_contrastive":
+            if (
+                self.contrastive_protein_projection is None
+                or self.contrastive_molecule_projection is None
+            ):
+                raise RuntimeError("Contrastive projections are not initialized")
+            contrastive_protein = self.projection_dropout(
+                self.contrastive_protein_projection(
+                    masked_pool(
+                        protein_tokens,
+                        protein_mask,
+                        self._config.protein_pooling_type
+                        or self._config.pooling_type,
+                    )
+                )
+            )
+            contrastive_molecule = self.projection_dropout(
+                self.contrastive_molecule_projection(
+                    masked_pool(
+                        molecule_tokens,
+                        molecule_mask,
+                        self._config.molecule_pooling_type
+                        or self._config.pooling_type,
+                    )
+                )
+            )
+            protein_tokens, molecule_tokens = self._project_tokens(
+                protein_tokens,
+                molecule_tokens,
+            )
+            if self.fusion is None:
+                raise RuntimeError("Token fusion is not initialized")
+            fused_protein, fused_molecule = self.fusion(
+                protein_tokens=protein_tokens,
+                molecule_tokens=molecule_tokens,
+                protein_mask=protein_mask,
+                molecule_mask=molecule_mask,
+            )
+            classification_protein = masked_pool(
+                fused_protein,
+                protein_mask,
+                self._config.protein_pooling_type or self._config.pooling_type,
+            )
+            classification_molecule = masked_pool(
+                fused_molecule,
+                molecule_mask,
+                self._config.molecule_pooling_type or self._config.pooling_type,
+            )
+            pooled_protein = contrastive_protein
+            pooled_molecule = contrastive_molecule
+            joint_embedding = torch.cat(
+                [classification_protein, classification_molecule],
+                dim=-1,
+            )
         else:
             protein_tokens, molecule_tokens = self._project_tokens(
                 protein_tokens,
@@ -658,7 +759,7 @@ class RewardModel(nn.Module):
                 molecule_mask,
                 self._config.molecule_pooling_type or self._config.pooling_type,
             )
-        joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
+            joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
 
         (
             ranking_score,
@@ -726,11 +827,7 @@ class RewardModel(nn.Module):
                 contrastive_group_ids,
                 contrastive_target_ids,
                 contrastive_molecule_ids,
-                score_scale=(
-                    score_scale
-                    if self._config.cosine_marginal_biases
-                    else None
-                ),
+                score_scale=score_scale,
             )
             weighted_contrastive = (
                 contrastive_loss * self._config.contrastive_loss_weight

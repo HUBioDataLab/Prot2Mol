@@ -307,7 +307,12 @@ class RewardModelTrainer(Trainer):
                 or default_learning_rate
             )
         if parameter_name.startswith(
-            ("protein_projection.", "molecule_projection.")
+            (
+                "protein_projection.",
+                "molecule_projection.",
+                "contrastive_protein_projection.",
+                "contrastive_molecule_projection.",
+            )
         ):
             return float(projection_learning_rate or default_learning_rate)
         return float(default_learning_rate)
@@ -521,6 +526,8 @@ class RewardModelTrainer(Trainer):
         if (
             getattr(config, "pair_scoring_mode", "mlp") != "scaled_cosine"
             and not getattr(config, "cosine_marginal_biases", False)
+            and getattr(config, "pair_scoring_mode", "mlp")
+            != "fusion_contrastive"
         ):
             return {}
         logit_scale = getattr(model, "logit_scale", None)
@@ -937,6 +944,7 @@ class RewardModelTrainer(Trainer):
         gathered_protein_embeddings: list[torch.Tensor] = []
         gathered_molecule_embeddings: list[torch.Tensor] = []
         gathered_protein_shuffled_scores: list[torch.Tensor] = []
+        contrastive_score_scale: float | None = None
         for batch in dataloader:
             batch = self._prepare_inputs(batch)
             with torch.no_grad(), self.compute_loss_context_manager():
@@ -951,6 +959,17 @@ class RewardModelTrainer(Trainer):
             ]
             if outputs.cosine_similarity is not None:
                 gathered_values.append(outputs.cosine_similarity.detach())
+            if outputs.score_scale is not None:
+                current_scale = float(outputs.score_scale.detach().float().cpu().item())
+                if contrastive_score_scale is None:
+                    contrastive_score_scale = current_scale
+                elif not math.isclose(
+                    contrastive_score_scale,
+                    current_scale,
+                    rel_tol=1.0e-6,
+                    abs_tol=1.0e-6,
+                ):
+                    raise RuntimeError("Cosine score scale changed during evaluation")
             protein_embedding_index = None
             molecule_embedding_index = None
             if contrastive_evaluation_enabled:
@@ -1098,7 +1117,11 @@ class RewardModelTrainer(Trainer):
                 molecule_identity_ids=_encode_identity_ids(
                     active_eval_dataset.example_dataset["compound_id"]
                 ),
-                temperature=model_config.ranking_temperature,
+                temperature=(
+                    1.0 / contrastive_score_scale
+                    if contrastive_score_scale is not None
+                    else model_config.ranking_temperature
+                ),
                 active_threshold=model_config.contrastive_active_threshold,
                 strict_active_only=(
                     model_config.contrastive_strict_active_only

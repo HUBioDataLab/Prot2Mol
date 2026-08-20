@@ -10,20 +10,23 @@ model:
   molecule_max_length: 256
   fusion_hidden_dim: 128
   projection_type: nonlinear
+  fusion_num_heads: 8
+  fusion_attention_backend: sdpa
+  fusion_residual: true
   dropout: 0.0
   pooling_type: cls
   protein_pooling_type: mean
   molecule_pooling_type: cls
-  pair_scoring_mode: cosine
-  cosine_classification_mlp: false
-  cosine_marginal_biases: true
+  pair_scoring_mode: fusion_contrastive
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
   activity_threshold: 6.0
   ranking_loss_weight: 0.0
   contrastive_loss_weight: 0.5
   contrastive_active_threshold: 6.0
   contrastive_strict_active_only: true
   classification_loss_weight: 0.5
-  ranking_temperature: 0.07692307692307693
+  ranking_temperature: 1.0
   ranking_affinity_margin: 0.47712125472
   ranking_min_pchembl_span: 0.5
   bce_pos_weight: 1.0
@@ -46,7 +49,7 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/random_assay_seen_target_contrastive_classification_2gpu
+  output_dir: ../outputs/random_assay_seen_target_fusion_contrastive_classification_2gpu
   num_train_epochs: 100
   per_device_train_batch_size: 12
   per_device_eval_batch_size: 32

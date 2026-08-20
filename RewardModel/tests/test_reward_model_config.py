@@ -111,6 +111,10 @@ def test_reward_model_config_validates_ligunity_contrastive_settings():
     assert config.contrastive_loss_weight == pytest.approx(0.5)
     assert config.contrastive_active_threshold == pytest.approx(5.0)
     assert config.contrastive_strict_active_only is False
+    assert RewardModelConfig(
+        pair_scoring_mode="fusion_contrastive",
+        contrastive_loss_weight=0.5,
+    ).pair_scoring_mode == "fusion_contrastive"
 
     with pytest.raises(ValueError, match="contrastive_loss_weight"):
         RewardModelConfig(contrastive_loss_weight=-0.1)
@@ -118,7 +122,7 @@ def test_reward_model_config_validates_ligunity_contrastive_settings():
         RewardModelConfig(contrastive_active_threshold=float("nan"))
     with pytest.raises(ValueError, match="contrastive_strict_active_only"):
         RewardModelConfig(contrastive_strict_active_only="true")
-    with pytest.raises(ValueError, match="pair_scoring_mode='cosine'"):
+    with pytest.raises(ValueError, match="pair_scoring_mode"):
         RewardModelConfig(
             pair_scoring_mode="mlp",
             contrastive_loss_weight=0.5,
