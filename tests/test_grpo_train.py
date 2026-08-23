@@ -77,10 +77,10 @@ def _write_random_split(tmp_path):
     structures = tmp_path / "structures.parquet"
     pd.DataFrame(
         {
-            "protein_accession": ["P1", "P1", "P2"],
-            "protein_sequence": ["AC", "AC", "GT"],
-            "smiles": ["C", "CC", "O"],
-            "binary_label": [1, 0, 1],
+            "protein_accession": ["P1", "P1", "P1", "P2", "P2"],
+            "protein_sequence": ["AC", "AC", "AC", "GT", "GT"],
+            "smiles": ["C", "CC", "CCC", "O", "CO"],
+            "binary_label": [1, 1, 0, 1, 1],
         }
     ).to_parquet(train, index=False)
     pd.DataFrame(
@@ -163,6 +163,17 @@ def test_unique_proteins_require_and_join_structure_aware_sequences(tmp_path):
     ]
     with pytest.raises(ValueError, match="requires a separate SaProt/Foldseek"):
         grpo_train.load_unique_training_proteins(train)
+
+
+def test_training_property_stats_use_unique_active_training_molecules(tmp_path):
+    train, _, _ = _write_random_split(tmp_path)
+
+    stats = grpo_train.load_training_active_property_stats(train, ["AC", "GT"])
+
+    assert stats["AC"].active_count == 2
+    assert stats["GT"].active_count == 2
+    assert stats["AC"].logp_std > 0.0
+    assert stats["AC"].sas_std > 0.0
 
 
 def test_unique_proteins_can_validate_only_fixed_training_panel(tmp_path):
@@ -371,6 +382,13 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "chemically_valid",
         "reward_eligible",
         "activity_reward",
+        "activity_probability",
+        "property_shaped_reward",
+        "logp_penalty_factor",
+        "sas_penalty_factor",
+        "property_penalty_factor",
+        "logp_violation",
+        "sas_violation",
         "qed",
         "sas",
         "logp",
@@ -378,12 +396,16 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert json.loads((output / "training_summary.json").read_text())["global_step"] == 2
     logged = [values for _, values in fake_runs[0].logs]
     assert any("grpo/reward_mean" in values for values in logged)
+    assert any("grpo/valid_activity_probability_mean" in values for values in logged)
+    assert any("grpo/property_penalty_factor_mean" in values for values in logged)
     assert any("grpo/qed_mean" in values for values in logged)
     assert any("grpo/sas_mean" in values for values in logged)
     assert any("grpo/valid_unique_fraction" in values for values in logged)
     assert any(values.get("grpo/optimization_iterations") == 2.0 for values in logged)
     assert any(values.get("grpo/sequence_normalized_loss") == 1.0 for values in logged)
     assert any("eval/fcd_macro" in values for values in logged)
+    assert any("eval/activity_probability_mean_macro" in values for values in logged)
+    assert any("eval/logp_violation_fraction_macro" in values for values in logged)
     assert any("eval/per_protein" in values for values in logged)
     assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True

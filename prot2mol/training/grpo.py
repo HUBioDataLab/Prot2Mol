@@ -83,6 +83,7 @@ class GRPORollout:
     reference_log_probs: torch.Tensor
     action_mask: torch.Tensor
     rewards: torch.Tensor
+    reward_diagnostics: dict[str, torch.Tensor]
     advantages: torch.Tensor
     generated_selfies: list[str]
     generated_smiles: list[str]
@@ -367,9 +368,10 @@ class GRPOTrainer:
         generated_smiles: Sequence[str],
         valid_mask: torch.Tensor,
         device: torch.device,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         valid_indices = torch.nonzero(valid_mask, as_tuple=False).flatten().tolist()
         rewards = torch.zeros(len(generated_smiles), dtype=torch.float32, device=device)
+        diagnostics: dict[str, torch.Tensor] = {}
         reward_molecules = (
             generated_selfies
             if self.reward_molecule_representation == "selfies"
@@ -394,7 +396,36 @@ class GRPOTrainer:
                     "reward function returned values outside the configured reward range"
                 )
             rewards[torch.tensor(valid_indices, device=device)] = scored
-        return rewards
+            diagnostics_provider = getattr(
+                self.reward_function,
+                "last_diagnostics",
+                None,
+            )
+            if callable(diagnostics_provider):
+                valid_diagnostics = diagnostics_provider()
+                for name, values in valid_diagnostics.items():
+                    valid_values = torch.as_tensor(
+                        values,
+                        dtype=torch.float32,
+                        device=device,
+                    ).reshape(-1)
+                    if valid_values.numel() != len(valid_indices):
+                        raise ValueError(
+                            f"Reward diagnostic {name!r} returned the wrong number "
+                            "of values"
+                        )
+                    if not torch.isfinite(valid_values).all():
+                        raise ValueError(
+                            f"Reward diagnostic {name!r} returned non-finite values"
+                        )
+                    aligned = torch.zeros(
+                        len(generated_smiles),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    aligned[torch.tensor(valid_indices, device=device)] = valid_values
+                    diagnostics[name] = aligned
+        return rewards, diagnostics
 
     def collect_rollouts(
         self,
@@ -493,7 +524,7 @@ class GRPOTrainer:
             if self.config.require_eos_for_reward
             else torch.ones_like(terminated_mask)
         )
-        rewards = self._score_rewards(
+        rewards, reward_diagnostics = self._score_rewards(
             repeated_reward_sequences,
             generated_selfies,
             generated_smiles,
@@ -519,6 +550,7 @@ class GRPOTrainer:
             reference_log_probs=reference_log_probs,
             action_mask=action_mask,
             rewards=rewards,
+            reward_diagnostics=reward_diagnostics,
             advantages=advantages,
             generated_selfies=generated_selfies,
             generated_smiles=generated_smiles,
@@ -629,6 +661,62 @@ class GRPOTrainer:
             "grpo/num_sequences": float(rollout.rewards.numel()),
             "grpo/num_action_tokens": float(rollout.action_mask.sum().cpu()),
         }
+        if rollout.reward_diagnostics:
+            valid_diagnostics = {
+                name: values[rollout.valid_mask]
+                for name, values in rollout.reward_diagnostics.items()
+            }
+
+            def diagnostic_mean(name: str) -> float:
+                values = valid_diagnostics.get(name)
+                if values is None or not values.numel():
+                    return 0.0
+                return float(values.mean().detach().cpu())
+
+            def diagnostic_max(name: str) -> float:
+                values = valid_diagnostics.get(name)
+                if values is None or not values.numel():
+                    return 0.0
+                return float(values.max().detach().cpu())
+
+            activity = valid_diagnostics.get("activity_probability")
+            metrics.update(
+                {
+                    "grpo/valid_activity_probability_mean": diagnostic_mean(
+                        "activity_probability"
+                    ),
+                    "grpo/valid_activity_probability_high_saturation_fraction": (
+                        float(
+                            activity.ge(high_saturation_limit)
+                            .float()
+                            .mean()
+                            .detach()
+                            .cpu()
+                        )
+                        if activity is not None and activity.numel()
+                        else 0.0
+                    ),
+                    "grpo/property_penalty_factor_mean": diagnostic_mean(
+                        "property_penalty_factor"
+                    ),
+                    "grpo/logp_penalty_factor_mean": diagnostic_mean(
+                        "logp_penalty_factor"
+                    ),
+                    "grpo/sas_penalty_factor_mean": diagnostic_mean(
+                        "sas_penalty_factor"
+                    ),
+                    "grpo/logp_violation_fraction": diagnostic_mean(
+                        "logp_violation"
+                    ),
+                    "grpo/sas_violation_fraction": diagnostic_mean(
+                        "sas_violation"
+                    ),
+                    "grpo/logp_excess_z_mean": diagnostic_mean("logp_excess_z"),
+                    "grpo/logp_excess_z_max": diagnostic_max("logp_excess_z"),
+                    "grpo/sas_excess_z_mean": diagnostic_mean("sas_excess_z"),
+                    "grpo/sas_excess_z_max": diagnostic_max("sas_excess_z"),
+                }
+            )
         metrics.update(
             {
                 f"grpo/{'property_count' if name == 'count' else name}": value

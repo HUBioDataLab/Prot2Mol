@@ -36,7 +36,11 @@ from ..io.hf_utils import (
     load_prot2mol_inference_model,
     save_model_config,
 )
-from ..rewards import FusionDTIActivityScorer
+from ..rewards import (
+    FusionDTIActivityScorer,
+    TargetActivePropertyStats,
+    TargetPropertyShapedActivityScorer,
+)
 from .grpo import GRPOConfig, GRPOTrainer, selfies_to_smiles, valid_selfies
 
 
@@ -286,6 +290,64 @@ def load_active_references(
     }
 
 
+def load_training_active_property_stats(
+    train_parquet_path: str | Path,
+    protein_sequences: Sequence[str],
+    *,
+    protein_sequence_column: str = "protein_sequence",
+    smiles_column: str = "smiles",
+    label_column: str = "binary_label",
+) -> dict[str, TargetActivePropertyStats]:
+    """Calculate target-property distributions from unique training actives."""
+
+    path = Path(train_parquet_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Random-split training Parquet not found: {path}")
+    names = _schema_names(path)
+    columns = (protein_sequence_column, smiles_column, label_column)
+    missing = sorted(set(columns).difference(names))
+    if missing:
+        raise ValueError(f"Training Parquet lacks required columns: {missing}")
+    requested = {str(sequence).strip().upper() for sequence in protein_sequences}
+    if not requested:
+        raise ValueError("Property shaping requires at least one target protein")
+    active_smiles: dict[str, set[str]] = {sequence: set() for sequence in requested}
+    for row in _iter_parquet_rows(path, columns):
+        if int(row[label_column] or 0) != 1:
+            continue
+        sequence = str(row[protein_sequence_column] or "").strip().upper()
+        if sequence not in active_smiles:
+            continue
+        smiles = canonic_smiles(row[smiles_column])
+        if smiles:
+            active_smiles[sequence].add(smiles)
+
+    stats: dict[str, TargetActivePropertyStats] = {}
+    insufficient = []
+    for sequence in sorted(requested):
+        smiles = sorted(active_smiles[sequence])
+        if len(smiles) < 2:
+            insufficient.append((sequence, len(smiles)))
+            continue
+        rows = molecular_property_rows(smiles)
+        logp = np.asarray([row["logp"] for row in rows], dtype=np.float64)
+        sas = np.asarray([row["sas"] for row in rows], dtype=np.float64)
+        stats[sequence] = TargetActivePropertyStats(
+            active_count=len(smiles),
+            logp_mean=float(logp.mean()),
+            logp_std=float(logp.std(ddof=0)),
+            sas_mean=float(sas.mean()),
+            sas_std=float(sas.std(ddof=0)),
+        )
+    if insufficient:
+        examples = [(sequence[:12], count) for sequence, count in insufficient[:5]]
+        raise ValueError(
+            "Property shaping requires at least two unique training actives per "
+            f"protein; insufficient examples: {examples}"
+        )
+    return stats
+
+
 def select_evaluation_targets(
     proteins: Sequence[ProteinRecord],
     active_references: Mapping[str, Sequence[str]],
@@ -505,13 +567,21 @@ class GRPOTrainingRun:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.policy: torch.nn.Module | None = None
         self.reference_policy: torch.nn.Module | None = None
-        self.reward_scorer: FusionDTIActivityScorer | None = None
+        self.reward_scorer: torch.nn.Module | None = None
         self.optimizer: torch.optim.Optimizer | None = None
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         self.trainer: GRPOTrainer | None = None
         self.proteins: list[ProteinRecord] = []
         self.source_unique_protein_count = 0
         self.evaluation_targets: list[EvaluationTarget] = []
+        self.property_stats_by_sequence: dict[
+            str,
+            TargetActivePropertyStats,
+        ] = {}
+        self.property_stats_by_reward_sequence: dict[
+            str,
+            TargetActivePropertyStats,
+        ] = {}
         self.molecule_tokenizer = None
         self.protein_tokenizer = None
         self._fcd = None
@@ -562,6 +632,20 @@ class GRPOTrainingRun:
             self.proteins = [target.protein for target in self.evaluation_targets]
         else:
             self.proteins = source_proteins
+        if self.config.property_reward_shaping:
+            self.property_stats_by_sequence = load_training_active_property_stats(
+                self.config.train_parquet_path,
+                [protein.protein_sequence for protein in self.proteins],
+                protein_sequence_column=self.config.protein_sequence_column,
+                smiles_column=self.config.smiles_column,
+                label_column=self.config.label_column,
+            )
+            self.property_stats_by_reward_sequence = {
+                protein.reward_protein_sequence: self.property_stats_by_sequence[
+                    protein.protein_sequence
+                ]
+                for protein in self.proteins
+            }
         self._save_cohort_manifest()
         LOGGER.info(
             "Selected %d training proteins from %d unique source proteins; "
@@ -572,8 +656,9 @@ class GRPOTrainingRun:
         )
 
     def _save_cohort_manifest(self) -> None:
-        rows = [
-            {
+        rows = []
+        for index, target in enumerate(self.evaluation_targets):
+            row = {
                 "cohort_index": index,
                 "protein_id": target.protein.protein_id,
                 "protein_sequence": target.protein.protein_sequence,
@@ -583,8 +668,16 @@ class GRPOTrainingRun:
                     target.active_reference_smiles
                 ),
             }
-            for index, target in enumerate(self.evaluation_targets)
-        ]
+            stats = self.property_stats_by_sequence.get(
+                target.protein.protein_sequence
+            )
+            if stats is not None:
+                row.update(
+                    stats.as_dict(
+                        allowed_sigma=self.config.property_allowed_sigma
+                    )
+                )
+            rows.append(row)
         pq.write_table(pa.Table.from_pylist(rows), self.output_dir / "cohort.parquet")
         manifest = {
             "selection_seed": self.config.seed,
@@ -596,6 +689,14 @@ class GRPOTrainingRun:
             "generator_max_protein_length": self.config.prot_max_length,
             "reward_max_protein_residues": self.config.reward_protein_max_residues,
             "minimum_unique_active_references": self.config.min_fcd_reference_actives,
+            "property_reward_shaping": self.config.property_reward_shaping,
+            "property_statistics_source": "unique canonical training-split actives",
+            "property_allowed_sigma": self.config.property_allowed_sigma,
+            "property_penalty_strength": self.config.property_penalty_strength,
+            "property_reward_formula": (
+                "activity_probability * exp(-strength * logp_excess_z^2) * "
+                "exp(-strength * sas_excess_z^2)"
+            ),
         }
         (self.output_dir / "cohort.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True),
@@ -652,7 +753,7 @@ class GRPOTrainingRun:
             trainable_projection=False,
             trainable_decoder=True,
         )
-        self.reward_scorer = FusionDTIActivityScorer.from_pretrained(
+        activity_scorer = FusionDTIActivityScorer.from_pretrained(
             dataset=self.config.fusiondti_dataset,
             device=self.device,
             batch_size=self.config.reward_batch_size,
@@ -660,6 +761,16 @@ class GRPOTrainingRun:
             cache_dir=self.config.models_base,
             local_files_only=self.config.local_files_only,
             protein_cache_size=self.config.reward_protein_cache_size,
+        )
+        self.reward_scorer = (
+            TargetPropertyShapedActivityScorer(
+                activity_scorer,
+                self.property_stats_by_reward_sequence,
+                allowed_sigma=self.config.property_allowed_sigma,
+                penalty_strength=self.config.property_penalty_strength,
+            )
+            if self.config.property_reward_shaping
+            else activity_scorer
         )
         trainable_parameters = [
             parameter for parameter in self.policy.parameters() if parameter.requires_grad
@@ -714,6 +825,27 @@ class GRPOTrainingRun:
         LOGGER.info("Policy parameters: %s", counts)
         LOGGER.info("Only the molecule decoder is trainable")
 
+    def _property_reward_contract(self) -> dict[str, Any]:
+        rows = [
+            {
+                "protein_id": protein.protein_id,
+                **self.property_stats_by_sequence[protein.protein_sequence].as_dict(
+                    allowed_sigma=self.config.property_allowed_sigma
+                ),
+            }
+            for protein in self.proteins
+            if protein.protein_sequence in self.property_stats_by_sequence
+        ]
+        digest = hashlib.sha256(
+            json.dumps(rows, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return {
+            "enabled": self.config.property_reward_shaping,
+            "allowed_sigma": self.config.property_allowed_sigma,
+            "penalty_strength": self.config.property_penalty_strength,
+            "training_active_statistics_sha256": digest,
+        }
+
     def _checkpoint_payload(self, *, epoch: int, next_index: int) -> dict[str, Any]:
         assert self.policy is not None
         assert self.optimizer is not None
@@ -735,6 +867,7 @@ class GRPOTrainingRun:
             "generator_checkpoint": str(Path(self.config.generator_checkpoint).resolve()),
             "train_parquet_path": str(Path(self.config.train_parquet_path).resolve()),
             "cohort_protein_ids": [protein.protein_id for protein in self.proteins],
+            "property_reward_contract": self._property_reward_contract(),
             "wandb_run_id": self.wandb_run.id if self.wandb_run is not None else None,
         }
         if torch.cuda.is_available():
@@ -775,6 +908,7 @@ class GRPOTrainingRun:
                     "generator_checkpoint",
                     "train_parquet_path",
                     "cohort_protein_ids",
+                    "property_reward_contract",
                     "wandb_run_id",
                 )
             }
@@ -811,6 +945,10 @@ class GRPOTrainingRun:
         expected_cohort = [protein.protein_id for protein in self.proteins]
         if payload.get("cohort_protein_ids") != expected_cohort:
             raise ValueError("Resume checkpoint was created for a different protein cohort")
+        if payload.get("property_reward_contract") != self._property_reward_contract():
+            raise ValueError(
+                "Resume checkpoint was created with a different property reward contract"
+            )
         _load_trainable_state_dict(self.policy, payload["policy_trainable_state"])
         self.optimizer.load_state_dict(payload["optimizer_state"])
         self.scheduler.load_state_dict(payload["scheduler_state"])
@@ -963,12 +1101,45 @@ class GRPOTrainingRun:
         valid_indices = [index for index, value in enumerate(valid) if value]
         valid_smiles = [smiles[index] for index in valid_indices]
         rewards = np.zeros(len(selfies), dtype=np.float32)
+        diagnostic_names = (
+            "activity_probability",
+            "logp_penalty_factor",
+            "sas_penalty_factor",
+            "property_penalty_factor",
+            "logp_excess_z",
+            "sas_excess_z",
+            "logp_violation",
+            "sas_violation",
+        )
+        diagnostics = {
+            name: np.zeros(len(selfies), dtype=np.float32)
+            for name in diagnostic_names
+        }
         if valid_indices:
             reward_values = self.reward_scorer(
                 [target.protein.reward_protein_sequence] * len(valid_indices),
                 [selfies[index] for index in valid_indices],
             ).numpy()
             rewards[valid_indices] = reward_values
+            diagnostics_provider = getattr(
+                self.reward_scorer,
+                "last_diagnostics",
+                None,
+            )
+            if callable(diagnostics_provider):
+                valid_diagnostics = diagnostics_provider()
+                for name in diagnostic_names:
+                    values = np.asarray(valid_diagnostics[name], dtype=np.float32)
+                    if len(values) != len(valid_indices):
+                        raise ValueError(
+                            f"Evaluation reward diagnostic {name!r} is misaligned"
+                        )
+                    diagnostics[name][valid_indices] = values
+            else:
+                diagnostics["activity_probability"][valid_indices] = reward_values
+                diagnostics["logp_penalty_factor"][valid_indices] = 1.0
+                diagnostics["sas_penalty_factor"][valid_indices] = 1.0
+                diagnostics["property_penalty_factor"][valid_indices] = 1.0
         properties = _evaluation_property_summary(valid_smiles)
         aligned_properties = molecular_property_rows(
             [smiles[index] if valid[index] else "" for index in range(len(smiles))]
@@ -996,6 +1167,43 @@ class GRPOTrainingRun:
             "valid_reward_mean": (
                 float(rewards[valid_indices].mean()) if valid_indices else 0.0
             ),
+            "activity_probability_mean": float(
+                diagnostics["activity_probability"].mean()
+            ),
+            "valid_activity_probability_mean": (
+                float(
+                    diagnostics["activity_probability"][valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "property_penalty_factor_mean": (
+                float(
+                    diagnostics["property_penalty_factor"][valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "logp_penalty_factor_mean": (
+                float(diagnostics["logp_penalty_factor"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "sas_penalty_factor_mean": (
+                float(diagnostics["sas_penalty_factor"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "logp_violation_fraction": (
+                float(diagnostics["logp_violation"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "sas_violation_fraction": (
+                float(diagnostics["sas_violation"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
             "fcd": fcd_value,
             **properties,
         }
@@ -1009,6 +1217,23 @@ class GRPOTrainingRun:
                 "chemically_valid": chemically_valid[index],
                 "reward_eligible": valid[index],
                 "activity_reward": float(rewards[index]),
+                "activity_probability": float(
+                    diagnostics["activity_probability"][index]
+                ),
+                "property_shaped_reward": float(rewards[index]),
+                "logp_penalty_factor": float(
+                    diagnostics["logp_penalty_factor"][index]
+                ),
+                "sas_penalty_factor": float(
+                    diagnostics["sas_penalty_factor"][index]
+                ),
+                "property_penalty_factor": float(
+                    diagnostics["property_penalty_factor"][index]
+                ),
+                "logp_excess_z": float(diagnostics["logp_excess_z"][index]),
+                "sas_excess_z": float(diagnostics["sas_excess_z"][index]),
+                "logp_violation": bool(diagnostics["logp_violation"][index]),
+                "sas_violation": bool(diagnostics["sas_violation"][index]),
                 **aligned_properties[index],
             }
             for index in range(len(selfies))
@@ -1107,6 +1332,34 @@ class GRPOTrainingRun:
             ),
             "eval/reward_mean_macro": self._macro(rows, "reward_mean"),
             "eval/valid_reward_mean_macro": self._macro(rows, "valid_reward_mean"),
+            "eval/activity_probability_mean_macro": self._macro(
+                rows,
+                "activity_probability_mean",
+            ),
+            "eval/valid_activity_probability_mean_macro": self._macro(
+                rows,
+                "valid_activity_probability_mean",
+            ),
+            "eval/property_penalty_factor_mean_macro": self._macro(
+                rows,
+                "property_penalty_factor_mean",
+            ),
+            "eval/logp_penalty_factor_mean_macro": self._macro(
+                rows,
+                "logp_penalty_factor_mean",
+            ),
+            "eval/sas_penalty_factor_mean_macro": self._macro(
+                rows,
+                "sas_penalty_factor_mean",
+            ),
+            "eval/logp_violation_fraction_macro": self._macro(
+                rows,
+                "logp_violation_fraction",
+            ),
+            "eval/sas_violation_fraction_macro": self._macro(
+                rows,
+                "sas_violation_fraction",
+            ),
             "eval/qed_mean_macro": self._macro(rows, "qed_mean"),
             "eval/sas_mean_macro": self._macro(rows, "sas_mean"),
             "eval/logp_mean_macro": self._macro(rows, "logp_mean"),
@@ -1131,6 +1384,13 @@ class GRPOTrainingRun:
                 "valid_unique_fraction",
                 "reward_mean",
                 "valid_reward_mean",
+                "activity_probability_mean",
+                "valid_activity_probability_mean",
+                "property_penalty_factor_mean",
+                "logp_penalty_factor_mean",
+                "sas_penalty_factor_mean",
+                "logp_violation_fraction",
+                "sas_violation_fraction",
                 "qed_mean",
                 "sas_mean",
                 "logp_mean",
@@ -1383,6 +1643,13 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     reward.add_argument("--reward_protein_max_residues", type=int, default=510)
     reward.add_argument("--reward_protein_cache_size", type=int, default=64)
     reward.add_argument(
+        "--property_reward_shaping",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    reward.add_argument("--property_allowed_sigma", type=float, default=2.0)
+    reward.add_argument("--property_penalty_strength", type=float, default=0.5)
+    reward.add_argument(
         "--local_files_only",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1459,6 +1726,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "reward_batch_size": config.reward_batch_size,
         "reward_protein_max_residues": config.reward_protein_max_residues,
         "reward_protein_cache_size": config.reward_protein_cache_size,
+        "property_allowed_sigma": config.property_allowed_sigma,
+        "property_penalty_strength": config.property_penalty_strength,
         "eval_samples_per_protein": config.eval_samples_per_protein,
     }
     invalid = {key: value for key, value in positive.items() if value <= 0}

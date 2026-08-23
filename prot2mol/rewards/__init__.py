@@ -14,6 +14,10 @@ from .fusiondti import (
     download_fusiondti_artifacts,
     load_fusiondti_head,
 )
+from .property_shaping import (
+    TargetActivePropertyStats,
+    TargetPropertyShapedActivityScorer,
+)
 
 __all__ = [
     "FUSIONDTI_MOLECULE_MODEL_ID",
@@ -28,4 +32,6 @@ __all__ = [
     "FusionDTISelfiesTokenizer",
     "download_fusiondti_artifacts",
     "load_fusiondti_head",
+    "TargetActivePropertyStats",
+    "TargetPropertyShapedActivityScorer",
 ]
