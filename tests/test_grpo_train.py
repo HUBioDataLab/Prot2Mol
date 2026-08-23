@@ -252,13 +252,17 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
             "8",
             "--max_steps",
             "2",
+            "--no-train_on_evaluation_panel_only",
             "--eval_proteins",
             "1",
+            "--wandb_target_metric_ids",
+            "P1",
             "--eval_samples_per_protein",
             "8",
+            "--min_fcd_reference_actives",
+            "2",
             "--eval_steps",
             "1",
-            "--no-eval_at_start",
             "--save_steps",
             "1",
             "--wandb_mode",
@@ -275,6 +279,26 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert summary["unique_training_proteins"] == 2
     assert (output / "checkpoint-2" / "trainer_state.pt").exists()
     assert (output / "final" / "pytorch_model.bin").exists()
+    assert (output / "cohort.parquet").exists()
+    assert (output / "evaluation" / "start" / "generated_molecules.parquet").exists()
+    assert (output / "evaluation" / "start" / "per_protein_metrics.parquet").exists()
+    assert (output / "evaluation" / "end" / "generated_molecules.parquet").exists()
+    assert (output / "evaluation" / "end" / "per_protein_metrics.parquet").exists()
+    endpoint_rows = pd.read_parquet(
+        output / "evaluation" / "end" / "generated_molecules.parquet"
+    )
+    assert len(endpoint_rows) == 8
+    assert {
+        "generated_selfies",
+        "generated_smiles",
+        "terminated",
+        "chemically_valid",
+        "reward_eligible",
+        "activity_reward",
+        "qed",
+        "sas",
+        "logp",
+    }.issubset(endpoint_rows.columns)
     assert json.loads((output / "training_summary.json").read_text())["global_step"] == 2
     logged = [values for _, values in fake_runs[0].logs]
     assert any("grpo/reward_mean" in values for values in logged)
@@ -283,10 +307,7 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("grpo/valid_unique_fraction" in values for values in logged)
     assert any("eval/fcd_macro" in values for values in logged)
     assert any("eval/per_protein" in values for values in logged)
-    assert any(
-        any(key.startswith("eval/targets/") and key.endswith("/fcd") for key in values)
-        for values in logged
-    )
+    assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True
 
     resume_config = grpo_train.parse_arguments(

@@ -269,21 +269,36 @@ python prot2mol/main.py grpo --config prot2mol/configs/grpo.yaml
 
 The supplied config matches the downloaded GPT-2 checkpoint: 12 layers, 16
 heads, hidden size 1280, protein length 1000, molecule length 200, BF16, group
-size 8, and protein batch size 1. A fixed-seed evaluation is logged at step 0,
-every 500 updates, and at the end. AKT1 (`P31749` / `CHEMBL4282`) is included in
-the default four-protein panel; it has 315 unique active references in this
-validation split. Add or replace `eval_protein_ids` to track other named targets.
+size 8, and protein batch size 1. GRPO is restricted to a fixed 40-protein
+cohort: AKT1 (`P31749` / `CHEMBL4282`), CDK2 (`P24941` / `CHEMBL301`), and 38
+seed-selected proteins with at least 200 unique active validation references.
+Proteins longer than the generator's 1000-residue context are excluded from the
+random selection. The exact cohort is saved as `cohort.json` and
+`cohort.parquet` before model loading.
 
 W&B receives every GRPO loss/reward/KL/advantage/update metric plus EOS,
 truncation, validity, valid uniqueness, QED, SAS, logP, step time, process RAM,
 and CUDA allocated/reserved/peak memory. Periodic evaluation adds macro reward,
-validity, uniqueness, QED, SAS, logP, target-conditional FCD, and an
-`eval/per_protein` table. FCD is not computed from an eight-molecule training
-group; the default evaluation generates 4 x 64 = 256 molecules and compares
-each protein only with its own validation actives.
-The fixed panel also gets per-target scalar series under
-`eval/targets/<protein_accession>/...`, so AKT1 FCD/reward/QED/SAS/logP can be
-plotted directly rather than recovered from the table.
+validity, uniqueness, QED, SAS, logP, target-conditional FCD, and one
+`eval/per_protein` table containing all 40 proteins. FCD is not computed from an
+eight-molecule training group; the endpoint evaluation generates
+40 x 64 = 2,560 molecules and compares each protein only with its own validation
+actives. Only AKT1 and CDK2 get individual scalar series under
+`eval/targets/<protein_accession>/...`; the other 38 do not create W&B plots.
+
+Fixed-seed molecule-level start and end snapshots are written to:
+
+```text
+evaluation/start/generated_molecules.parquet
+evaluation/start/per_protein_metrics.parquet
+evaluation/end/generated_molecules.parquet
+evaluation/end/per_protein_metrics.parquet
+```
+
+Each molecule row retains SELFIES, canonical SMILES, EOS/validity status,
+FusionDTI probability, QED, SAS, and logP. Matching seeds make the baseline and
+post-GRPO distributions directly comparable; both endpoint folders also include
+JSON metrics and sampling metadata.
 
 Intermediate checkpoints contain the trainable decoder, optimizer, scheduler,
 RNG, epoch/protein position, W&B run ID, and base-checkpoint identity. Resume

@@ -50,18 +50,62 @@ grpo:
   precision: bf16
   seed: 42
   device: cuda
+  train_on_evaluation_panel_only: true
 
   # Fixed-seed baseline at step 0, then periodic target-conditional evaluation.
-  # Four proteins x 64 generations gives 256 molecules per evaluation pass.
+  # Forty proteins x 64 generations gives 2,560 molecules per endpoint.
   eval_at_start: true
   eval_steps: 500
-  eval_proteins: 4
-  # AKT1/P31749 is always included; the remaining three are seed-selected.
+  eval_proteins: 40
+  # Fixed seed-42 cohort: AKT1, CDK2, then 38 eligible random proteins.
   eval_protein_ids:
     - P31749
+    - P24941
+    - Q15118
+    - Q9BY41
+    - P21917
+    - P45452
+    - P22455
+    - Q13547
+    - Q06187
+    - P32245
+    - P05067
+    - P09960
+    - P00797
+    - P00746
+    - Q8NI77
+    - Q08345
+    - P00742
+    - P49682
+    - P41595
+    - P23975
+    - P36897
+    - Q13822
+    - Q9Y5Z0
+    - O43570
+    - P28482
+    - P49761
+    - P41144
+    - P28223
+    - P56817
+    - P03951
+    - P06276
+    - Q96RI0
+    - Q01959
+    - P20309
+    - Q16539
+    - Q9NWZ3
+    - P41143
+    - P34913
+    - Q8NER1
+    - Q99705
+  # Only these two get individual scalar plots; all 40 stay in one W&B table.
+  wandb_target_metric_ids:
+    - P31749
+    - P24941
   eval_samples_per_protein: 64
   eval_seed: 17
-  min_fcd_reference_actives: 2
+  min_fcd_reference_actives: 200
   fcd_batch_size: 256
   fcd_num_workers: 1
   fcd_model_path: null

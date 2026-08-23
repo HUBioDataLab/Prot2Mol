@@ -75,14 +75,12 @@ def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float
     happens to be zero.
     """
 
-    molecules = [get_mol(value) for value in smiles_list]
-    molecules = [molecule for molecule in molecules if molecule is not None]
+    property_rows = molecular_property_rows(smiles_list)
     values = {
-        "qed": [float(QED.qed(molecule)) for molecule in molecules],
-        "sas": [float(sascorer.calculateScore(molecule)) for molecule in molecules],
-        "logp": [float(Crippen.MolLogP(molecule)) for molecule in molecules],
+        name: [float(row[name]) for row in property_rows if row[name] is not None]
+        for name in ("qed", "sas", "logp")
     }
-    summary = {"count": float(len(molecules))}
+    summary = {"count": float(len(values["qed"]))}
     for name, property_values in values.items():
         array = np.asarray(property_values, dtype=np.float64)
         summary.update(
@@ -94,6 +92,27 @@ def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float
             }
         )
     return summary
+
+
+def molecular_property_rows(
+    smiles_list: Iterable[object],
+) -> list[dict[str, float | None]]:
+    """Return aligned per-molecule QED, SAS, and logP values."""
+
+    rows: list[dict[str, float | None]] = []
+    for value in smiles_list:
+        molecule = get_mol(value)
+        if molecule is None:
+            rows.append({"qed": None, "sas": None, "logp": None})
+        else:
+            rows.append(
+                {
+                    "qed": float(QED.qed(molecule)),
+                    "sas": float(sascorer.calculateScore(molecule)),
+                    "logp": float(Crippen.MolLogP(molecule)),
+                }
+            )
+    return rows
 
 
 def _reference_smiles(data_source) -> list[str]:

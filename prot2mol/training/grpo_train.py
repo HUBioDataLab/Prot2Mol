@@ -16,11 +16,16 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 import wandb
 
-from ..chem.utils import canonic_smiles, molecular_property_summary
+from ..chem.utils import (
+    canonic_smiles,
+    molecular_property_rows,
+    molecular_property_summary,
+)
 from ..core.protein_encoders import get_protein_tokenizer
 from ..data.pipeline import tokenize_protein_sequences_for_inference
 from ..io.config import parse_args_with_config
@@ -265,6 +270,7 @@ def select_evaluation_targets(
     seed: int,
     min_reference_actives: int,
     requested_protein_ids: Sequence[str] = (),
+    max_protein_length: int | None = None,
 ) -> list[EvaluationTarget]:
     by_id = {protein.protein_id: protein for protein in proteins}
     eligible = [
@@ -272,6 +278,10 @@ def select_evaluation_targets(
         for protein in proteins
         if len(active_references.get(protein.protein_sequence, ()))
         >= min_reference_actives
+        and (
+            max_protein_length is None
+            or len(protein.protein_sequence) <= max_protein_length
+        )
     ]
     requested = [str(value) for value in requested_protein_ids if str(value)]
     ordered = sorted(
@@ -295,6 +305,17 @@ def select_evaluation_targets(
             raise ValueError(
                 "Requested evaluation proteins lack enough validation actives for FCD: "
                 f"{insufficient}"
+            )
+        too_long = [
+            protein.protein_id
+            for protein in selected
+            if max_protein_length is not None
+            and len(protein.protein_sequence) > max_protein_length
+        ]
+        if too_long:
+            raise ValueError(
+                "Requested evaluation proteins exceed the generator protein context: "
+                f"{too_long}"
             )
         selected_ids = {protein.protein_id for protein in selected}
         selected.extend(
@@ -438,6 +459,7 @@ class GRPOTrainingRun:
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         self.trainer: GRPOTrainer | None = None
         self.proteins: list[ProteinRecord] = []
+        self.source_unique_protein_count = 0
         self.evaluation_targets: list[EvaluationTarget] = []
         self.molecule_tokenizer = None
         self.protein_tokenizer = None
@@ -448,7 +470,7 @@ class GRPOTrainingRun:
         self.wandb_run = None
 
     def _load_data(self) -> None:
-        self.proteins = load_unique_training_proteins(
+        source_proteins = load_unique_training_proteins(
             self.config.train_parquet_path,
             protein_id_column=self.config.protein_id_column,
             protein_sequence_column=self.config.protein_sequence_column,
@@ -462,20 +484,58 @@ class GRPOTrainingRun:
             smiles_column=self.config.smiles_column,
             label_column=self.config.label_column,
         )
+        self.source_unique_protein_count = len(source_proteins)
         self.evaluation_targets = select_evaluation_targets(
-            self.proteins,
+            source_proteins,
             references,
             count=self.config.eval_proteins,
             seed=self.config.seed,
             min_reference_actives=self.config.min_fcd_reference_actives,
             requested_protein_ids=self.config.eval_protein_ids,
+            max_protein_length=self.config.prot_max_length,
         )
         if self.config.eval_proteins and not self.evaluation_targets:
             raise ValueError("No proteins are eligible for target-conditional evaluation")
+        if self.config.train_on_evaluation_panel_only:
+            self.proteins = [target.protein for target in self.evaluation_targets]
+        else:
+            self.proteins = source_proteins
+        self._save_cohort_manifest()
         LOGGER.info(
-            "Loaded %d unique training proteins and %d evaluation targets",
+            "Selected %d training proteins from %d unique source proteins; "
+            "%d evaluation targets",
             len(self.proteins),
+            self.source_unique_protein_count,
             len(self.evaluation_targets),
+        )
+
+    def _save_cohort_manifest(self) -> None:
+        rows = [
+            {
+                "cohort_index": index,
+                "protein_id": target.protein.protein_id,
+                "protein_sequence": target.protein.protein_sequence,
+                "structure_aware_sequence": target.protein.reward_protein_sequence,
+                "protein_length": len(target.protein.protein_sequence),
+                "validation_active_reference_count": len(
+                    target.active_reference_smiles
+                ),
+            }
+            for index, target in enumerate(self.evaluation_targets)
+        ]
+        pq.write_table(pa.Table.from_pylist(rows), self.output_dir / "cohort.parquet")
+        manifest = {
+            "selection_seed": self.config.seed,
+            "source_unique_proteins": self.source_unique_protein_count,
+            "cohort_size": len(rows),
+            "required_protein_ids": list(self.config.eval_protein_ids),
+            "protein_ids": [row["protein_id"] for row in rows],
+            "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
+            "max_protein_length": self.config.prot_max_length,
+        }
+        (self.output_dir / "cohort.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True),
+            encoding="utf-8",
         )
 
     def _load_models(self) -> None:
@@ -596,6 +656,7 @@ class GRPOTrainingRun:
             "torch_rng_state": torch.get_rng_state(),
             "generator_checkpoint": str(Path(self.config.generator_checkpoint).resolve()),
             "train_parquet_path": str(Path(self.config.train_parquet_path).resolve()),
+            "cohort_protein_ids": [protein.protein_id for protein in self.proteins],
             "wandb_run_id": self.wandb_run.id if self.wandb_run is not None else None,
         }
         if torch.cuda.is_available():
@@ -621,6 +682,7 @@ class GRPOTrainingRun:
                 "proteins_seen",
                 "generator_checkpoint",
                 "train_parquet_path",
+                "cohort_protein_ids",
                 "wandb_run_id",
             )
         }
@@ -649,6 +711,9 @@ class GRPOTrainingRun:
             raise ValueError("Resume checkpoint was created from a different generator")
         if payload.get("train_parquet_path") != expected_data:
             raise ValueError("Resume checkpoint was created from a different training split")
+        expected_cohort = [protein.protein_id for protein in self.proteins]
+        if payload.get("cohort_protein_ids") != expected_cohort:
+            raise ValueError("Resume checkpoint was created for a different protein cohort")
         _load_trainable_state_dict(self.policy, payload["policy_trainable_state"])
         self.optimizer.load_state_dict(payload["optimizer_state"])
         self.scheduler.load_state_dict(payload["scheduler_state"])
@@ -672,6 +737,7 @@ class GRPOTrainingRun:
         values.update(
             {
                 "unique_training_proteins": len(self.proteins),
+                "source_unique_proteins": self.source_unique_protein_count,
                 "evaluation_proteins": len(self.evaluation_targets),
                 "reward_requires_structure_aware_sequence": True,
                 "reward_requires_eos": True,
@@ -741,7 +807,7 @@ class GRPOTrainingRun:
         target: EvaluationTarget,
         *,
         seed: int,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         assert self.policy is not None
         assert self.reward_scorer is not None
         protein_ids, protein_mask = self._tokenize(target.protein)
@@ -783,9 +849,13 @@ class GRPOTrainingRun:
         smiles = [selfies_to_smiles(value) for value in selfies]
         eos_id = int(self.policy.config.eos_token_id)
         terminated = generated_ids[:, 1:].eq(eos_id).any(dim=1).cpu().tolist()
+        chemically_valid = [
+            bool(valid_selfies(value) and smiles[index])
+            for index, value in enumerate(selfies)
+        ]
         valid = [
-            bool(done and valid_selfies(value) and smiles[index])
-            for index, (value, done) in enumerate(zip(selfies, terminated))
+            bool(done and chemical)
+            for done, chemical in zip(terminated, chemically_valid)
         ]
         valid_indices = [index for index, value in enumerate(valid) if value]
         valid_smiles = [smiles[index] for index in valid_indices]
@@ -797,6 +867,9 @@ class GRPOTrainingRun:
             ).numpy()
             rewards[valid_indices] = reward_values
         properties = molecular_property_summary(valid_smiles)
+        aligned_properties = molecular_property_rows(
+            [smiles[index] if valid[index] else "" for index in range(len(smiles))]
+        )
         fcd_value: float | None = None
         if len(valid_smiles) >= 2 and len(target.active_reference_smiles) >= 2:
             candidate = float(
@@ -807,7 +880,7 @@ class GRPOTrainingRun:
             )
             if np.isfinite(candidate):
                 fcd_value = candidate
-        return {
+        summary = {
             "protein_id": target.protein.protein_id,
             "reference_actives": len(target.active_reference_smiles),
             "generated": len(selfies),
@@ -823,22 +896,88 @@ class GRPOTrainingRun:
             "fcd": fcd_value,
             **properties,
         }
+        molecule_rows = [
+            {
+                "protein_id": target.protein.protein_id,
+                "sample_index": index,
+                "generated_selfies": selfies[index],
+                "generated_smiles": smiles[index],
+                "terminated": bool(terminated[index]),
+                "chemically_valid": chemically_valid[index],
+                "reward_eligible": valid[index],
+                "activity_reward": float(rewards[index]),
+                **aligned_properties[index],
+            }
+            for index in range(len(selfies))
+        ]
+        return summary, molecule_rows
 
     @staticmethod
     def _macro(rows: Sequence[Mapping[str, Any]], key: str) -> float:
         values = [float(row[key]) for row in rows if row.get(key) is not None]
         return float(np.mean(values)) if values else 0.0
 
-    def evaluate(self, *, global_step: int) -> dict[str, float]:
+    def _save_evaluation_snapshot(
+        self,
+        *,
+        snapshot_name: str,
+        global_step: int,
+        metrics: Mapping[str, float],
+        per_protein_rows: Sequence[Mapping[str, Any]],
+        molecule_rows: Sequence[Mapping[str, Any]],
+    ) -> Path:
+        snapshot_dir = self.output_dir / "evaluation" / snapshot_name
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        pq.write_table(
+            pa.Table.from_pylist(list(per_protein_rows)),
+            snapshot_dir / "per_protein_metrics.parquet",
+        )
+        pq.write_table(
+            pa.Table.from_pylist(list(molecule_rows)),
+            snapshot_dir / "generated_molecules.parquet",
+        )
+        (snapshot_dir / "metrics.json").write_text(
+            json.dumps(dict(metrics), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        metadata = {
+            "snapshot": snapshot_name,
+            "global_step": global_step,
+            "sampling_seed": self.config.eval_seed,
+            "samples_per_protein": self.config.eval_samples_per_protein,
+            "protein_ids": [row["protein_id"] for row in per_protein_rows],
+            "generator_checkpoint": str(
+                Path(self.config.generator_checkpoint).expanduser().resolve()
+            ),
+        }
+        (snapshot_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        LOGGER.info("Saved %s evaluation snapshot to %s", snapshot_name, snapshot_dir)
+        return snapshot_dir
+
+    def evaluate(
+        self,
+        *,
+        global_step: int,
+        snapshot_name: str | None = None,
+    ) -> dict[str, float]:
         if not self.evaluation_targets:
             return {}
         started = time.perf_counter()
-        rows = [
+        results = [
             self._generate_evaluation_group(
                 target,
                 seed=self.config.eval_seed + index,
             )
             for index, target in enumerate(self.evaluation_targets)
+        ]
+        rows = [summary for summary, _ in results]
+        molecule_rows = [
+            {"global_step": global_step, "snapshot": snapshot_name, **row}
+            for _, generated_rows in results
+            for row in generated_rows
         ]
         metrics = {
             "eval/protein_count": float(len(rows)),
@@ -860,7 +999,10 @@ class GRPOTrainingRun:
             "eval/runtime_seconds": time.perf_counter() - started,
             "trainer/global_step": float(global_step),
         }
+        wandb_target_ids = set(self.config.wandb_target_metric_ids)
         for row in rows:
+            if row["protein_id"] not in wandb_target_ids:
+                continue
             prefix = f"eval/targets/{row['protein_id']}"
             for key in (
                 "valid_fraction",
@@ -875,6 +1017,14 @@ class GRPOTrainingRun:
             ):
                 if row[key] is not None:
                     metrics[f"{prefix}/{key}"] = float(row[key])
+        if snapshot_name is not None:
+            self._save_evaluation_snapshot(
+                snapshot_name=snapshot_name,
+                global_step=global_step,
+                metrics=metrics,
+                per_protein_rows=rows,
+                molecule_rows=molecule_rows,
+            )
         if self.wandb_run is not None:
             table = wandb.Table(
                 columns=list(rows[0]),
@@ -964,7 +1114,7 @@ class GRPOTrainingRun:
         last_next_index = self.start_index
         try:
             if self.config.eval_at_start and self.trainer.global_step == 0:
-                self.evaluate(global_step=0)
+                self.evaluate(global_step=0, snapshot_name="start")
             stop = False
             for epoch in range(self.start_epoch, self.config.epochs):
                 order = self._protein_order(epoch)
@@ -1020,14 +1170,11 @@ class GRPOTrainingRun:
                 self.start_index = 0
                 if stop:
                     break
-            if (
-                self.evaluation_targets
-                and (
-                    not self.config.eval_steps
-                    or self.trainer.global_step % self.config.eval_steps
+            if self.evaluation_targets:
+                self.evaluate(
+                    global_step=self.trainer.global_step,
+                    snapshot_name="end",
                 )
-            ):
-                self.evaluate(global_step=self.trainer.global_step)
             checkpoint = self.save_checkpoint(
                 epoch=last_epoch,
                 next_index=last_next_index,
@@ -1037,8 +1184,13 @@ class GRPOTrainingRun:
                 "global_step": self.trainer.global_step,
                 "proteins_seen": self.proteins_seen,
                 "unique_training_proteins": len(self.proteins),
+                "cohort_protein_ids": [
+                    protein.protein_id for protein in self.proteins
+                ],
                 "checkpoint": str(checkpoint),
                 "final_model": str(final_dir),
+                "start_snapshot": str(self.output_dir / "evaluation" / "start"),
+                "end_snapshot": str(self.output_dir / "evaluation" / "end"),
             }
             (self.output_dir / "training_summary.json").write_text(
                 json.dumps(summary, indent=2, sort_keys=True),
@@ -1112,15 +1264,27 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     training.add_argument("--precision", choices=["fp32", "bf16"], default="bf16")
     training.add_argument("--seed", type=int, default=42)
     training.add_argument("--device", default="cuda")
+    training.add_argument(
+        "--train_on_evaluation_panel_only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Restrict GRPO updates to the fixed evaluation cohort",
+    )
 
     evaluation = parser.add_argument_group("Periodic evaluation")
     evaluation.add_argument("--eval_steps", type=int, default=500)
     evaluation.add_argument("--eval_at_start", action=argparse.BooleanOptionalAction, default=True)
     evaluation.add_argument("--eval_proteins", type=int, default=4)
     evaluation.add_argument("--eval_protein_ids", nargs="*", default=[])
+    evaluation.add_argument(
+        "--wandb_target_metric_ids",
+        nargs="*",
+        default=["P31749", "P24941"],
+        help="Panel proteins that receive individual W&B scalar series",
+    )
     evaluation.add_argument("--eval_samples_per_protein", type=int, default=64)
     evaluation.add_argument("--eval_seed", type=int, default=17)
-    evaluation.add_argument("--min_fcd_reference_actives", type=int, default=2)
+    evaluation.add_argument("--min_fcd_reference_actives", type=int, default=200)
     evaluation.add_argument("--fcd_batch_size", type=int, default=256)
     evaluation.add_argument("--fcd_num_workers", type=int, default=1)
     evaluation.add_argument("--fcd_model_path", default=None)
