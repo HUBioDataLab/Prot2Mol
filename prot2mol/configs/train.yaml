@@ -3,7 +3,13 @@ train:
 
   prot_emb_model: esm2
   protein_model_id: facebook/esm2_t33_650M_UR50D
+  decoder_type: gpt2
+  # GPT-2 uses the MolGen SELFIES tokenizer but initializes the causal decoder
+  # architecture below; load_pretrained_model supplies pretrained GPT-2 weights.
   decoder_model_id: zjunlp/MolGen-large
+  n_layer: 1
+  n_head: 16
+  n_emb: 1280
   conditioning_dropout: 0.1
   max_mol_len: 256
   prot_max_length: 1024
@@ -22,7 +28,7 @@ train:
   split_seed: 42
 
   train_encoder_model: false
-  train_projection_model: true
+  train_projection_model: false
   train_decoder_model: true
 
   generation_eval_proteins: 32

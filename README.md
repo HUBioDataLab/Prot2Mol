@@ -6,8 +6,8 @@ Prot2Mol is a protein-conditioned molecular design framework based on an encoder
 
 - Protein encoder: `ESM2` (default) or `ProtT5`, using the same checkpoint for
   model and tokenizer.
-- Molecule decoder: the pretrained MolGen-large BART decoder with cross-attention
-  over projected, normalized per-residue protein representations.
+- Molecule decoder: selectable protein-conditioned GPT-2 (default) or the
+  experimental MolGen-large BART decoder.
 - Molecule representation: SELFIES.
 - Training objective: molecule language modeling conditioned on protein token representations.
 - Reward objective: standalone listwise ranking and activity classification in `RewardModel/`.
@@ -31,6 +31,7 @@ prot2mol/
   inference/              # Molecule generation pipeline
   data/                   # Shared data/tokenization pipeline
   io/                     # HF/model/config I/O utilities
+  rewards/                # Frozen post-training reward-model ablations
   chem/                   # Cheminformatics utilities and fingerprints
 data_processing/
   build_chembl_generation_dataset.py # Strict-positive MMseqs50 train/validation split
@@ -76,6 +77,34 @@ Argument precedence is:
 
 This allows concise runs with selective CLI overrides.
 
+## Decoder Architectures
+
+Set `decoder_type` to `gpt2` or `molgen` in the train and generate configs.
+
+### GPT-2 (default)
+
+The restored Prot2Mol decoder is a causal `GPT2LMHeadModel` initialized with
+`add_cross_attention=true`. Its cross-attention keys and values are protein
+encoder states, so protein-to-molecule conditioning is part of this decoder's
+training contract. `n_layer`, `n_head`, and `n_emb` configure the architecture.
+Use `load_pretrained_model` to initialize it from an existing Prot2Mol GPT-2
+checkpoint.
+
+### MolGen (experimental alternative)
+
+`zjunlp/MolGen-large` is a BART model pretrained on 100 million ZINC-15
+molecules represented as SELFIES. Its encoder receives a corrupted SELFIES for a
+molecule and its autoregressive decoder reconstructs the original SELFIES. Thus,
+its pretrained decoder cross-attention learned molecule-to-molecule denoising,
+not protein-to-molecule conditioning. Prot2Mol can replace those encoder states
+with projected protein states, but this cross-modal alignment is new and must be
+learned during downstream training; the MolGen checkpoint does not provide that
+alignment. Sources: [ICLR 2024 paper](https://proceedings.iclr.cc/paper_files/paper/2024/file/ed7dd1e32cf9b0abf664bf0e891527e5-Paper-Conference.pdf)
+and [MolGen-large model card](https://huggingface.co/zjunlp/MolGen-large).
+
+For both decoder types, `decoder_model_id` identifies the matched SELFIES
+tokenizer. In `molgen` mode it also identifies the pretrained BART weights.
+
 ## Recommended Workflow
 
 ### 1. Build the ChEMBL37 generation split
@@ -88,7 +117,7 @@ This reads the canonical ChEMBL37 binding table, retains only rows with
 `pchembl_value > 6.0`, and assigns complete MMseqs50 clusters to a 95% train / 5%
 validation split. Duplicate protein-canonical-SMILES pairs are collapsed before
 splitting, while their source-row and assay counts are preserved as provenance.
-Examples that exceed the ESM2 or MolGen context are filtered explicitly; the
+Examples that exceed the configured protein or molecule context are filtered explicitly; the
 pipeline deliberately writes no test split and never silently truncates targets.
 
 ### 2. Preprocess once
@@ -97,7 +126,7 @@ pipeline deliberately writes no test split and never silently truncates targets.
 python data_processing/preprocess_dataset.py
 ```
 
-The matched MolGen tokenizer uses right padding and is checked for unknown-token
+The matched SELFIES tokenizer uses right padding and is checked for unknown-token
 coverage and encoded length across both splits; the protein tokenizer also uses
 right padding. Raw provenance columns remain available for bounded generation
 evaluation, while the training collator passes only tensors to the model.
@@ -119,19 +148,102 @@ python prot2mol/main.py train \
   --epoch 20 --learning_rate 5e-6
 ```
 
-Warm the learned protein projection and molecular decoder with a frozen protein
-encoder:
+Load an existing GPT-2 Prot2Mol checkpoint with a frozen protein encoder:
 
 ```bash
 python prot2mol/main.py train \
   --config prot2mol/configs/train.yaml \
   --no-train_encoder_model \
-  --train_projection_model \
+  --no-train_projection_model \
   --train_decoder_model \
   --load_pretrained_model /path/to/encoder_decoder_checkpoint
 ```
 
-### 3.1 Selectable Training Execution Mode
+Select MolGen explicitly for an ablation:
+
+```bash
+python prot2mol/main.py train \
+  --config prot2mol/configs/train.yaml \
+  --decoder_type molgen \
+  --train_projection_model
+```
+
+### 3.1 GRPO post-training core
+
+`prot2mol.training.GRPOTrainer` performs online protein-conditioned GRPO with
+either decoder. For every protein it samples `group_size` molecules (8 by
+default; 16 is also supported), validates and decodes SELFIES to SMILES, scores
+only valid molecules with the selected frozen probability scorer (`RewardModel`
+on SMILES or the FusionDTI ablation on SELFIES), normalizes the 0-1 rewards
+within that protein's group, and applies the clipped GRPO objective with a
+frozen reference-policy KL penalty. Invalid generations receive reward zero.
+
+For the structure-aware FusionDTI ablation, load the released BindingDB binary
+classifier and pass the Foldseek/SaProt structure-aware strings separately from
+the generator's protein strings:
+
+```python
+from prot2mol.rewards import FusionDTIActivityScorer
+from prot2mol.training import GRPOTrainer
+
+reward_scorer = FusionDTIActivityScorer.from_pretrained(
+    dataset="BindingDB",  # also: Biosnap or Human
+    device="cuda",
+    batch_size=8,
+)
+trainer = GRPOTrainer(
+    policy=policy,
+    reference_policy=reference_policy,
+    optimizer=optimizer,
+    tokenizer=molecule_tokenizer,
+    reward_function=reward_scorer,
+)
+output = trainer.step(
+    protein_input_ids=protein_input_ids,
+    protein_attention_mask=protein_attention_mask,
+    protein_sequences=amino_acid_sequences,
+    reward_protein_sequences=structure_aware_sequences,
+)
+```
+
+The scorer is frozen and kept in evaluation mode. It automatically receives
+the generated SELFIES, encodes structure-aware proteins with
+`westlake-repl/SaProt_650M_AF2`, encodes SELFIES with
+`HUBioDataLab/SELFormer`, and returns the released sigmoid binary-activity
+probability. The Space revision, both encoder revisions, checkpoint checksum,
+and custom 428-token SELFIES vocabulary are pinned. The generator may still use
+ESM2 or ProtT5; only `reward_protein_sequences` must contain SaProt-compatible
+structure-aware tokens such as `MdEvLp`.
+
+Every `step()` returns a `metrics` dictionary suitable for W&B or another
+logger. Read the metrics together:
+
+- Learning signal: `grpo/reward_mean`, `grpo/reward_std`,
+  `grpo/group_reward_std_mean`, `grpo/zero_variance_group_fraction`,
+  `grpo/valid_reward_low_saturation_fraction`, and
+  `grpo/valid_reward_high_saturation_fraction`.
+- Update direction: `grpo/advantage_weighted_logprob_change` should normally be
+  positive; `grpo/mean_abs_logprob_change` confirms that an update occurred.
+- Stability: `grpo/post_update_kl`, `grpo/post_update_old_policy_approx_kl`,
+  `grpo/post_update_clip_fraction`, `grpo/post_update_ratio_mean`, and
+  `grpo/grad_norm` expose overly large or clipped updates.
+- Generation health: `grpo/valid_fraction`, `grpo/valid_unique_fraction`,
+  `grpo/group_unique_fraction`, `grpo/eos_fraction`, and sequence-length
+  metrics expose invalid-output, diversity-collapse, and termination failures.
+
+A rising training reward is not enough by itself: reward increase accompanied
+by falling validity or uniqueness, rising KL/clip fraction, or no held-out
+generation improvement is a warning for collapse or reward-model exploitation.
+The deterministic unit smoke tests exercise 2 proteins x 8 rollouts through
+generation and a separate structure-aware-protein/SELFIES FusionDTI ablation
+through 1 protein x 8 rollouts, grouped advantages, backpropagation, and a GPT-2
+policy update. Checkpoint compatibility is strict; the released BindingDB head
+has also been compared tensor-for-tensor with the upstream CAN implementation.
+Set `PROT2MOL_RUN_FUSIONDTI_LIVE=1` to run the heavyweight tests with the real
+pinned SaProt, SELFormer, tokenizer, and BindingDB checkpoint, including an
+8-molecule FusionDTI reward group that drives an actual GPT-2 GRPO update.
+
+### 3.2 Selectable Training Execution Mode
 
 `train` supports explicit execution mode control through `--training_mode` (or `train.training_mode` in YAML):
 

@@ -96,7 +96,11 @@ def test_parse_arguments_defaults_match_generation_contract():
     args = parse_arguments(argv=[])
     assert args.training_mode == "single_gpu"
     assert args.prot_emb_model == "esm2"
+    assert args.decoder_type == "gpt2"
     assert args.decoder_model_id == "zjunlp/MolGen-large"
+    assert args.n_layer == 1
+    assert args.n_head == 16
+    assert args.n_emb is None
     assert args.train_projection_model is True
     assert not hasattr(args, "eval_split")
 
@@ -120,7 +124,11 @@ def test_training_arguments_require_a_trainable_component():
 def test_create_run_name_is_compact_stable_and_has_no_affinity_stage():
     config = SimpleNamespace(
         prot_emb_model="esm2",
+        decoder_type="gpt2",
         decoder_model_id="zjunlp/MolGen-large",
+        n_layer=1,
+        n_head=16,
+        n_emb=1280,
         train_encoder_model=False,
         train_decoder_model=True,
         max_mol_len=256,

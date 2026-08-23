@@ -2,7 +2,11 @@ generate:
   model_file: /absolute/path/to/prot2mol_checkpoint
   prot_emb_model: esm2
   protein_model_id: facebook/esm2_t33_650M_UR50D
+  decoder_type: gpt2
   decoder_model_id: zjunlp/MolGen-large
+  n_layer: 1
+  n_head: 16
+  n_emb: 1280
   conditioning_dropout: 0.1
   models_base: null
 

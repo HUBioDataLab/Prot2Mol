@@ -31,7 +31,31 @@ def parse_arguments(argv=None):
         help="Protein embedding model to use",
     )
     model_group.add_argument("--protein_model_id", default=None)
+    model_group.add_argument(
+        "--decoder_type",
+        choices=["gpt2", "molgen"],
+        default="gpt2",
+        help="Molecule decoder architecture",
+    )
     model_group.add_argument("--decoder_model_id", default="zjunlp/MolGen-large")
+    model_group.add_argument(
+        "--n_layer",
+        type=int,
+        default=1,
+        help="Number of GPT-2 decoder layers; ignored for MolGen",
+    )
+    model_group.add_argument(
+        "--n_head",
+        type=int,
+        default=16,
+        help="Number of GPT-2 attention heads; ignored for MolGen",
+    )
+    model_group.add_argument(
+        "--n_emb",
+        type=int,
+        default=None,
+        help="GPT-2 hidden size; defaults to the protein encoder width",
+    )
     model_group.add_argument("--conditioning_dropout", type=float, default=0.1)
     model_group.add_argument("--max_mol_len", type=int, default=256, help="Maximum molecule sequence length")
     model_group.add_argument("--prot_max_length", type=int, default=1024, help="Maximum protein sequence length")
@@ -136,6 +160,13 @@ def parse_arguments(argv=None):
         raise ValueError("dataloader_num_workers cannot be negative")
     if config.max_mol_len < 3 or config.prot_max_length < 3:
         raise ValueError("Token contexts must leave room for content and special tokens")
+    if config.decoder_type == "gpt2":
+        if config.n_layer <= 0 or config.n_head <= 0:
+            raise ValueError("GPT-2 n_layer and n_head must be positive")
+        if config.n_emb is not None and config.n_emb <= 0:
+            raise ValueError("GPT-2 n_emb must be positive when provided")
+        if config.n_emb is not None and config.n_emb % config.n_head != 0:
+            raise ValueError("GPT-2 n_emb must be divisible by n_head")
     if config.generation_eval_proteins < 0 or config.generation_samples_per_protein < 1:
         raise ValueError("Generation evaluation counts are invalid")
     if not any(
@@ -220,7 +251,11 @@ def create_run_name(config, dataset_name):
             str(config.prot_emb_model),
             str(config.train_encoder_model),
             str(config.train_decoder_model),
+            str(config.decoder_type),
             str(config.decoder_model_id),
+            str(config.n_layer),
+            str(config.n_head),
+            str(config.n_emb),
             str(config.max_mol_len),
             str(config.prot_max_length),
             str(config.learning_rate),
@@ -236,7 +271,7 @@ def create_run_name(config, dataset_name):
         f"emb-{_slugify_run_component(config.prot_emb_model, max_length=12)}",
         f"enc{int(bool(config.train_encoder_model))}",
         f"dec{int(bool(config.train_decoder_model))}",
-        f"dec-{_slugify_run_component(config.decoder_model_id, max_length=20)}",
+        f"dec-{_slugify_run_component(config.decoder_type, max_length=8)}",
         f"ml{config.max_mol_len}",
         f"pl{config.prot_max_length}",
         f"lr{_slugify_run_component(config.learning_rate, max_length=12)}",

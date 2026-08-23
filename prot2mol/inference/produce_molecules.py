@@ -57,7 +57,11 @@ class MoleculeGenerator:
             mol_tokenizer=self.mol_tokenizer,
             prot_emb_model=self.config.prot_emb_model,
             protein_model_id=self.config.protein_model_id,
+            decoder_type=self.config.decoder_type,
             decoder_model_id=self.config.decoder_model_id,
+            n_layer=self.config.n_layer,
+            n_head=self.config.n_head,
+            n_emb=self.config.n_emb,
             conditioning_dropout=self.config.conditioning_dropout,
             max_mol_len=self.config.max_mol_len,
             prot_max_length=self.config.prot_max_length,
@@ -182,7 +186,11 @@ def parse_arguments(argv=None) -> argparse.Namespace:
     parser.add_argument("--model_file", required=True)
     parser.add_argument("--prot_emb_model", default="esm2", choices=["prot_t5", "esm2"])
     parser.add_argument("--protein_model_id", default=None)
+    parser.add_argument("--decoder_type", choices=["gpt2", "molgen"], default="gpt2")
     parser.add_argument("--decoder_model_id", default="zjunlp/MolGen-large")
+    parser.add_argument("--n_layer", type=int, default=1)
+    parser.add_argument("--n_head", type=int, default=16)
+    parser.add_argument("--n_emb", type=int, default=None)
     parser.add_argument("--conditioning_dropout", type=float, default=0.1)
     parser.add_argument("--models_base", default=None)
     parser.add_argument("--protein_sequence", default=None)
@@ -201,6 +209,13 @@ def parse_arguments(argv=None) -> argparse.Namespace:
         raise ValueError("num_samples and batch_size must be positive")
     if config.prot_max_length < 3 or config.max_mol_len < 3:
         raise ValueError("Token contexts must leave room for content and special tokens")
+    if config.decoder_type == "gpt2":
+        if config.n_layer <= 0 or config.n_head <= 0:
+            raise ValueError("GPT-2 n_layer and n_head must be positive")
+        if config.n_emb is not None and config.n_emb <= 0:
+            raise ValueError("GPT-2 n_emb must be positive when provided")
+        if config.n_emb is not None and config.n_emb % config.n_head != 0:
+            raise ValueError("GPT-2 n_emb must be divisible by n_head")
     if config.temperature <= 0 or not 0 < config.top_p <= 1:
         raise ValueError("temperature must be positive and top_p must be in (0, 1]")
     if config.train_reference_limit < 0:

@@ -4,10 +4,17 @@ from typing import Dict, Optional, Sequence
 
 import torch
 
+SUPPORTED_DECODER_TYPES = {"gpt2", "molgen"}
+
 MODEL_CONFIG_KEYS = (
     "prot_emb_model",
     "protein_model_id",
+    "decoder_type",
     "decoder_model_id",
+    "n_layer",
+    "n_head",
+    "n_emb",
+    "gpt2_vocab_size",
     "conditioning_dropout",
     "max_mol_len",
     "prot_max_length",
@@ -27,6 +34,72 @@ MODEL_CONFIG_KEYS = (
     "generation_eval_proteins",
     "generation_samples_per_protein",
 )
+
+
+def infer_decoder_type(config: Dict[str, object]) -> str:
+    """Resolve explicit and historical Prot2Mol decoder configurations.
+
+    Checkpoints written before the MolGen rewrite have GPT-2 architecture fields
+    but no ``decoder_type``. Checkpoints from the MolGen-only period have a
+    ``decoder_model_id`` and none of the GPT-2 fields.
+    """
+
+    explicit = config.get("decoder_type")
+    if explicit is not None:
+        decoder_type = str(explicit).strip().lower()
+        if decoder_type not in SUPPORTED_DECODER_TYPES:
+            raise ValueError(
+                f"Unsupported decoder_type {explicit!r}; expected one of "
+                f"{sorted(SUPPORTED_DECODER_TYPES)}"
+            )
+        return decoder_type
+    if any(key in config for key in ("n_layer", "n_head", "n_emb")):
+        return "gpt2"
+    return "molgen"
+
+
+def prepare_prot2mol_state_dict(
+    state_dict: Dict[str, torch.Tensor],
+    *,
+    decoder_type: str,
+) -> Dict[str, torch.Tensor]:
+    """Migrate only the known structural differences in legacy GPT-2 saves."""
+
+    if decoder_type != "gpt2":
+        return state_dict
+
+    legacy_rotary_keys = [
+        key
+        for key in state_dict
+        if key.startswith("protein_encoder.encoder_model.encoder.layer.")
+        and key.endswith(".attention.self.rotary_embeddings.inv_freq")
+    ]
+    legacy_rotary_value = (
+        state_dict[legacy_rotary_keys[0]] if legacy_rotary_keys else None
+    )
+    migrated: Dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        if key in {"lm_weight", "pchembl_weight"} or key.startswith("pchembl_head."):
+            continue
+        if legacy_rotary_keys and (
+            key in legacy_rotary_keys
+            or key
+            == "protein_encoder.encoder_model.embeddings.position_embeddings.weight"
+        ):
+            # Transformers <=4.x persisted an unused learned position table and
+            # one rotary-frequency buffer per ESM layer. Transformers 5.x uses
+            # one shared rotary buffer instead. The layer buffers are identical.
+            continue
+        if key.startswith("protein_encoder.encoder_model."):
+            key = "protein_encoder.model." + key.removeprefix(
+                "protein_encoder.encoder_model."
+            )
+        migrated[key] = value
+    if legacy_rotary_value is not None:
+        migrated["protein_encoder.model.rotary_embeddings.inv_freq"] = (
+            legacy_rotary_value
+        )
+    return migrated
 
 
 def resolve_model_path(model_name: str, models_base: Optional[str] = None, fallback_bases: Optional[Sequence[str]] = None) -> str:
@@ -145,7 +218,9 @@ def load_saved_model_config(model_path: str, logger=None) -> Dict[str, object]:
             logger.warning("Ignoring non-mapping config.json at %s", config_path)
         return {}
 
-    return {key: raw_config[key] for key in MODEL_CONFIG_KEYS if key in raw_config}
+    loaded = {key: raw_config[key] for key in MODEL_CONFIG_KEYS if key in raw_config}
+    loaded["decoder_type"] = infer_decoder_type(raw_config)
+    return loaded
 
 
 def save_model_config(output_dir: str, model_config: Dict[str, object], logger=None) -> str:
@@ -186,7 +261,11 @@ def load_prot2mol_inference_model(
     max_mol_len: int,
     prot_max_length: int,
     protein_model_id: Optional[str] = None,
+    decoder_type: str = "gpt2",
     decoder_model_id: str = "zjunlp/MolGen-large",
+    n_layer: int = 1,
+    n_head: int = 16,
+    n_emb: Optional[int] = None,
     conditioning_dropout: float = 0.1,
     strict: bool = True,
     allow_strict_fallback: bool = False,
@@ -215,7 +294,11 @@ def load_prot2mol_inference_model(
     model_config = {
         "prot_emb_model": prot_emb_model,
         "protein_model_id": protein_model_id,
+        "decoder_type": decoder_type,
         "decoder_model_id": decoder_model_id,
+        "n_layer": n_layer,
+        "n_head": n_head,
+        "n_emb": n_emb,
         "conditioning_dropout": conditioning_dropout,
         "max_mol_len": max_mol_len,
         "prot_max_length": prot_max_length,
@@ -230,7 +313,12 @@ def load_prot2mol_inference_model(
     model_config["train_decoder_model"] = False
     model_config["mol_tokenizer"] = mol_tokenizer
 
+    resolved_decoder_type = infer_decoder_type(model_config)
     model = Prot2MolModel(model_config)
+    model_state = prepare_prot2mol_state_dict(
+        model_state,
+        decoder_type=resolved_decoder_type,
+    )
     try:
         model.load_state_dict(model_state, strict=strict)
     except RuntimeError as exc:

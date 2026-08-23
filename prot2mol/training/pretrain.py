@@ -24,7 +24,10 @@ from prot2mol.data.pipeline import (
     load_processed_dataset,
     tokenize_protein_sequences_for_inference,
 )
-from prot2mol.io.hf_utils import load_molgen_tokenizer
+from prot2mol.io.hf_utils import (
+    load_molgen_tokenizer,
+    prepare_prot2mol_state_dict,
+)
 from prot2mol.training.distributed import resolve_distributed_context
 from prot2mol.training.entry import (
     create_run_name,
@@ -60,7 +63,11 @@ class TrainingScript:
         self.model_config = {
             "prot_emb_model": config.prot_emb_model,
             "protein_model_id": config.protein_model_id,
+            "decoder_type": config.decoder_type,
             "decoder_model_id": config.decoder_model_id,
+            "n_layer": config.n_layer,
+            "n_head": config.n_head,
+            "n_emb": config.n_emb,
             "conditioning_dropout": config.conditioning_dropout,
             "max_mol_len": config.max_mol_len,
             "prot_max_length": config.prot_max_length,
@@ -310,6 +317,10 @@ class TrainingScript:
             state = load_file(str(checkpoint))
         else:
             state = torch.load(str(checkpoint), map_location="cpu")
+        state = prepare_prot2mol_state_dict(
+            state,
+            decoder_type=self.model.decoder_type,
+        )
         self.model.load_state_dict(state, strict=True)
 
     def compute_generation_eval_metrics(self):

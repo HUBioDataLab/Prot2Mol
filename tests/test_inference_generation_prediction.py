@@ -14,7 +14,11 @@ def _config(tmp_path, **overrides):
         "model_file": str(tmp_path / "model"),
         "prot_emb_model": "esm2",
         "protein_model_id": None,
+        "decoder_type": "gpt2",
         "decoder_model_id": "zjunlp/MolGen-large",
+        "n_layer": 1,
+        "n_head": 2,
+        "n_emb": 8,
         "conditioning_dropout": 0.1,
         "models_base": None,
         "protein_sequence": "MKT",
@@ -141,6 +145,7 @@ def test_saved_config_override_uses_known_generation_fields_only(tmp_path, monke
     monkeypatch.setattr(
         "prot2mol.inference.produce_molecules.load_saved_model_config",
         lambda path, logger=None: {
+            "decoder_type": "molgen",
             "decoder_model_id": "zjunlp/MolGen-large",
             "max_mol_len": 128,
             "pchembl_tf_hidden_dim": 640,
@@ -148,5 +153,6 @@ def test_saved_config_override_uses_known_generation_fields_only(tmp_path, monke
     )
     generator = MoleculeGenerator(_config(tmp_path))
     generator._apply_saved_config()
+    assert generator.config.decoder_type == "molgen"
     assert generator.config.max_mol_len == 128
     assert not hasattr(generator.config, "pchembl_tf_hidden_dim")

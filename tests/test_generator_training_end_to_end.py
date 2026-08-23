@@ -39,6 +39,7 @@ def _tiny_model(monkeypatch):
         {
             "prot_emb_model": "esm2",
             "protein_model_id": "dummy/protein",
+            "decoder_type": "molgen",
             "decoder_model_id": "dummy/molgen",
             "conditioning_dropout": 0.0,
             "max_mol_len": 4,
