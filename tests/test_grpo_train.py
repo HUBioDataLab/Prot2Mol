@@ -393,9 +393,12 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "diversity_penalty_factor",
         "mean_tanimoto_similarity",
         "max_tanimoto_similarity",
-        "diversity_similarity_excess",
-        "diversity_violation",
+        "combined_tanimoto_similarity",
+        "diversity_score",
+        "global_mean_tanimoto_similarity",
+        "global_max_tanimoto_similarity",
         "exact_duplicate",
+        "global_exact_duplicate",
         "diversity_comparable",
         "qed",
         "sas",
@@ -418,6 +421,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("eval/logp_violation_fraction_macro" in values for values in logged)
     assert any("eval/internal_diversity_mean_macro" in values for values in logged)
     assert any("eval/exact_duplicate_fraction_macro" in values for values in logged)
+    assert any("eval/global_internal_diversity_mean_macro" in values for values in logged)
+    assert any("eval/scaffold_unique_fraction_macro" in values for values in logged)
     assert any("eval/per_protein" in values for values in logged)
     assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True

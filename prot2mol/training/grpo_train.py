@@ -41,6 +41,7 @@ from ..rewards import (
     TargetActivePropertyStats,
     TargetPropertyShapedActivityScorer,
     internal_diversity_factors,
+    scaffold_diversity_summary,
 )
 from .grpo import GRPOConfig, GRPOTrainer, selfies_to_smiles, valid_selfies
 
@@ -702,17 +703,23 @@ class GRPOTrainingRun:
             "diversity_scope": (
                 "valid EOS molecules within each fixed GRPO protein group"
             ),
-            "diversity_similarity_threshold": (
-                self.config.diversity_similarity_threshold
+            "diversity_reward_weight": self.config.diversity_reward_weight,
+            "diversity_mean_similarity_weight": (
+                self.config.diversity_mean_similarity_weight
             ),
-            "diversity_similarity_softness": (
-                self.config.diversity_similarity_softness
+            "diversity_nearest_similarity_weight": (
+                1.0 - self.config.diversity_mean_similarity_weight
+            ),
+            "diversity_duplicate_penalty_factor": (
+                self.config.diversity_duplicate_penalty_factor
             ),
             "diversity_morgan_radius": self.config.diversity_morgan_radius,
             "diversity_morgan_bits": self.config.diversity_morgan_bits,
             "final_reward_formula": (
-                "property_shaped_reward * exp(-0.5 * "
-                "max(0, (mean_group_tanimoto - threshold) / softness)^2)"
+                "property_shaped_reward * ((1 - diversity_reward_weight) + "
+                "diversity_reward_weight * (1 - weighted_mean_and_nearest_"
+                "group_tanimoto)); canonical duplicates use the configured "
+                "duplicate penalty factor"
             ),
         }
         (self.output_dir / "cohort.json").write_text(
@@ -836,11 +843,12 @@ class GRPOTrainingRun:
                 max_grad_norm=self.config.max_grad_norm,
                 require_eos_for_reward=True,
                 diversity_reward_shaping=self.config.diversity_reward_shaping,
-                diversity_similarity_threshold=(
-                    self.config.diversity_similarity_threshold
+                diversity_reward_weight=self.config.diversity_reward_weight,
+                diversity_mean_similarity_weight=(
+                    self.config.diversity_mean_similarity_weight
                 ),
-                diversity_similarity_softness=(
-                    self.config.diversity_similarity_softness
+                diversity_duplicate_penalty_factor=(
+                    self.config.diversity_duplicate_penalty_factor
                 ),
                 diversity_morgan_radius=self.config.diversity_morgan_radius,
                 diversity_morgan_bits=self.config.diversity_morgan_bits,
@@ -871,11 +879,12 @@ class GRPOTrainingRun:
             "penalty_strength": self.config.property_penalty_strength,
             "training_active_statistics_sha256": digest,
             "diversity_enabled": self.config.diversity_reward_shaping,
-            "diversity_similarity_threshold": (
-                self.config.diversity_similarity_threshold
+            "diversity_reward_weight": self.config.diversity_reward_weight,
+            "diversity_mean_similarity_weight": (
+                self.config.diversity_mean_similarity_weight
             ),
-            "diversity_similarity_softness": (
-                self.config.diversity_similarity_softness
+            "diversity_duplicate_penalty_factor": (
+                self.config.diversity_duplicate_penalty_factor
             ),
             "diversity_morgan_radius": self.config.diversity_morgan_radius,
             "diversity_morgan_bits": self.config.diversity_morgan_bits,
@@ -1182,12 +1191,30 @@ class GRPOTrainingRun:
             smiles,
             valid,
             group_size=self.config.group_size,
-            similarity_threshold=self.config.diversity_similarity_threshold,
-            similarity_softness=self.config.diversity_similarity_softness,
+            reward_weight=self.config.diversity_reward_weight,
+            mean_similarity_weight=self.config.diversity_mean_similarity_weight,
+            duplicate_penalty_factor=(
+                self.config.diversity_duplicate_penalty_factor
+            ),
             morgan_radius=self.config.diversity_morgan_radius,
             morgan_bits=self.config.diversity_morgan_bits,
         )
         diagnostics.update(diversity.as_dict())
+        global_diversity = internal_diversity_factors(
+            smiles,
+            valid,
+            group_size=len(smiles),
+            reward_weight=self.config.diversity_reward_weight,
+            mean_similarity_weight=self.config.diversity_mean_similarity_weight,
+            duplicate_penalty_factor=(
+                self.config.diversity_duplicate_penalty_factor
+            ),
+            morgan_radius=self.config.diversity_morgan_radius,
+            morgan_bits=self.config.diversity_morgan_bits,
+        ).as_dict()
+        local_comparable = diagnostics["diversity_comparable"].astype(bool)
+        global_comparable = global_diversity["diversity_comparable"].astype(bool)
+        scaffold_metrics = scaffold_diversity_summary(smiles, valid)
         if self.config.diversity_reward_shaping:
             rewards *= diversity.penalty_factor
         diagnostics["final_reward"] = rewards.copy()
@@ -1271,47 +1298,48 @@ class GRPOTrainingRun:
             "internal_diversity_mean": (
                 1.0
                 - float(
-                    diagnostics["mean_tanimoto_similarity"]
-                    [diagnostics["diversity_comparable"].astype(bool)]
-                    .mean()
+                    diagnostics["mean_tanimoto_similarity"][local_comparable].mean()
                 )
-                if diagnostics["diversity_comparable"].any()
+                if local_comparable.any()
                 else 0.0
             ),
             "mean_tanimoto_similarity": (
                 float(
-                    diagnostics["mean_tanimoto_similarity"]
-                    [diagnostics["diversity_comparable"].astype(bool)]
-                    .mean()
+                    diagnostics["mean_tanimoto_similarity"][local_comparable].mean()
                 )
-                if diagnostics["diversity_comparable"].any()
+                if local_comparable.any()
                 else 0.0
             ),
             "max_tanimoto_similarity": (
                 float(
+                    diagnostics["max_tanimoto_similarity"][local_comparable].max()
+                )
+                if local_comparable.any()
+                else 0.0
+            ),
+            "nearest_neighbor_tanimoto_similarity_mean": (
+                float(
                     diagnostics["max_tanimoto_similarity"]
-                    [diagnostics["diversity_comparable"].astype(bool)]
-                    .max()
-                )
-                if diagnostics["diversity_comparable"].any()
-                else 0.0
-            ),
-            "diversity_violation_fraction": (
-                float(
-                    diagnostics["diversity_violation"]
-                    [diagnostics["diversity_comparable"].astype(bool)]
+                    [local_comparable]
                     .mean()
                 )
-                if diagnostics["diversity_comparable"].any()
+                if local_comparable.any()
                 else 0.0
             ),
-            "diversity_similarity_excess_mean": (
+            "combined_tanimoto_similarity_mean": (
                 float(
-                    diagnostics["diversity_similarity_excess"]
-                    [diagnostics["diversity_comparable"].astype(bool)]
+                    diagnostics["combined_tanimoto_similarity"]
+                    [local_comparable]
                     .mean()
                 )
-                if diagnostics["diversity_comparable"].any()
+                if local_comparable.any()
+                else 0.0
+            ),
+            "diversity_score_mean": (
+                float(
+                    diagnostics["diversity_score"][local_comparable].mean()
+                )
+                if local_comparable.any()
                 else 0.0
             ),
             "exact_duplicate_fraction": (
@@ -1324,6 +1352,65 @@ class GRPOTrainingRun:
                 if valid_indices
                 else 0.0
             ),
+            "global_internal_diversity_mean": (
+                1.0
+                - float(
+                    global_diversity["mean_tanimoto_similarity"]
+                    [global_comparable]
+                    .mean()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_mean_tanimoto_similarity": (
+                float(
+                    global_diversity["mean_tanimoto_similarity"]
+                    [global_comparable]
+                    .mean()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_max_tanimoto_similarity": (
+                float(
+                    global_diversity["max_tanimoto_similarity"]
+                    [global_comparable]
+                    .max()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_nearest_neighbor_tanimoto_similarity_mean": (
+                float(
+                    global_diversity["max_tanimoto_similarity"]
+                    [global_comparable]
+                    .mean()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_combined_tanimoto_similarity_mean": (
+                float(
+                    global_diversity["combined_tanimoto_similarity"]
+                    [global_comparable]
+                    .mean()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_diversity_score_mean": (
+                float(
+                    global_diversity["diversity_score"][global_comparable].mean()
+                )
+                if global_comparable.any()
+                else 0.0
+            ),
+            "global_exact_duplicate_fraction": (
+                float(global_diversity["exact_duplicate"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            **scaffold_metrics,
             "fcd": fcd_value,
             **properties,
         }
@@ -1364,13 +1451,20 @@ class GRPOTrainingRun:
                 "max_tanimoto_similarity": float(
                     diagnostics["max_tanimoto_similarity"][index]
                 ),
-                "diversity_similarity_excess": float(
-                    diagnostics["diversity_similarity_excess"][index]
+                "combined_tanimoto_similarity": float(
+                    diagnostics["combined_tanimoto_similarity"][index]
                 ),
-                "diversity_violation": bool(
-                    diagnostics["diversity_violation"][index]
+                "diversity_score": float(diagnostics["diversity_score"][index]),
+                "global_mean_tanimoto_similarity": float(
+                    global_diversity["mean_tanimoto_similarity"][index]
+                ),
+                "global_max_tanimoto_similarity": float(
+                    global_diversity["max_tanimoto_similarity"][index]
                 ),
                 "exact_duplicate": bool(diagnostics["exact_duplicate"][index]),
+                "global_exact_duplicate": bool(
+                    global_diversity["exact_duplicate"][index]
+                ),
                 "diversity_comparable": bool(
                     diagnostics["diversity_comparable"][index]
                 ),
@@ -1416,11 +1510,12 @@ class GRPOTrainingRun:
                 self.config.eval_samples_per_protein // self.config.group_size
             ),
             "diversity_reward_shaping": self.config.diversity_reward_shaping,
-            "diversity_similarity_threshold": (
-                self.config.diversity_similarity_threshold
+            "diversity_reward_weight": self.config.diversity_reward_weight,
+            "diversity_mean_similarity_weight": (
+                self.config.diversity_mean_similarity_weight
             ),
-            "diversity_similarity_softness": (
-                self.config.diversity_similarity_softness
+            "diversity_duplicate_penalty_factor": (
+                self.config.diversity_duplicate_penalty_factor
             ),
             "diversity_morgan_radius": self.config.diversity_morgan_radius,
             "diversity_morgan_bits": self.config.diversity_morgan_bits,
@@ -1537,13 +1632,17 @@ class GRPOTrainingRun:
                 rows,
                 "max_tanimoto_similarity",
             ),
-            "eval/diversity_violation_fraction_macro": self._macro(
+            "eval/nearest_neighbor_tanimoto_similarity_mean_macro": self._macro(
                 rows,
-                "diversity_violation_fraction",
+                "nearest_neighbor_tanimoto_similarity_mean",
             ),
-            "eval/diversity_similarity_excess_mean_macro": self._macro(
+            "eval/combined_tanimoto_similarity_mean_macro": self._macro(
                 rows,
-                "diversity_similarity_excess_mean",
+                "combined_tanimoto_similarity_mean",
+            ),
+            "eval/diversity_score_mean_macro": self._macro(
+                rows,
+                "diversity_score_mean",
             ),
             "eval/exact_duplicate_fraction_macro": self._macro(
                 rows,
@@ -1552,6 +1651,44 @@ class GRPOTrainingRun:
             "eval/diversity_comparable_fraction_macro": self._macro(
                 rows,
                 "diversity_comparable_fraction",
+            ),
+            "eval/global_internal_diversity_mean_macro": self._macro(
+                rows,
+                "global_internal_diversity_mean",
+            ),
+            "eval/global_mean_tanimoto_similarity_macro": self._macro(
+                rows,
+                "global_mean_tanimoto_similarity",
+            ),
+            "eval/global_max_tanimoto_similarity_macro": self._macro(
+                rows,
+                "global_max_tanimoto_similarity",
+            ),
+            "eval/global_nearest_neighbor_tanimoto_similarity_mean_macro": (
+                self._macro(
+                    rows,
+                    "global_nearest_neighbor_tanimoto_similarity_mean",
+                )
+            ),
+            "eval/global_combined_tanimoto_similarity_mean_macro": self._macro(
+                rows,
+                "global_combined_tanimoto_similarity_mean",
+            ),
+            "eval/global_diversity_score_mean_macro": self._macro(
+                rows,
+                "global_diversity_score_mean",
+            ),
+            "eval/global_exact_duplicate_fraction_macro": self._macro(
+                rows,
+                "global_exact_duplicate_fraction",
+            ),
+            "eval/scaffold_available_fraction_macro": self._macro(
+                rows,
+                "scaffold_available_fraction",
+            ),
+            "eval/scaffold_unique_fraction_macro": self._macro(
+                rows,
+                "scaffold_unique_fraction",
             ),
             "eval/qed_mean_macro": self._macro(rows, "qed_mean"),
             "eval/sas_mean_macro": self._macro(rows, "sas_mean"),
@@ -1590,10 +1727,20 @@ class GRPOTrainingRun:
                 "internal_diversity_mean",
                 "mean_tanimoto_similarity",
                 "max_tanimoto_similarity",
-                "diversity_violation_fraction",
-                "diversity_similarity_excess_mean",
+                "nearest_neighbor_tanimoto_similarity_mean",
+                "combined_tanimoto_similarity_mean",
+                "diversity_score_mean",
                 "exact_duplicate_fraction",
                 "diversity_comparable_fraction",
+                "global_internal_diversity_mean",
+                "global_mean_tanimoto_similarity",
+                "global_max_tanimoto_similarity",
+                "global_nearest_neighbor_tanimoto_similarity_mean",
+                "global_combined_tanimoto_similarity_mean",
+                "global_diversity_score_mean",
+                "global_exact_duplicate_fraction",
+                "scaffold_available_fraction",
+                "scaffold_unique_fraction",
                 "qed_mean",
                 "sas_mean",
                 "logp_mean",
@@ -1858,14 +2005,19 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=True,
     )
     reward.add_argument(
-        "--diversity_similarity_threshold",
+        "--diversity_reward_weight",
         type=float,
-        default=0.4,
+        default=0.5,
     )
     reward.add_argument(
-        "--diversity_similarity_softness",
+        "--diversity_mean_similarity_weight",
         type=float,
-        default=0.2,
+        default=0.5,
+    )
+    reward.add_argument(
+        "--diversity_duplicate_penalty_factor",
+        type=float,
+        default=0.0,
     )
     reward.add_argument("--diversity_morgan_radius", type=int, default=2)
     reward.add_argument("--diversity_morgan_bits", type=int, default=2048)
@@ -1948,7 +2100,6 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "reward_protein_cache_size": config.reward_protein_cache_size,
         "property_allowed_sigma": config.property_allowed_sigma,
         "property_penalty_strength": config.property_penalty_strength,
-        "diversity_similarity_softness": config.diversity_similarity_softness,
         "diversity_morgan_radius": config.diversity_morgan_radius,
         "diversity_morgan_bits": config.diversity_morgan_bits,
         "eval_samples_per_protein": config.eval_samples_per_protein,
@@ -1958,8 +2109,24 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError(f"GRPO values must be positive: {invalid}")
     if config.group_size < 2:
         raise ValueError("group_size must be at least 2")
-    if not 0.0 <= config.diversity_similarity_threshold < 1.0:
-        raise ValueError("diversity_similarity_threshold must be in [0, 1)")
+    bounded_diversity = {
+        "diversity_reward_weight": config.diversity_reward_weight,
+        "diversity_mean_similarity_weight": (
+            config.diversity_mean_similarity_weight
+        ),
+        "diversity_duplicate_penalty_factor": (
+            config.diversity_duplicate_penalty_factor
+        ),
+    }
+    invalid_diversity = {
+        key: value
+        for key, value in bounded_diversity.items()
+        if not 0.0 <= value <= 1.0
+    }
+    if invalid_diversity:
+        raise ValueError(
+            f"GRPO diversity weights must be in [0, 1]: {invalid_diversity}"
+        )
     if config.max_steps is not None and config.max_steps < 1:
         raise ValueError("max_steps must be positive when provided")
     if not 0.0 <= config.warmup_ratio < 1.0:

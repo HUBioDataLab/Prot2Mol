@@ -42,12 +42,14 @@ grpo:
   property_reward_shaping: true
   property_allowed_sigma: 2.0
   property_penalty_strength: 0.5
-  # Penalize a molecule when its mean Morgan/Tanimoto similarity to the other
-  # valid EOS molecules in its eight-sample protein group exceeds 0.4.
-  # The factor is exp(-0.5 * max(0, (similarity - 0.4) / 0.2)^2).
+  # Continuously reward each molecule's contribution to group diversity using
+  # equal mean and nearest-neighbor Morgan/Tanimoto weights. The factor is
+  # (1 - reward_weight) + reward_weight * (1 - combined_similarity).
+  # Canonical duplicates get zero reward.
   diversity_reward_shaping: true
-  diversity_similarity_threshold: 0.4
-  diversity_similarity_softness: 0.2
+  diversity_reward_weight: 0.5
+  diversity_mean_similarity_weight: 0.5
+  diversity_duplicate_penalty_factor: 0.0
   diversity_morgan_radius: 2
   diversity_morgan_bits: 2048
   local_files_only: false
@@ -133,13 +135,14 @@ grpo:
   fcd_num_workers: 1
   fcd_model_path: null
 
-  output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-property-diversity-10ep
+  output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-continuous-diversity-10ep
   resume_from_checkpoint: null
   logging_steps: 1
-  # One checkpoint per 40-protein epoch avoids exhausting the server quota.
-  save_steps: 40
+  # The server has room for checkpoints 200/400 plus the final model while
+  # preserving the previous ablation run.
+  save_steps: 200
   wandb_project: prot2mol-grpo
   wandb_entity: null
-  wandb_run_name: random-assay-fusiondti-property-diversity-10ep
+  wandb_run_name: random-assay-fusiondti-continuous-diversity-10ep
   wandb_mode: online
   log_level: INFO

@@ -425,23 +425,20 @@ def test_grpo_applies_group_local_diversity_factor_to_final_reward(monkeypatch):
         protein_sequences=["AAAA"],
     )
     metrics = trainer._rollout_metrics(rollout)
-    expected_factor = math.exp(-4.5)
-
     assert rollout.reward_diagnostics["property_shaped_reward"].tolist() == (
         pytest.approx([0.8] * 8)
     )
     assert rollout.reward_diagnostics["diversity_penalty_factor"].tolist() == (
-        pytest.approx([expected_factor] * 8)
+        pytest.approx([0.0] * 8)
     )
-    assert rollout.rewards.tolist() == pytest.approx(
-        [0.8 * expected_factor] * 8
-    )
+    assert rollout.rewards.tolist() == pytest.approx([0.0] * 8)
     assert rollout.reward_diagnostics["final_reward"].tolist() == pytest.approx(
         rollout.rewards.tolist()
     )
     assert metrics["grpo/internal_diversity_mean"] == pytest.approx(0.0)
     assert metrics["grpo/mean_tanimoto_similarity"] == pytest.approx(1.0)
-    assert metrics["grpo/diversity_violation_fraction"] == pytest.approx(1.0)
+    assert metrics["grpo/combined_tanimoto_similarity_mean"] == pytest.approx(1.0)
+    assert metrics["grpo/diversity_score_mean"] == pytest.approx(0.0)
     assert metrics["grpo/exact_duplicate_fraction"] == pytest.approx(1.0)
 
 

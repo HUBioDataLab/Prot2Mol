@@ -38,8 +38,9 @@ class GRPOConfig:
     reward_saturation_threshold: float = 0.01
     require_eos_for_reward: bool = True
     diversity_reward_shaping: bool = False
-    diversity_similarity_threshold: float = 0.4
-    diversity_similarity_softness: float = 0.2
+    diversity_reward_weight: float = 0.5
+    diversity_mean_similarity_weight: float = 0.5
+    diversity_duplicate_penalty_factor: float = 0.0
     diversity_morgan_radius: int = 2
     diversity_morgan_bits: int = 2048
     precision: Literal["fp32", "bf16"] = "fp32"
@@ -69,10 +70,12 @@ class GRPOConfig:
             raise ValueError("max_grad_norm must be positive")
         if self.reward_min >= self.reward_max:
             raise ValueError("reward_min must be smaller than reward_max")
-        if not 0.0 <= self.diversity_similarity_threshold < 1.0:
-            raise ValueError("diversity_similarity_threshold must be in [0, 1)")
-        if self.diversity_similarity_softness <= 0.0:
-            raise ValueError("diversity_similarity_softness must be positive")
+        if not 0.0 <= self.diversity_reward_weight <= 1.0:
+            raise ValueError("diversity_reward_weight must be in [0, 1]")
+        if not 0.0 <= self.diversity_mean_similarity_weight <= 1.0:
+            raise ValueError("diversity_mean_similarity_weight must be in [0, 1]")
+        if not 0.0 <= self.diversity_duplicate_penalty_factor <= 1.0:
+            raise ValueError("diversity_duplicate_penalty_factor must be in [0, 1]")
         if self.diversity_morgan_radius < 1 or self.diversity_morgan_bits < 8:
             raise ValueError("Morgan diversity fingerprint settings are invalid")
         reward_range = self.reward_max - self.reward_min
@@ -447,8 +450,13 @@ class GRPOTrainer:
                 generated_smiles,
                 valid_mask.detach().cpu().tolist(),
                 group_size=self.config.group_size,
-                similarity_threshold=self.config.diversity_similarity_threshold,
-                similarity_softness=self.config.diversity_similarity_softness,
+                reward_weight=self.config.diversity_reward_weight,
+                mean_similarity_weight=(
+                    self.config.diversity_mean_similarity_weight
+                ),
+                duplicate_penalty_factor=(
+                    self.config.diversity_duplicate_penalty_factor
+                ),
                 morgan_radius=self.config.diversity_morgan_radius,
                 morgan_bits=self.config.diversity_morgan_bits,
             )
@@ -787,17 +795,17 @@ class GRPOTrainer:
                         "grpo/mean_tanimoto_similarity": comparable_mean(
                             "mean_tanimoto_similarity"
                         ),
+                        "grpo/nearest_neighbor_tanimoto_similarity_mean": (
+                            comparable_mean("max_tanimoto_similarity")
+                        ),
                         "grpo/max_tanimoto_similarity": comparable_max(
                             "max_tanimoto_similarity"
                         ),
-                        "grpo/diversity_violation_fraction": comparable_mean(
-                            "diversity_violation"
+                        "grpo/combined_tanimoto_similarity_mean": comparable_mean(
+                            "combined_tanimoto_similarity"
                         ),
-                        "grpo/diversity_similarity_excess_mean": comparable_mean(
-                            "diversity_similarity_excess"
-                        ),
-                        "grpo/diversity_similarity_excess_max": comparable_max(
-                            "diversity_similarity_excess"
+                        "grpo/diversity_score_mean": comparable_mean(
+                            "diversity_score"
                         ),
                         "grpo/exact_duplicate_fraction": diagnostic_mean(
                             "exact_duplicate"

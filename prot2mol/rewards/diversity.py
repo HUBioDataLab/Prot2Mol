@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
-from rdkit import DataStructs
+from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem.Scaffolds import MurckoScaffold
 
 from ..chem.utils import get_mol
 
@@ -18,20 +18,20 @@ class InternalDiversityResult:
     """Per-sample diversity diagnostics aligned with the original batch."""
 
     penalty_factor: np.ndarray
+    diversity_score: np.ndarray
+    combined_tanimoto_similarity: np.ndarray
     mean_tanimoto_similarity: np.ndarray
     max_tanimoto_similarity: np.ndarray
-    similarity_excess: np.ndarray
-    violation: np.ndarray
     exact_duplicate: np.ndarray
     comparable: np.ndarray
 
     def as_dict(self) -> dict[str, np.ndarray]:
         return {
             "diversity_penalty_factor": self.penalty_factor,
+            "diversity_score": self.diversity_score,
+            "combined_tanimoto_similarity": self.combined_tanimoto_similarity,
             "mean_tanimoto_similarity": self.mean_tanimoto_similarity,
             "max_tanimoto_similarity": self.max_tanimoto_similarity,
-            "diversity_similarity_excess": self.similarity_excess,
-            "diversity_violation": self.violation,
             "exact_duplicate": self.exact_duplicate,
             "diversity_comparable": self.comparable,
         }
@@ -42,30 +42,33 @@ def internal_diversity_factors(
     valid_mask: Sequence[bool],
     *,
     group_size: int,
-    similarity_threshold: float = 0.4,
-    similarity_softness: float = 0.2,
+    reward_weight: float = 0.5,
+    mean_similarity_weight: float = 0.5,
+    duplicate_penalty_factor: float = 0.0,
     morgan_radius: int = 2,
     morgan_bits: int = 2048,
 ) -> InternalDiversityResult:
-    """Calculate mean-pairwise-Tanimoto soft penalties within each group."""
+    """Calculate continuous per-molecule diversity factors within each group."""
 
     if len(smiles) != len(valid_mask):
         raise ValueError("SMILES and diversity validity masks must align")
     if group_size < 2 or len(smiles) % group_size:
         raise ValueError("Diversity batches must contain complete groups")
-    if not 0.0 <= similarity_threshold < 1.0:
-        raise ValueError("similarity_threshold must be in [0, 1)")
-    if similarity_softness <= 0.0:
-        raise ValueError("similarity_softness must be positive")
+    if not 0.0 <= reward_weight <= 1.0:
+        raise ValueError("reward_weight must be in [0, 1]")
+    if not 0.0 <= mean_similarity_weight <= 1.0:
+        raise ValueError("mean_similarity_weight must be in [0, 1]")
+    if not 0.0 <= duplicate_penalty_factor <= 1.0:
+        raise ValueError("duplicate_penalty_factor must be in [0, 1]")
     if morgan_radius < 1 or morgan_bits < 8:
         raise ValueError("Morgan fingerprint settings are invalid")
 
     length = len(smiles)
     penalty = np.zeros(length, dtype=np.float32)
+    diversity_score = np.zeros(length, dtype=np.float32)
+    combined_similarity = np.zeros(length, dtype=np.float32)
     mean_similarity = np.zeros(length, dtype=np.float32)
     max_similarity = np.zeros(length, dtype=np.float32)
-    excess = np.zeros(length, dtype=np.float32)
-    violation = np.zeros(length, dtype=np.float32)
     exact_duplicate = np.zeros(length, dtype=np.float32)
     comparable = np.zeros(length, dtype=np.float32)
     generator = rdFingerprintGenerator.GetMorganGenerator(
@@ -82,6 +85,7 @@ def internal_diversity_factors(
             continue
         canonical_counts: dict[str, int] = {}
         fingerprints = []
+        canonical_smiles = []
         for index in valid_indices:
             molecule = get_mol(smiles[index])
             if molecule is None:
@@ -90,12 +94,15 @@ def internal_diversity_factors(
                     f"could not parse sample {index}"
                 )
             fingerprints.append(generator.GetFingerprint(molecule))
-            canonical_counts[smiles[index]] = canonical_counts.get(smiles[index], 0) + 1
-        for index in valid_indices:
-            exact_duplicate[index] = float(canonical_counts[smiles[index]] > 1)
+            canonical = Chem.MolToSmiles(molecule)
+            canonical_smiles.append(canonical)
+            canonical_counts[canonical] = canonical_counts.get(canonical, 0) + 1
+        for index, canonical in zip(valid_indices, canonical_smiles):
+            exact_duplicate[index] = float(canonical_counts[canonical] > 1)
 
         if len(valid_indices) == 1:
             penalty[valid_indices[0]] = 1.0
+            diversity_score[valid_indices[0]] = 1.0
             continue
 
         count = len(valid_indices)
@@ -115,23 +122,63 @@ def internal_diversity_factors(
             others = np.delete(similarities[offset], offset)
             sample_mean = float(others.mean())
             sample_max = float(others.max())
-            sample_excess = max(
-                0.0,
-                (sample_mean - similarity_threshold) / similarity_softness,
+            sample_combined = (
+                mean_similarity_weight * sample_mean
+                + (1.0 - mean_similarity_weight) * sample_max
             )
-            penalty[index] = math.exp(-0.5 * sample_excess * sample_excess)
+            sample_diversity = 1.0 - sample_combined
+            sample_factor = (
+                (1.0 - reward_weight) + reward_weight * sample_diversity
+            )
+            if exact_duplicate[index]:
+                sample_factor = duplicate_penalty_factor
+            penalty[index] = sample_factor
+            diversity_score[index] = sample_diversity
+            combined_similarity[index] = sample_combined
             mean_similarity[index] = sample_mean
             max_similarity[index] = sample_max
-            excess[index] = sample_excess
-            violation[index] = float(sample_mean > similarity_threshold)
             comparable[index] = 1.0
 
     return InternalDiversityResult(
         penalty_factor=penalty,
+        diversity_score=diversity_score,
+        combined_tanimoto_similarity=combined_similarity,
         mean_tanimoto_similarity=mean_similarity,
         max_tanimoto_similarity=max_similarity,
-        similarity_excess=excess,
-        violation=violation,
         exact_duplicate=exact_duplicate,
         comparable=comparable,
     )
+
+
+def scaffold_diversity_summary(
+    smiles: Sequence[str],
+    valid_mask: Sequence[bool],
+) -> dict[str, float]:
+    """Summarize non-empty Bemis-Murcko scaffolds among valid molecules."""
+
+    if len(smiles) != len(valid_mask):
+        raise ValueError("SMILES and scaffold validity masks must align")
+    valid_count = 0
+    scaffolds: list[str] = []
+    for index, is_valid in enumerate(valid_mask):
+        if not is_valid:
+            continue
+        molecule = get_mol(smiles[index])
+        if molecule is None:
+            raise ValueError(
+                "Scaffold metrics received a molecule marked valid but RDKit "
+                f"could not parse sample {index}"
+            )
+        valid_count += 1
+        scaffold = MurckoScaffold.GetScaffoldForMol(molecule)
+        scaffold_smiles = Chem.MolToSmiles(scaffold)
+        if scaffold_smiles:
+            scaffolds.append(scaffold_smiles)
+    return {
+        "scaffold_available_fraction": (
+            len(scaffolds) / valid_count if valid_count else 0.0
+        ),
+        "scaffold_unique_fraction": (
+            len(set(scaffolds)) / len(scaffolds) if scaffolds else 0.0
+        ),
+    }
