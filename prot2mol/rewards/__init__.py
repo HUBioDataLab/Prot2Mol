@@ -1,5 +1,7 @@
 """Reward scorers used for post-training ablations."""
 
+from .diversity import InternalDiversityResult, internal_diversity_factors
+
 from .fusiondti import (
     FUSIONDTI_MOLECULE_MODEL_ID,
     FUSIONDTI_MOLECULE_MODEL_REVISION,
@@ -34,4 +36,6 @@ __all__ = [
     "load_fusiondti_head",
     "TargetActivePropertyStats",
     "TargetPropertyShapedActivityScorer",
+    "InternalDiversityResult",
+    "internal_diversity_factors",
 ]

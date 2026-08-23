@@ -384,11 +384,19 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "activity_reward",
         "activity_probability",
         "property_shaped_reward",
+        "final_reward",
         "logp_penalty_factor",
         "sas_penalty_factor",
         "property_penalty_factor",
         "logp_violation",
         "sas_violation",
+        "diversity_penalty_factor",
+        "mean_tanimoto_similarity",
+        "max_tanimoto_similarity",
+        "diversity_similarity_excess",
+        "diversity_violation",
+        "exact_duplicate",
+        "diversity_comparable",
         "qed",
         "sas",
         "logp",
@@ -398,6 +406,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("grpo/reward_mean" in values for values in logged)
     assert any("grpo/valid_activity_probability_mean" in values for values in logged)
     assert any("grpo/property_penalty_factor_mean" in values for values in logged)
+    assert any("grpo/internal_diversity_mean" in values for values in logged)
+    assert any("grpo/diversity_penalty_factor_mean" in values for values in logged)
     assert any("grpo/qed_mean" in values for values in logged)
     assert any("grpo/sas_mean" in values for values in logged)
     assert any("grpo/valid_unique_fraction" in values for values in logged)
@@ -406,6 +416,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("eval/fcd_macro" in values for values in logged)
     assert any("eval/activity_probability_mean_macro" in values for values in logged)
     assert any("eval/logp_violation_fraction_macro" in values for values in logged)
+    assert any("eval/internal_diversity_mean_macro" in values for values in logged)
+    assert any("eval/exact_duplicate_fraction_macro" in values for values in logged)
     assert any("eval/per_protein" in values for values in logged)
     assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True

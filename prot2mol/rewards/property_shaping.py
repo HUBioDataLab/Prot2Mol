@@ -170,6 +170,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             "logp_violation": [],
             "sas_violation": [],
             "property_valid": [],
+            "property_shaped_reward": [],
         }
         rewards = []
         for index, (protein, row) in enumerate(zip(protein_sequences, properties)):
@@ -199,7 +200,8 @@ class TargetPropertyShapedActivityScorer(nn.Module):
                     -self.penalty_strength * sas_excess * sas_excess
                 )
             property_factor = logp_factor * sas_factor
-            rewards.append(float(activity[index]) * property_factor)
+            shaped_reward = float(activity[index]) * property_factor
+            rewards.append(shaped_reward)
             diagnostics["activity_probability"].append(float(activity[index]))
             diagnostics["logp_penalty_factor"].append(logp_factor)
             diagnostics["sas_penalty_factor"].append(sas_factor)
@@ -209,6 +211,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             diagnostics["logp_violation"].append(float(logp_excess > 0.0))
             diagnostics["sas_violation"].append(float(sas_excess > 0.0))
             diagnostics["property_valid"].append(float(property_valid[index]))
+            diagnostics["property_shaped_reward"].append(shaped_reward)
 
         reward_tensor = torch.tensor(rewards, dtype=torch.float32)
         if not torch.isfinite(reward_tensor).all():

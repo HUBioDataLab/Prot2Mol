@@ -392,6 +392,59 @@ def test_grpo_requires_eos_before_a_chemically_valid_generation_can_be_rewarded(
     assert metrics["grpo/truncated_fraction"] == 0.5
 
 
+def test_grpo_applies_group_local_diversity_factor_to_final_reward(monkeypatch):
+    policy, tokenizer = _tiny_gpt2_policy(monkeypatch)
+    reference_policy = copy.deepcopy(policy)
+    fixed_generations = torch.tensor([[1, 3, 2, 0, 0]] * 8, dtype=torch.long)
+
+    def deterministic_generate(self, protein_embeddings, prot_attention_mask, **kwargs):
+        del protein_embeddings, prot_attention_mask, kwargs
+        return fixed_generations
+
+    policy.generate_from_protein_embeddings = MethodType(deterministic_generate, policy)
+    trainer = GRPOTrainer(
+        policy=policy,
+        reference_policy=reference_policy,
+        optimizer=torch.optim.AdamW(
+            [parameter for parameter in policy.parameters() if parameter.requires_grad],
+            lr=1.0e-2,
+        ),
+        tokenizer=tokenizer,
+        reward_function=lambda proteins, molecules: [0.8] * len(molecules),
+        config=GRPOConfig(
+            group_size=8,
+            max_length=5,
+            min_length=3,
+            diversity_reward_shaping=True,
+        ),
+    )
+
+    rollout = trainer.collect_rollouts(
+        protein_input_ids=torch.tensor([[1, 2, 3, 0]]),
+        protein_attention_mask=torch.tensor([[1, 1, 1, 0]]),
+        protein_sequences=["AAAA"],
+    )
+    metrics = trainer._rollout_metrics(rollout)
+    expected_factor = math.exp(-4.5)
+
+    assert rollout.reward_diagnostics["property_shaped_reward"].tolist() == (
+        pytest.approx([0.8] * 8)
+    )
+    assert rollout.reward_diagnostics["diversity_penalty_factor"].tolist() == (
+        pytest.approx([expected_factor] * 8)
+    )
+    assert rollout.rewards.tolist() == pytest.approx(
+        [0.8 * expected_factor] * 8
+    )
+    assert rollout.reward_diagnostics["final_reward"].tolist() == pytest.approx(
+        rollout.rewards.tolist()
+    )
+    assert metrics["grpo/internal_diversity_mean"] == pytest.approx(0.0)
+    assert metrics["grpo/mean_tanimoto_similarity"] == pytest.approx(1.0)
+    assert metrics["grpo/diversity_violation_fraction"] == pytest.approx(1.0)
+    assert metrics["grpo/exact_duplicate_fraction"] == pytest.approx(1.0)
+
+
 def test_fusiondti_ablation_runs_structure_aware_reward_feedback_to_gpt2(monkeypatch):
     class StructureAwareTokenizer:
         def __init__(self):

@@ -42,11 +42,19 @@ grpo:
   property_reward_shaping: true
   property_allowed_sigma: 2.0
   property_penalty_strength: 0.5
+  # Penalize a molecule when its mean Morgan/Tanimoto similarity to the other
+  # valid EOS molecules in its eight-sample protein group exceeds 0.4.
+  # The factor is exp(-0.5 * max(0, (similarity - 0.4) / 0.2)^2).
+  diversity_reward_shaping: true
+  diversity_similarity_threshold: 0.4
+  diversity_similarity_softness: 0.2
+  diversity_morgan_radius: 2
+  diversity_morgan_bits: 2048
   local_files_only: false
 
   # One rollout = one unique protein x eight generated molecules; the rollout
   # is reused for num_iterations decoder optimizer updates.
-  epochs: 1
+  epochs: 10
   max_steps: null
   group_size: 8
   learning_rate: 1.0e-6
@@ -125,12 +133,13 @@ grpo:
   fcd_num_workers: 1
   fcd_model_path: null
 
-  output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-gpt2
+  output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-property-diversity-10ep
   resume_from_checkpoint: null
   logging_steps: 1
-  save_steps: 5
+  # One checkpoint per 40-protein epoch avoids exhausting the server quota.
+  save_steps: 40
   wandb_project: prot2mol-grpo
   wandb_entity: null
-  wandb_run_name: random-assay-fusiondti-gpt2
+  wandb_run_name: random-assay-fusiondti-property-diversity-10ep
   wandb_mode: online
   log_level: INFO

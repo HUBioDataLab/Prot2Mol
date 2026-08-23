@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 
 from ..chem.utils import canonic_smiles, molecular_property_summary
+from ..rewards.diversity import internal_diversity_factors
 
 
 RewardFunction = Callable[[Sequence[str], Sequence[str]], torch.Tensor | Sequence[float]]
@@ -36,6 +37,11 @@ class GRPOConfig:
     reward_max: float = 1.0
     reward_saturation_threshold: float = 0.01
     require_eos_for_reward: bool = True
+    diversity_reward_shaping: bool = False
+    diversity_similarity_threshold: float = 0.4
+    diversity_similarity_softness: float = 0.2
+    diversity_morgan_radius: int = 2
+    diversity_morgan_bits: int = 2048
     precision: Literal["fp32", "bf16"] = "fp32"
 
     def __post_init__(self) -> None:
@@ -63,6 +69,12 @@ class GRPOConfig:
             raise ValueError("max_grad_norm must be positive")
         if self.reward_min >= self.reward_max:
             raise ValueError("reward_min must be smaller than reward_max")
+        if not 0.0 <= self.diversity_similarity_threshold < 1.0:
+            raise ValueError("diversity_similarity_threshold must be in [0, 1)")
+        if self.diversity_similarity_softness <= 0.0:
+            raise ValueError("diversity_similarity_softness must be positive")
+        if self.diversity_morgan_radius < 1 or self.diversity_morgan_bits < 8:
+            raise ValueError("Morgan diversity fingerprint settings are invalid")
         reward_range = self.reward_max - self.reward_min
         if not 0.0 <= self.reward_saturation_threshold < reward_range / 2:
             raise ValueError(
@@ -425,6 +437,30 @@ class GRPOTrainer:
                     )
                     aligned[torch.tensor(valid_indices, device=device)] = valid_values
                     diagnostics[name] = aligned
+        if diagnostics or self.config.diversity_reward_shaping:
+            diagnostics.setdefault(
+                "property_shaped_reward",
+                rewards.detach().clone(),
+            )
+        if self.config.diversity_reward_shaping:
+            diversity = internal_diversity_factors(
+                generated_smiles,
+                valid_mask.detach().cpu().tolist(),
+                group_size=self.config.group_size,
+                similarity_threshold=self.config.diversity_similarity_threshold,
+                similarity_softness=self.config.diversity_similarity_softness,
+                morgan_radius=self.config.diversity_morgan_radius,
+                morgan_bits=self.config.diversity_morgan_bits,
+            )
+            for name, values in diversity.as_dict().items():
+                diagnostics[name] = torch.as_tensor(
+                    values,
+                    dtype=torch.float32,
+                    device=device,
+                )
+            rewards = rewards * diagnostics["diversity_penalty_factor"]
+        if diagnostics:
+            diagnostics["final_reward"] = rewards.detach().clone()
         return rewards, diagnostics
 
     def collect_rollouts(
@@ -715,8 +751,62 @@ class GRPOTrainer:
                     "grpo/logp_excess_z_max": diagnostic_max("logp_excess_z"),
                     "grpo/sas_excess_z_mean": diagnostic_mean("sas_excess_z"),
                     "grpo/sas_excess_z_max": diagnostic_max("sas_excess_z"),
+                    "grpo/valid_property_shaped_reward_mean": diagnostic_mean(
+                        "property_shaped_reward"
+                    ),
                 }
             )
+            if "diversity_penalty_factor" in rollout.reward_diagnostics:
+                comparable_mask = rollout.valid_mask & rollout.reward_diagnostics[
+                    "diversity_comparable"
+                ].bool()
+                has_comparable = bool(comparable_mask.any())
+
+                def comparable_mean(name: str) -> float:
+                    if not has_comparable:
+                        return 0.0
+                    values = rollout.reward_diagnostics[name]
+                    return float(values[comparable_mask].mean().detach().cpu())
+
+                def comparable_max(name: str) -> float:
+                    if not has_comparable:
+                        return 0.0
+                    values = rollout.reward_diagnostics[name]
+                    return float(values[comparable_mask].max().detach().cpu())
+
+                metrics.update(
+                    {
+                        "grpo/diversity_penalty_factor_mean": diagnostic_mean(
+                            "diversity_penalty_factor"
+                        ),
+                        "grpo/internal_diversity_mean": (
+                            1.0 - comparable_mean("mean_tanimoto_similarity")
+                            if has_comparable
+                            else 0.0
+                        ),
+                        "grpo/mean_tanimoto_similarity": comparable_mean(
+                            "mean_tanimoto_similarity"
+                        ),
+                        "grpo/max_tanimoto_similarity": comparable_max(
+                            "max_tanimoto_similarity"
+                        ),
+                        "grpo/diversity_violation_fraction": comparable_mean(
+                            "diversity_violation"
+                        ),
+                        "grpo/diversity_similarity_excess_mean": comparable_mean(
+                            "diversity_similarity_excess"
+                        ),
+                        "grpo/diversity_similarity_excess_max": comparable_max(
+                            "diversity_similarity_excess"
+                        ),
+                        "grpo/exact_duplicate_fraction": diagnostic_mean(
+                            "exact_duplicate"
+                        ),
+                        "grpo/diversity_comparable_fraction": diagnostic_mean(
+                            "diversity_comparable"
+                        ),
+                    }
+                )
         metrics.update(
             {
                 f"grpo/{'property_count' if name == 'count' else name}": value

@@ -40,6 +40,7 @@ from ..rewards import (
     FusionDTIActivityScorer,
     TargetActivePropertyStats,
     TargetPropertyShapedActivityScorer,
+    internal_diversity_factors,
 )
 from .grpo import GRPOConfig, GRPOTrainer, selfies_to_smiles, valid_selfies
 
@@ -697,6 +698,22 @@ class GRPOTrainingRun:
                 "activity_probability * exp(-strength * logp_excess_z^2) * "
                 "exp(-strength * sas_excess_z^2)"
             ),
+            "diversity_reward_shaping": self.config.diversity_reward_shaping,
+            "diversity_scope": (
+                "valid EOS molecules within each fixed GRPO protein group"
+            ),
+            "diversity_similarity_threshold": (
+                self.config.diversity_similarity_threshold
+            ),
+            "diversity_similarity_softness": (
+                self.config.diversity_similarity_softness
+            ),
+            "diversity_morgan_radius": self.config.diversity_morgan_radius,
+            "diversity_morgan_bits": self.config.diversity_morgan_bits,
+            "final_reward_formula": (
+                "property_shaped_reward * exp(-0.5 * "
+                "max(0, (mean_group_tanimoto - threshold) / softness)^2)"
+            ),
         }
         (self.output_dir / "cohort.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True),
@@ -818,6 +835,15 @@ class GRPOTrainingRun:
                 loss_type=self.config.loss_type,
                 max_grad_norm=self.config.max_grad_norm,
                 require_eos_for_reward=True,
+                diversity_reward_shaping=self.config.diversity_reward_shaping,
+                diversity_similarity_threshold=(
+                    self.config.diversity_similarity_threshold
+                ),
+                diversity_similarity_softness=(
+                    self.config.diversity_similarity_softness
+                ),
+                diversity_morgan_radius=self.config.diversity_morgan_radius,
+                diversity_morgan_bits=self.config.diversity_morgan_bits,
                 precision=self.config.precision,
             ),
         )
@@ -844,6 +870,15 @@ class GRPOTrainingRun:
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
             "training_active_statistics_sha256": digest,
+            "diversity_enabled": self.config.diversity_reward_shaping,
+            "diversity_similarity_threshold": (
+                self.config.diversity_similarity_threshold
+            ),
+            "diversity_similarity_softness": (
+                self.config.diversity_similarity_softness
+            ),
+            "diversity_morgan_radius": self.config.diversity_morgan_radius,
+            "diversity_morgan_bits": self.config.diversity_morgan_bits,
         }
 
     def _checkpoint_payload(self, *, epoch: int, next_index: int) -> dict[str, Any]:
@@ -1110,6 +1145,7 @@ class GRPOTrainingRun:
             "sas_excess_z",
             "logp_violation",
             "sas_violation",
+            "property_shaped_reward",
         )
         diagnostics = {
             name: np.zeros(len(selfies), dtype=np.float32)
@@ -1140,6 +1176,21 @@ class GRPOTrainingRun:
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
                 diagnostics["property_penalty_factor"][valid_indices] = 1.0
+                diagnostics["property_shaped_reward"][valid_indices] = reward_values
+        property_rewards = rewards.copy()
+        diversity = internal_diversity_factors(
+            smiles,
+            valid,
+            group_size=self.config.group_size,
+            similarity_threshold=self.config.diversity_similarity_threshold,
+            similarity_softness=self.config.diversity_similarity_softness,
+            morgan_radius=self.config.diversity_morgan_radius,
+            morgan_bits=self.config.diversity_morgan_bits,
+        )
+        diagnostics.update(diversity.as_dict())
+        if self.config.diversity_reward_shaping:
+            rewards *= diversity.penalty_factor
+        diagnostics["final_reward"] = rewards.copy()
         properties = _evaluation_property_summary(valid_smiles)
         aligned_properties = molecular_property_rows(
             [smiles[index] if valid[index] else "" for index in range(len(smiles))]
@@ -1166,6 +1217,12 @@ class GRPOTrainingRun:
             "reward_mean": float(rewards.mean()),
             "valid_reward_mean": (
                 float(rewards[valid_indices].mean()) if valid_indices else 0.0
+            ),
+            "property_shaped_reward_mean": float(property_rewards.mean()),
+            "valid_property_shaped_reward_mean": (
+                float(property_rewards[valid_indices].mean())
+                if valid_indices
+                else 0.0
             ),
             "activity_probability_mean": float(
                 diagnostics["activity_probability"].mean()
@@ -1204,6 +1261,69 @@ class GRPOTrainingRun:
                 if valid_indices
                 else 0.0
             ),
+            "diversity_penalty_factor_mean": (
+                float(
+                    diagnostics["diversity_penalty_factor"][valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "internal_diversity_mean": (
+                1.0
+                - float(
+                    diagnostics["mean_tanimoto_similarity"]
+                    [diagnostics["diversity_comparable"].astype(bool)]
+                    .mean()
+                )
+                if diagnostics["diversity_comparable"].any()
+                else 0.0
+            ),
+            "mean_tanimoto_similarity": (
+                float(
+                    diagnostics["mean_tanimoto_similarity"]
+                    [diagnostics["diversity_comparable"].astype(bool)]
+                    .mean()
+                )
+                if diagnostics["diversity_comparable"].any()
+                else 0.0
+            ),
+            "max_tanimoto_similarity": (
+                float(
+                    diagnostics["max_tanimoto_similarity"]
+                    [diagnostics["diversity_comparable"].astype(bool)]
+                    .max()
+                )
+                if diagnostics["diversity_comparable"].any()
+                else 0.0
+            ),
+            "diversity_violation_fraction": (
+                float(
+                    diagnostics["diversity_violation"]
+                    [diagnostics["diversity_comparable"].astype(bool)]
+                    .mean()
+                )
+                if diagnostics["diversity_comparable"].any()
+                else 0.0
+            ),
+            "diversity_similarity_excess_mean": (
+                float(
+                    diagnostics["diversity_similarity_excess"]
+                    [diagnostics["diversity_comparable"].astype(bool)]
+                    .mean()
+                )
+                if diagnostics["diversity_comparable"].any()
+                else 0.0
+            ),
+            "exact_duplicate_fraction": (
+                float(diagnostics["exact_duplicate"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "diversity_comparable_fraction": (
+                float(diagnostics["diversity_comparable"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
             "fcd": fcd_value,
             **properties,
         }
@@ -1220,7 +1340,8 @@ class GRPOTrainingRun:
                 "activity_probability": float(
                     diagnostics["activity_probability"][index]
                 ),
-                "property_shaped_reward": float(rewards[index]),
+                "property_shaped_reward": float(property_rewards[index]),
+                "final_reward": float(rewards[index]),
                 "logp_penalty_factor": float(
                     diagnostics["logp_penalty_factor"][index]
                 ),
@@ -1234,6 +1355,25 @@ class GRPOTrainingRun:
                 "sas_excess_z": float(diagnostics["sas_excess_z"][index]),
                 "logp_violation": bool(diagnostics["logp_violation"][index]),
                 "sas_violation": bool(diagnostics["sas_violation"][index]),
+                "diversity_penalty_factor": float(
+                    diagnostics["diversity_penalty_factor"][index]
+                ),
+                "mean_tanimoto_similarity": float(
+                    diagnostics["mean_tanimoto_similarity"][index]
+                ),
+                "max_tanimoto_similarity": float(
+                    diagnostics["max_tanimoto_similarity"][index]
+                ),
+                "diversity_similarity_excess": float(
+                    diagnostics["diversity_similarity_excess"][index]
+                ),
+                "diversity_violation": bool(
+                    diagnostics["diversity_violation"][index]
+                ),
+                "exact_duplicate": bool(diagnostics["exact_duplicate"][index]),
+                "diversity_comparable": bool(
+                    diagnostics["diversity_comparable"][index]
+                ),
                 **aligned_properties[index],
             }
             for index in range(len(selfies))
@@ -1271,6 +1411,19 @@ class GRPOTrainingRun:
             "global_step": global_step,
             "sampling_seed": self.config.eval_seed,
             "samples_per_protein": self.config.eval_samples_per_protein,
+            "diversity_group_size": self.config.group_size,
+            "diversity_group_count_per_protein": (
+                self.config.eval_samples_per_protein // self.config.group_size
+            ),
+            "diversity_reward_shaping": self.config.diversity_reward_shaping,
+            "diversity_similarity_threshold": (
+                self.config.diversity_similarity_threshold
+            ),
+            "diversity_similarity_softness": (
+                self.config.diversity_similarity_softness
+            ),
+            "diversity_morgan_radius": self.config.diversity_morgan_radius,
+            "diversity_morgan_bits": self.config.diversity_morgan_bits,
             "protein_ids": [row["protein_id"] for row in per_protein_rows],
             "generator_checkpoint": str(
                 Path(self.config.generator_checkpoint).expanduser().resolve()
@@ -1332,6 +1485,14 @@ class GRPOTrainingRun:
             ),
             "eval/reward_mean_macro": self._macro(rows, "reward_mean"),
             "eval/valid_reward_mean_macro": self._macro(rows, "valid_reward_mean"),
+            "eval/property_shaped_reward_mean_macro": self._macro(
+                rows,
+                "property_shaped_reward_mean",
+            ),
+            "eval/valid_property_shaped_reward_mean_macro": self._macro(
+                rows,
+                "valid_property_shaped_reward_mean",
+            ),
             "eval/activity_probability_mean_macro": self._macro(
                 rows,
                 "activity_probability_mean",
@@ -1360,6 +1521,38 @@ class GRPOTrainingRun:
                 rows,
                 "sas_violation_fraction",
             ),
+            "eval/diversity_penalty_factor_mean_macro": self._macro(
+                rows,
+                "diversity_penalty_factor_mean",
+            ),
+            "eval/internal_diversity_mean_macro": self._macro(
+                rows,
+                "internal_diversity_mean",
+            ),
+            "eval/mean_tanimoto_similarity_macro": self._macro(
+                rows,
+                "mean_tanimoto_similarity",
+            ),
+            "eval/max_tanimoto_similarity_macro": self._macro(
+                rows,
+                "max_tanimoto_similarity",
+            ),
+            "eval/diversity_violation_fraction_macro": self._macro(
+                rows,
+                "diversity_violation_fraction",
+            ),
+            "eval/diversity_similarity_excess_mean_macro": self._macro(
+                rows,
+                "diversity_similarity_excess_mean",
+            ),
+            "eval/exact_duplicate_fraction_macro": self._macro(
+                rows,
+                "exact_duplicate_fraction",
+            ),
+            "eval/diversity_comparable_fraction_macro": self._macro(
+                rows,
+                "diversity_comparable_fraction",
+            ),
             "eval/qed_mean_macro": self._macro(rows, "qed_mean"),
             "eval/sas_mean_macro": self._macro(rows, "sas_mean"),
             "eval/logp_mean_macro": self._macro(rows, "logp_mean"),
@@ -1384,6 +1577,8 @@ class GRPOTrainingRun:
                 "valid_unique_fraction",
                 "reward_mean",
                 "valid_reward_mean",
+                "property_shaped_reward_mean",
+                "valid_property_shaped_reward_mean",
                 "activity_probability_mean",
                 "valid_activity_probability_mean",
                 "property_penalty_factor_mean",
@@ -1391,6 +1586,14 @@ class GRPOTrainingRun:
                 "sas_penalty_factor_mean",
                 "logp_violation_fraction",
                 "sas_violation_fraction",
+                "diversity_penalty_factor_mean",
+                "internal_diversity_mean",
+                "mean_tanimoto_similarity",
+                "max_tanimoto_similarity",
+                "diversity_violation_fraction",
+                "diversity_similarity_excess_mean",
+                "exact_duplicate_fraction",
+                "diversity_comparable_fraction",
                 "qed_mean",
                 "sas_mean",
                 "logp_mean",
@@ -1650,6 +1853,23 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     reward.add_argument("--property_allowed_sigma", type=float, default=2.0)
     reward.add_argument("--property_penalty_strength", type=float, default=0.5)
     reward.add_argument(
+        "--diversity_reward_shaping",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    reward.add_argument(
+        "--diversity_similarity_threshold",
+        type=float,
+        default=0.4,
+    )
+    reward.add_argument(
+        "--diversity_similarity_softness",
+        type=float,
+        default=0.2,
+    )
+    reward.add_argument("--diversity_morgan_radius", type=int, default=2)
+    reward.add_argument("--diversity_morgan_bits", type=int, default=2048)
+    reward.add_argument(
         "--local_files_only",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1728,6 +1948,9 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "reward_protein_cache_size": config.reward_protein_cache_size,
         "property_allowed_sigma": config.property_allowed_sigma,
         "property_penalty_strength": config.property_penalty_strength,
+        "diversity_similarity_softness": config.diversity_similarity_softness,
+        "diversity_morgan_radius": config.diversity_morgan_radius,
+        "diversity_morgan_bits": config.diversity_morgan_bits,
         "eval_samples_per_protein": config.eval_samples_per_protein,
     }
     invalid = {key: value for key, value in positive.items() if value <= 0}
@@ -1735,6 +1958,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError(f"GRPO values must be positive: {invalid}")
     if config.group_size < 2:
         raise ValueError("group_size must be at least 2")
+    if not 0.0 <= config.diversity_similarity_threshold < 1.0:
+        raise ValueError("diversity_similarity_threshold must be in [0, 1)")
     if config.max_steps is not None and config.max_steps < 1:
         raise ValueError("max_steps must be positive when provided")
     if not 0.0 <= config.warmup_ratio < 1.0:
@@ -1751,6 +1976,10 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     if config.eval_proteins < 0 or config.min_fcd_reference_actives < 2:
         raise ValueError("Evaluation counts are invalid")
+    if config.eval_samples_per_protein % config.group_size:
+        raise ValueError(
+            "eval_samples_per_protein must contain complete GRPO diversity groups"
+        )
     return config
 
 
