@@ -140,6 +140,7 @@ def load_unique_training_proteins(
     structure_aware_path: str | Path | None = None,
     structure_aware_key_column: str = "protein_accession",
     structure_aware_sequence_column: str | None = None,
+    required_protein_ids: Sequence[str] | None = None,
 ) -> list[ProteinRecord]:
     """Load one stable record per unique amino-acid sequence from the train split."""
 
@@ -176,6 +177,13 @@ def load_unique_training_proteins(
 
     columns = [protein_id_column, protein_sequence_column]
     lookup_column = structure_aware_key_column
+    required_ids = (
+        {str(value).strip() for value in required_protein_ids}
+        if required_protein_ids is not None
+        else None
+    )
+    if required_ids is not None and not required_ids:
+        raise ValueError("required_protein_ids cannot be empty")
     if structure_mapping is not None and lookup_column not in names:
         raise ValueError(
             f"Training Parquet lacks structure mapping join column {lookup_column!r}"
@@ -191,6 +199,8 @@ def load_unique_training_proteins(
         protein_id = str(row[protein_id_column] or "").strip()
         sequence = str(row[protein_sequence_column] or "").strip().upper()
         if not protein_id or not sequence:
+            continue
+        if required_ids is not None and protein_id not in required_ids:
             continue
         if structure_mapping is not None:
             mapping_key = str(row[lookup_column] or "").strip()
@@ -225,6 +235,13 @@ def load_unique_training_proteins(
             f"training protein keys; examples: {examples}"
         )
     proteins = sorted(by_sequence.values(), key=lambda row: (row.protein_id, row.protein_sequence))
+    if required_ids is not None:
+        found_ids = {protein.protein_id for protein in proteins}
+        missing_ids = sorted(required_ids.difference(found_ids))
+        if missing_ids:
+            raise ValueError(
+                f"Required protein IDs were not found with structure mappings: {missing_ids[:5]}"
+            )
     if not proteins:
         raise ValueError("No usable unique proteins were found in the training split")
     return proteins
@@ -470,6 +487,12 @@ class GRPOTrainingRun:
         self.wandb_run = None
 
     def _load_data(self) -> None:
+        required_protein_ids = (
+            self.config.eval_protein_ids
+            if self.config.train_on_evaluation_panel_only
+            and self.config.eval_protein_ids
+            else None
+        )
         source_proteins = load_unique_training_proteins(
             self.config.train_parquet_path,
             protein_id_column=self.config.protein_id_column,
@@ -477,6 +500,7 @@ class GRPOTrainingRun:
             structure_aware_path=self.config.structure_aware_path,
             structure_aware_key_column=self.config.structure_aware_key_column,
             structure_aware_sequence_column=self.config.structure_aware_sequence_column,
+            required_protein_ids=required_protein_ids,
         )
         references = load_active_references(
             self.config.validation_parquet_path,

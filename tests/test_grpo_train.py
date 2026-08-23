@@ -165,6 +165,29 @@ def test_unique_proteins_require_and_join_structure_aware_sequences(tmp_path):
         grpo_train.load_unique_training_proteins(train)
 
 
+def test_unique_proteins_can_validate_only_fixed_training_panel(tmp_path):
+    train, _, structures = _write_random_split(tmp_path)
+    structure_frame = pd.read_parquet(structures)
+    structure_frame.loc[structure_frame["protein_accession"] == "P2"].to_parquet(
+        structures, index=False
+    )
+
+    proteins = grpo_train.load_unique_training_proteins(
+        train,
+        structure_aware_path=structures,
+        required_protein_ids=["P2"],
+    )
+
+    assert proteins == [grpo_train.ProteinRecord("P2", "GT", "GaTa")]
+
+    with pytest.raises(ValueError, match="Required protein IDs"):
+        grpo_train.load_unique_training_proteins(
+            train,
+            structure_aware_path=structures,
+            required_protein_ids=["P3"],
+        )
+
+
 def test_structure_mapping_rejects_plain_amino_acid_values(tmp_path):
     train, _, structures = _write_random_split(tmp_path)
     frame = pd.read_parquet(structures)

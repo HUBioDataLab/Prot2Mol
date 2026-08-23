@@ -263,6 +263,18 @@ Foldseek/SaProt representation. Before launch, provide
 The runner validates complete coverage and rejects plain amino-acid strings in
 that column. Launch with:
 
+Generate the mapping reproducibly from canonical AlphaFold DB structures with
+the official Foldseek binary (low-confidence positions are masked at pLDDT 70,
+as recommended by SaProt for AlphaFold structures):
+
+```bash
+python data_processing/build_structure_aware_proteins.py \
+  --config prot2mol/configs/grpo.yaml \
+  --foldseek /path/to/foldseek
+```
+
+Then launch GRPO with:
+
 ```bash
 python prot2mol/main.py grpo --config prot2mol/configs/grpo.yaml
 ```
