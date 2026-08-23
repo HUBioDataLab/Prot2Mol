@@ -383,3 +383,25 @@ def test_legacy_gpt2_config_is_inferred_and_state_is_migrated(tmp_path):
         migrated["protein_encoder.model.rotary_embeddings.inv_freq"],
         torch.tensor([1.0, 0.5]),
     )
+
+
+def test_migrated_esm_rotary_buffer_adapts_to_per_layer_layout():
+    shared_key = "protein_encoder.model.rotary_embeddings.inv_freq"
+    first_layer = (
+        "protein_encoder.model.encoder.layer.0.attention.self."
+        "rotary_embeddings.inv_freq"
+    )
+    second_layer = (
+        "protein_encoder.model.encoder.layer.1.attention.self."
+        "rotary_embeddings.inv_freq"
+    )
+    value = torch.tensor([1.0, 0.5])
+
+    aligned = hf_utils.align_prot2mol_state_dict_to_model(
+        {shared_key: value, "molecule_decoder.weight": torch.ones(1)},
+        [first_layer, second_layer, "molecule_decoder.weight"],
+    )
+
+    assert shared_key not in aligned
+    assert torch.equal(aligned[first_layer], value)
+    assert torch.equal(aligned[second_layer], value)

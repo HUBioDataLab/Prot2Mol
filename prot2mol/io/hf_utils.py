@@ -88,9 +88,10 @@ def prepare_prot2mol_state_dict(
             or key
             == "protein_encoder.encoder_model.embeddings.position_embeddings.weight"
         ):
-            # Transformers <=4.x persisted an unused learned position table and
-            # one rotary-frequency buffer per ESM layer. Transformers 5.x uses
-            # one shared rotary buffer instead. The layer buffers are identical.
+            # Older checkpoints persisted an unused learned position table and
+            # one rotary-frequency buffer per ESM layer. Normalize those
+            # identical buffers to one canonical key; the loader adapts that
+            # key to the layout expected by the installed Transformers release.
             continue
         if key.startswith("protein_encoder.encoder_model."):
             key = "protein_encoder.model." + key.removeprefix(
@@ -102,6 +103,29 @@ def prepare_prot2mol_state_dict(
             legacy_rotary_value
         )
     return migrated
+
+
+def align_prot2mol_state_dict_to_model(
+    state_dict: Dict[str, torch.Tensor],
+    expected_keys: Sequence[str],
+) -> Dict[str, torch.Tensor]:
+    """Adapt ESM rotary buffers across Transformers state-dict layouts."""
+
+    shared_key = "protein_encoder.model.rotary_embeddings.inv_freq"
+    per_layer_suffix = ".attention.self.rotary_embeddings.inv_freq"
+    per_layer_prefix = "protein_encoder.model.encoder.layer."
+    expected = set(expected_keys)
+    expected_per_layer = sorted(
+        key
+        for key in expected
+        if key.startswith(per_layer_prefix) and key.endswith(per_layer_suffix)
+    )
+    aligned = dict(state_dict)
+    if shared_key in aligned and shared_key not in expected and expected_per_layer:
+        rotary_value = aligned.pop(shared_key)
+        for key in expected_per_layer:
+            aligned[key] = rotary_value
+    return aligned
 
 
 def resolve_model_path(
@@ -361,6 +385,10 @@ def load_prot2mol_inference_model(
     model_state = prepare_prot2mol_state_dict(
         model_state,
         decoder_type=resolved_decoder_type,
+    )
+    model_state = align_prot2mol_state_dict_to_model(
+        model_state,
+        tuple(model.state_dict()),
     )
     try:
         model.load_state_dict(model_state, strict=strict)
