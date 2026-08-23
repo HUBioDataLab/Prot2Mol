@@ -352,13 +352,15 @@ class Prot2MolModel(nn.Module):
         *,
         temperature: float = 1.0,
         protein_embeddings: torch.Tensor | None = None,
+        pad_token_is_termination: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Score sampled molecule tokens under the protein-conditioned policy.
 
         The first generated token is the fixed generation start token (BOS for
         GPT-2 and ``decoder_start_token_id`` for BART), so it is excluded from
-        the policy objective. The returned mask includes the first EOS token and
-        excludes padding and everything following termination.
+        the policy objective. The returned mask includes the first EOS token.
+        Padding is normally treated as termination; legacy left-padded GPT-2
+        rollouts can instead score sampled PAD actions until EOS.
         """
 
         if generated_ids.ndim != 2 or generated_ids.size(1) < 2:
@@ -376,9 +378,13 @@ class Prot2MolModel(nn.Module):
         target_ids = generated_ids[:, 1:]
         pad_id = int(self.config.pad_token_id)
         eos_id = int(self.config.eos_token_id)
-        stop_tokens = target_ids.eq(eos_id) | target_ids.eq(pad_id)
+        stop_tokens = target_ids.eq(eos_id)
+        if pad_token_is_termination:
+            stop_tokens = stop_tokens | target_ids.eq(pad_id)
         stopped_before = stop_tokens.cumsum(dim=1) - stop_tokens.long()
-        action_mask = stopped_before.eq(0) & target_ids.ne(pad_id)
+        action_mask = stopped_before.eq(0)
+        if pad_token_is_termination:
+            action_mask = action_mask & target_ids.ne(pad_id)
         safe_targets = target_ids.masked_fill(~action_mask, pad_id)
 
         if self.decoder_type == "gpt2":

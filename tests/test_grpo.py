@@ -321,6 +321,7 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
     assert 0.0 <= result.metrics["grpo/qed_mean"] <= 1.0
     assert result.metrics["grpo/sas_mean"] > 0.0
     assert math.isfinite(result.metrics["grpo/logp_mean"])
+    assert result.metrics["grpo/heavy_atom_count_mean"] > 0.0
     assert result.metrics["grpo/zero_variance_group_fraction"] == 0.0
     assert result.metrics["grpo/grad_norm"] > 0.0
     assert result.metrics["grpo/mean_abs_logprob_change"] > 0.0
@@ -335,6 +336,55 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
         torch.equal(parameter, reference_before[name])
         for name, parameter in reference_policy.named_parameters()
     )
+
+
+def test_legacy_pad_rollout_uses_pad_start_and_scores_prefix_actions(monkeypatch):
+    policy, tokenizer = _tiny_gpt2_policy(monkeypatch)
+    reference_policy = copy.deepcopy(policy)
+    generations = torch.tensor(
+        [[0, 0, 1, 3, 2, 0], [0, 0, 1, 4, 2, 0]],
+        dtype=torch.long,
+    )
+    captured = {}
+
+    def deterministic_generate(self, protein_embeddings, prot_attention_mask, **kwargs):
+        del self, protein_embeddings, prot_attention_mask
+        captured.update(kwargs)
+        return generations
+
+    policy.generate_from_protein_embeddings = MethodType(deterministic_generate, policy)
+    trainer = GRPOTrainer(
+        policy=policy,
+        reference_policy=reference_policy,
+        optimizer=torch.optim.AdamW(
+            [parameter for parameter in policy.parameters() if parameter.requires_grad],
+            lr=1.0e-3,
+        ),
+        tokenizer=tokenizer,
+        reward_function=lambda proteins, molecules: [0.2, 0.8],
+        config=GRPOConfig(
+            group_size=2,
+            max_length=6,
+            min_length=3,
+            generation_start_mode="legacy_pad",
+        ),
+    )
+
+    rollout = trainer.collect_rollouts(
+        protein_input_ids=torch.tensor([[1, 2, 0]]),
+        protein_attention_mask=torch.tensor([[1, 1, 0]]),
+        protein_sequences=["AAAA"],
+    )
+
+    assert captured["bos_token_id"] == tokenizer.pad_token_id
+    assert torch.equal(
+        rollout.action_mask,
+        torch.tensor(
+            [[True, True, True, True, False], [True, True, True, True, False]]
+        ),
+    )
+    assert rollout.generated_smiles == ["C", "O"]
+    assert rollout.terminated_mask.tolist() == [True, True]
     assert all(
         not parameter.requires_grad for parameter in reference_policy.parameters()
     )

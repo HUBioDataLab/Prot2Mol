@@ -1,5 +1,4 @@
 grpo:
-  # Unique plain protein sequences are derived directly from this training split.
   train_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/train.parquet
   validation_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/val.parquet
   protein_id_column: protein_accession
@@ -7,50 +6,36 @@ grpo:
   smiles_column: smiles
   label_column: binary_label
 
-  # Required for FusionDTI. The random-assay files do not contain this column.
-  # The mapping must contain protein_accession + structure_aware_sequence, where
-  # structure_aware_sequence is the SaProt residue/3Di paired string.
   structure_aware_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/structure_aware_proteins.parquet
   structure_aware_key_column: protein_accession
   structure_aware_sequence_column: structure_aware_sequence
 
-  generator_checkpoint: ../../models/prot_comp_set_pchembl_6_protlen_1000_human_False_emb_esm2_dec_gpt_lr_5e-05_bs_6_layers_12_heads_16_20250706_235311
-  prot_emb_model: esm2
-  protein_model_id: facebook/esm2_t33_650M_UR50D
-  protein_model_revision: 08e4846e537177426273712802403f7ba8261b6c
+  generator_checkpoint: ../../models/prot_comp_set_pchembl_6_protlen_1000_human_False_emb_prot_t5_dec_gpt_lr_5e-05_bs_2_layers_18_heads_16_20250706_235455/checkpoint-5292
+  prot_emb_model: prot_t5
+  protein_model_id: Rostlab/prot_t5_xl_uniref50
+  protein_model_revision: null
   decoder_type: gpt2
   decoder_model_id: zjunlp/MolGen-large
   decoder_model_revision: 3c6e8fb91a783853a3782552a85efc4df6f96d0a
-  n_layer: 12
+  n_layer: 18
   n_head: 16
-  n_emb: 1280
+  n_emb: 1024
   conditioning_dropout: 0.1
   models_base: null
   max_mol_len: 200
   min_mol_len: 3
   prot_max_length: 1000
-  # These July 2025 GPT-2 checkpoints were trained on fixed-width left-padded
-  # molecule rows and historically sampled from PAD token 1.
   generation_start_mode: legacy_pad
 
   fusiondti_dataset: BindingDB
   reward_batch_size: 8
   reward_max_length: 512
-  # FusionDTI adds CLS/EOS, so 510 residues is its strict no-truncation limit.
   reward_protein_max_residues: 510
   reward_protein_cache_size: 64
-  # Shape FusionDTI activity with target-specific training-active chemistry.
-  # LogP is unpenalized inside mean +/- 2 std; SAS is unpenalized below
-  # mean + 2 std. Heavy atoms use a soft target-specific mean +/- 2 std
-  # guardrail with at most a 15% reward reduction.
   property_reward_shaping: true
   property_allowed_sigma: 2.0
   property_penalty_strength: 0.5
   heavy_atom_penalty_weight: 0.15
-  # Continuously reward each molecule's contribution to group diversity using
-  # equal mean and nearest-neighbor Morgan/Tanimoto weights. The factor is
-  # (1 - reward_weight) + reward_weight * (1 - combined_similarity).
-  # Canonical duplicates get zero reward.
   diversity_reward_shaping: true
   diversity_reward_weight: 0.5
   diversity_mean_similarity_weight: 0.5
@@ -59,8 +44,6 @@ grpo:
   diversity_morgan_bits: 2048
   local_files_only: false
 
-  # One rollout = one unique protein x sixteen generated molecules; the rollout
-  # is reused for num_iterations decoder optimizer updates.
   epochs: 20
   max_steps: null
   group_size: 16
@@ -70,7 +53,6 @@ grpo:
   clip_epsilon: 0.2
   kl_beta: 0.01
   advantage_epsilon: 1.0e-6
-  # Reuse each rollout once after the first update so PPO clipping is active.
   num_iterations: 2
   loss_type: grpo
   max_grad_norm: 1.0
@@ -81,12 +63,9 @@ grpo:
   device: cuda
   train_on_evaluation_panel_only: true
 
-  # Fixed-seed baseline at step 0, then periodic target-conditional evaluation.
-  # Forty proteins x 64 generations gives 2,560 molecules per endpoint.
   eval_at_start: true
   eval_steps: 500
   eval_proteins: 40
-  # Fixed seed-42 cohort: AKT1, CDK2, then 38 eligible random proteins.
   eval_protein_ids:
     - P31749
     - P24941
@@ -128,26 +107,22 @@ grpo:
     - P0DMS8
     - O14757
     - P56373
-  # Only these two get individual scalar plots; all 40 stay in one W&B table.
   wandb_target_metric_ids:
     - P31749
     - P24941
   eval_samples_per_protein: 64
   eval_seed: 17
-  # Strictly more than 200 unique active validation molecules.
   min_fcd_reference_actives: 201
   fcd_batch_size: 256
   fcd_num_workers: 1
   fcd_model_path: null
 
-  output_dir: ../../outputs/prot2mol-grpo/esm2-legacy-hac-g16-20ep
+  output_dir: ../../outputs/prot2mol-grpo/prott5-legacy-hac-g16-20ep
   resume_from_checkpoint: null
   logging_steps: 1
-  # The server has room for checkpoints 200/400 plus the final model while
-  # preserving the previous ablation run.
   save_steps: 200
   wandb_project: prot2mol-grpo
   wandb_entity: null
-  wandb_run_name: esm2-legacy-hac-g16-20ep
+  wandb_run_name: prott5-legacy-hac-g16-20ep
   wandb_mode: online
   log_level: INFO

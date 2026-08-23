@@ -166,6 +166,33 @@ def test_molgen_generated_token_log_probs_align_targets_and_stop_at_eos(monkeypa
     assert torch.equal(log_probs.masked_select(~action_mask), torch.zeros(4))
 
 
+def test_legacy_left_padded_log_probs_score_pad_actions_until_eos(monkeypatch):
+    from conftest import DummyBatchTokenizer
+
+    _patch_tiny_architecture(monkeypatch)
+    model = model_module.create_prot2mol_model(_config(DummyBatchTokenizer()))
+    generated_ids = torch.tensor(
+        [[0, 0, 1, 3, 2, 0], [0, 0, 0, 4, 5, 2]],
+        dtype=torch.long,
+    )
+
+    log_probs, action_mask = model.generated_token_log_probs(
+        generated_ids,
+        prot_input_ids=torch.tensor([[1, 2, 0], [3, 4, 0]]),
+        prot_attention_mask=torch.tensor([[1, 1, 0], [1, 1, 0]]),
+        pad_token_is_termination=False,
+    )
+
+    assert log_probs.shape == (2, 5)
+    assert torch.equal(
+        action_mask,
+        torch.tensor(
+            [[True, True, True, True, False], [True, True, True, True, True]]
+        ),
+    )
+    assert torch.isfinite(log_probs).all()
+
+
 def test_loss_backpropagates_through_cross_attention_conditioning(monkeypatch):
     from conftest import DummyBatchTokenizer
 

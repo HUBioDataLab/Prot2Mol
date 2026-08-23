@@ -68,7 +68,7 @@ def canonicalize_smiles_list(
 
 
 def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float]:
-    """Summarize QED, synthetic-accessibility score, and logP.
+    """Summarize QED, synthetic accessibility, logP, and heavy-atom count.
 
     Invalid inputs are excluded. ``count`` makes the denominator explicit so a
     caller can distinguish an empty/invalid batch from a real batch whose mean
@@ -78,7 +78,7 @@ def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float
     property_rows = molecular_property_rows(smiles_list)
     values = {
         name: [float(row[name]) for row in property_rows if row[name] is not None]
-        for name in ("qed", "sas", "logp")
+        for name in ("qed", "sas", "logp", "heavy_atom_count")
     }
     summary = {"count": float(len(values["qed"]))}
     for name, property_values in values.items():
@@ -97,19 +97,27 @@ def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float
 def molecular_property_rows(
     smiles_list: Iterable[object],
 ) -> list[dict[str, float | None]]:
-    """Return aligned per-molecule QED, SAS, and logP values."""
+    """Return aligned per-molecule QED, SAS, logP, and heavy-atom values."""
 
     rows: list[dict[str, float | None]] = []
     for value in smiles_list:
         molecule = get_mol(value)
         if molecule is None:
-            rows.append({"qed": None, "sas": None, "logp": None})
+            rows.append(
+                {
+                    "qed": None,
+                    "sas": None,
+                    "logp": None,
+                    "heavy_atom_count": None,
+                }
+            )
         else:
             rows.append(
                 {
                     "qed": float(QED.qed(molecule)),
                     "sas": float(sascorer.calculateScore(molecule)),
                     "logp": float(Crippen.MolLogP(molecule)),
+                    "heavy_atom_count": float(molecule.GetNumHeavyAtoms()),
                 }
             )
     return rows

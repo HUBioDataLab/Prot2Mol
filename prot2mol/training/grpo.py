@@ -17,6 +17,7 @@ from ..rewards.diversity import internal_diversity_factors
 RewardFunction = Callable[[Sequence[str], Sequence[str]], torch.Tensor | Sequence[float]]
 RewardMoleculeRepresentation = Literal["smiles", "selfies"]
 GRPOLossType = Literal["grpo", "bnpo"]
+GenerationStartMode = Literal["tokenizer_bos", "legacy_pad"]
 ValidityFunction = Callable[[str], bool]
 
 
@@ -44,6 +45,7 @@ class GRPOConfig:
     diversity_morgan_radius: int = 2
     diversity_morgan_bits: int = 2048
     precision: Literal["fp32", "bf16"] = "fp32"
+    generation_start_mode: GenerationStartMode = "tokenizer_bos"
 
     def __post_init__(self) -> None:
         if self.group_size < 2:
@@ -86,6 +88,10 @@ class GRPOConfig:
             )
         if self.precision not in {"fp32", "bf16"}:
             raise ValueError("GRPO precision must be 'fp32' or 'bf16'")
+        if self.generation_start_mode not in {"tokenizer_bos", "legacy_pad"}:
+            raise ValueError(
+                "generation_start_mode must be 'tokenizer_bos' or 'legacy_pad'"
+            )
 
 
 @dataclass
@@ -525,6 +531,11 @@ class GRPOTrainer:
                 do_sample=True,
                 temperature=self.config.temperature,
                 top_p=self.config.top_p,
+                bos_token_id=(
+                    int(self.policy.config.pad_token_id)
+                    if self.config.generation_start_mode == "legacy_pad"
+                    else int(self.policy.config.bos_token_id)
+                ),
             )
             old_log_probs, action_mask = self.policy.generated_token_log_probs(
                 generated_ids,
@@ -532,6 +543,9 @@ class GRPOTrainer:
                 repeated_attention_mask,
                 temperature=self.config.temperature,
                 protein_embeddings=protein_embeddings,
+                pad_token_is_termination=(
+                    self.config.generation_start_mode != "legacy_pad"
+                ),
             )
             reference_log_probs, reference_mask = (
                 self.reference_policy.generated_token_log_probs(
@@ -543,6 +557,9 @@ class GRPOTrainer:
                         protein_embeddings
                         if self._reuse_reference_protein_embeddings
                         else None
+                    ),
+                    pad_token_is_termination=(
+                        self.config.generation_start_mode != "legacy_pad"
                     ),
                 )
             )
@@ -632,6 +649,9 @@ class GRPOTrainer:
         property_metrics = molecular_property_summary(valid_smiles)
         metrics = {
             "grpo/precision_bf16": float(self.config.precision == "bf16"),
+            "grpo/legacy_pad_generation": float(
+                self.config.generation_start_mode == "legacy_pad"
+            ),
             "grpo/reused_policy_protein_embeddings": float(
                 rollout.protein_embeddings is not None
             ),
@@ -749,16 +769,28 @@ class GRPOTrainer:
                     "grpo/sas_penalty_factor_mean": diagnostic_mean(
                         "sas_penalty_factor"
                     ),
+                    "grpo/heavy_atom_penalty_factor_mean": diagnostic_mean(
+                        "heavy_atom_penalty_factor"
+                    ),
                     "grpo/logp_violation_fraction": diagnostic_mean(
                         "logp_violation"
                     ),
                     "grpo/sas_violation_fraction": diagnostic_mean(
                         "sas_violation"
                     ),
+                    "grpo/heavy_atom_violation_fraction": diagnostic_mean(
+                        "heavy_atom_violation"
+                    ),
                     "grpo/logp_excess_z_mean": diagnostic_mean("logp_excess_z"),
                     "grpo/logp_excess_z_max": diagnostic_max("logp_excess_z"),
                     "grpo/sas_excess_z_mean": diagnostic_mean("sas_excess_z"),
                     "grpo/sas_excess_z_max": diagnostic_max("sas_excess_z"),
+                    "grpo/heavy_atom_excess_z_mean": diagnostic_mean(
+                        "heavy_atom_excess_z"
+                    ),
+                    "grpo/heavy_atom_excess_z_max": diagnostic_max(
+                        "heavy_atom_excess_z"
+                    ),
                     "grpo/valid_property_shaped_reward_mean": diagnostic_mean(
                         "property_shaped_reward"
                     ),
@@ -854,6 +886,9 @@ class GRPOTrainer:
                     rollout.protein_attention_mask,
                     temperature=self.config.temperature,
                     protein_embeddings=rollout.protein_embeddings,
+                    pad_token_is_termination=(
+                        self.config.generation_start_mode != "legacy_pad"
+                    ),
                 )
                 if not torch.equal(action_mask, rollout.action_mask):
                     raise RuntimeError("policy action mask changed during optimization")
@@ -889,6 +924,9 @@ class GRPOTrainer:
                 rollout.protein_attention_mask,
                 temperature=self.config.temperature,
                 protein_embeddings=rollout.protein_embeddings,
+                pad_token_is_termination=(
+                    self.config.generation_start_mode != "legacy_pad"
+                ),
             )
             per_sequence_change = (
                 (updated_log_probs - rollout.old_log_probs) * rollout.action_mask

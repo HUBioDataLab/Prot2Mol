@@ -334,12 +334,18 @@ def load_training_active_property_stats(
         rows = molecular_property_rows(smiles)
         logp = np.asarray([row["logp"] for row in rows], dtype=np.float64)
         sas = np.asarray([row["sas"] for row in rows], dtype=np.float64)
+        heavy_atom_count = np.asarray(
+            [row["heavy_atom_count"] for row in rows],
+            dtype=np.float64,
+        )
         stats[sequence] = TargetActivePropertyStats(
             active_count=len(smiles),
             logp_mean=float(logp.mean()),
             logp_std=float(logp.std(ddof=0)),
             sas_mean=float(sas.mean()),
             sas_std=float(sas.std(ddof=0)),
+            heavy_atom_mean=float(heavy_atom_count.mean()),
+            heavy_atom_std=float(heavy_atom_count.std(ddof=0)),
         )
     if insufficient:
         examples = [(sequence[:12], count) for sequence, count in insufficient[:5]]
@@ -695,9 +701,12 @@ class GRPOTrainingRun:
             "property_statistics_source": "unique canonical training-split actives",
             "property_allowed_sigma": self.config.property_allowed_sigma,
             "property_penalty_strength": self.config.property_penalty_strength,
+            "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "property_reward_formula": (
                 "activity_probability * exp(-strength * logp_excess_z^2) * "
-                "exp(-strength * sas_excess_z^2)"
+                "exp(-strength * sas_excess_z^2) * "
+                "(1 - heavy_atom_penalty_weight * "
+                "(1 - exp(-0.5 * heavy_atom_excess_z^2)))"
             ),
             "diversity_reward_shaping": self.config.diversity_reward_shaping,
             "diversity_scope": (
@@ -792,6 +801,9 @@ class GRPOTrainingRun:
                 self.property_stats_by_reward_sequence,
                 allowed_sigma=self.config.property_allowed_sigma,
                 penalty_strength=self.config.property_penalty_strength,
+                heavy_atom_penalty_weight=(
+                    self.config.heavy_atom_penalty_weight
+                ),
             )
             if self.config.property_reward_shaping
             else activity_scorer
@@ -853,6 +865,7 @@ class GRPOTrainingRun:
                 diversity_morgan_radius=self.config.diversity_morgan_radius,
                 diversity_morgan_bits=self.config.diversity_morgan_bits,
                 precision=self.config.precision,
+                generation_start_mode=self.config.generation_start_mode,
             ),
         )
         counts = self.policy.parameter_counts()
@@ -877,6 +890,8 @@ class GRPOTrainingRun:
             "enabled": self.config.property_reward_shaping,
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
+            "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
+            "generation_start_mode": self.config.generation_start_mode,
             "training_active_statistics_sha256": digest,
             "diversity_enabled": self.config.diversity_reward_shaping,
             "diversity_reward_weight": self.config.diversity_reward_weight,
@@ -1120,6 +1135,11 @@ class GRPOTrainingRun:
                     do_sample=True,
                     temperature=self.config.temperature,
                     top_p=self.config.top_p,
+                    bos_token_id=(
+                        int(self.policy.config.pad_token_id)
+                        if self.config.generation_start_mode == "legacy_pad"
+                        else int(self.policy.config.bos_token_id)
+                    ),
                 )
         if was_training:
             self.policy.train()
@@ -1149,11 +1169,15 @@ class GRPOTrainingRun:
             "activity_probability",
             "logp_penalty_factor",
             "sas_penalty_factor",
+            "heavy_atom_penalty_factor",
             "property_penalty_factor",
             "logp_excess_z",
             "sas_excess_z",
+            "heavy_atom_excess_z",
             "logp_violation",
             "sas_violation",
+            "heavy_atom_violation",
+            "heavy_atom_count",
             "property_shaped_reward",
         )
         diagnostics = {
@@ -1184,6 +1208,7 @@ class GRPOTrainingRun:
                 diagnostics["activity_probability"][valid_indices] = reward_values
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
+                diagnostics["heavy_atom_penalty_factor"][valid_indices] = 1.0
                 diagnostics["property_penalty_factor"][valid_indices] = 1.0
                 diagnostics["property_shaped_reward"][valid_indices] = reward_values
         property_rewards = rewards.copy()
@@ -1278,6 +1303,13 @@ class GRPOTrainingRun:
                 if valid_indices
                 else 0.0
             ),
+            "heavy_atom_penalty_factor_mean": (
+                float(
+                    diagnostics["heavy_atom_penalty_factor"][valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
             "logp_violation_fraction": (
                 float(diagnostics["logp_violation"][valid_indices].mean())
                 if valid_indices
@@ -1285,6 +1317,11 @@ class GRPOTrainingRun:
             ),
             "sas_violation_fraction": (
                 float(diagnostics["sas_violation"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "heavy_atom_violation_fraction": (
+                float(diagnostics["heavy_atom_violation"][valid_indices].mean())
                 if valid_indices
                 else 0.0
             ),
@@ -1435,13 +1472,22 @@ class GRPOTrainingRun:
                 "sas_penalty_factor": float(
                     diagnostics["sas_penalty_factor"][index]
                 ),
+                "heavy_atom_penalty_factor": float(
+                    diagnostics["heavy_atom_penalty_factor"][index]
+                ),
                 "property_penalty_factor": float(
                     diagnostics["property_penalty_factor"][index]
                 ),
                 "logp_excess_z": float(diagnostics["logp_excess_z"][index]),
                 "sas_excess_z": float(diagnostics["sas_excess_z"][index]),
+                "heavy_atom_excess_z": float(
+                    diagnostics["heavy_atom_excess_z"][index]
+                ),
                 "logp_violation": bool(diagnostics["logp_violation"][index]),
                 "sas_violation": bool(diagnostics["sas_violation"][index]),
+                "heavy_atom_violation": bool(
+                    diagnostics["heavy_atom_violation"][index]
+                ),
                 "diversity_penalty_factor": float(
                     diagnostics["diversity_penalty_factor"][index]
                 ),
@@ -1505,6 +1551,8 @@ class GRPOTrainingRun:
             "global_step": global_step,
             "sampling_seed": self.config.eval_seed,
             "samples_per_protein": self.config.eval_samples_per_protein,
+            "generation_start_mode": self.config.generation_start_mode,
+            "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "diversity_group_size": self.config.group_size,
             "diversity_group_count_per_protein": (
                 self.config.eval_samples_per_protein // self.config.group_size
@@ -1608,6 +1656,10 @@ class GRPOTrainingRun:
                 rows,
                 "sas_penalty_factor_mean",
             ),
+            "eval/heavy_atom_penalty_factor_mean_macro": self._macro(
+                rows,
+                "heavy_atom_penalty_factor_mean",
+            ),
             "eval/logp_violation_fraction_macro": self._macro(
                 rows,
                 "logp_violation_fraction",
@@ -1615,6 +1667,10 @@ class GRPOTrainingRun:
             "eval/sas_violation_fraction_macro": self._macro(
                 rows,
                 "sas_violation_fraction",
+            ),
+            "eval/heavy_atom_violation_fraction_macro": self._macro(
+                rows,
+                "heavy_atom_violation_fraction",
             ),
             "eval/diversity_penalty_factor_mean_macro": self._macro(
                 rows,
@@ -1693,6 +1749,14 @@ class GRPOTrainingRun:
             "eval/qed_mean_macro": self._macro(rows, "qed_mean"),
             "eval/sas_mean_macro": self._macro(rows, "sas_mean"),
             "eval/logp_mean_macro": self._macro(rows, "logp_mean"),
+            "eval/heavy_atom_count_mean_macro": self._macro(
+                rows,
+                "heavy_atom_count_mean",
+            ),
+            "eval/heavy_atom_count_std_macro": self._macro(
+                rows,
+                "heavy_atom_count_std",
+            ),
             "eval/property_available_fraction": float(
                 sum(row["count"] > 0 for row in rows) / len(rows)
             ),
@@ -1721,8 +1785,10 @@ class GRPOTrainingRun:
                 "property_penalty_factor_mean",
                 "logp_penalty_factor_mean",
                 "sas_penalty_factor_mean",
+                "heavy_atom_penalty_factor_mean",
                 "logp_violation_fraction",
                 "sas_violation_fraction",
+                "heavy_atom_violation_fraction",
                 "diversity_penalty_factor_mean",
                 "internal_diversity_mean",
                 "mean_tanimoto_similarity",
@@ -1744,6 +1810,10 @@ class GRPOTrainingRun:
                 "qed_mean",
                 "sas_mean",
                 "logp_mean",
+                "heavy_atom_count_mean",
+                "heavy_atom_count_std",
+                "heavy_atom_count_min",
+                "heavy_atom_count_max",
                 "fcd",
             ):
                 if row[key] is not None:
@@ -1815,6 +1885,7 @@ class GRPOTrainingRun:
             {
                 "max_mol_len": self.config.max_mol_len,
                 "prot_max_length": self.config.prot_max_length,
+                "generation_start_mode": self.config.generation_start_mode,
                 "train_encoder_model": False,
                 "train_projection_model": False,
                 "train_decoder_model": False,
@@ -1981,6 +2052,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     model.add_argument("--max_mol_len", type=int, default=200)
     model.add_argument("--min_mol_len", type=int, default=3)
     model.add_argument("--prot_max_length", type=int, default=1000)
+    model.add_argument(
+        "--generation_start_mode",
+        choices=["tokenizer_bos", "legacy_pad"],
+        default="tokenizer_bos",
+        help=(
+            "Start GPT-2 from its tokenizer BOS, or reproduce historical "
+            "left-padded checkpoints by starting from PAD and scoring PAD actions"
+        ),
+    )
 
     reward = parser.add_argument_group("Frozen FusionDTI reward")
     reward.add_argument(
@@ -1999,6 +2079,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     reward.add_argument("--property_allowed_sigma", type=float, default=2.0)
     reward.add_argument("--property_penalty_strength", type=float, default=0.5)
+    reward.add_argument(
+        "--heavy_atom_penalty_weight",
+        type=float,
+        default=0.15,
+        help=(
+            "Maximum fractional reward reduction outside each target's "
+            "training-active heavy-atom mean +/- allowed sigma band"
+        ),
+    )
     reward.add_argument(
         "--diversity_reward_shaping",
         action=argparse.BooleanOptionalAction,
@@ -2110,6 +2199,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if config.group_size < 2:
         raise ValueError("group_size must be at least 2")
     bounded_diversity = {
+        "heavy_atom_penalty_weight": config.heavy_atom_penalty_weight,
         "diversity_reward_weight": config.diversity_reward_weight,
         "diversity_mean_similarity_weight": (
             config.diversity_mean_similarity_weight
@@ -2125,7 +2215,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     }
     if invalid_diversity:
         raise ValueError(
-            f"GRPO diversity weights must be in [0, 1]: {invalid_diversity}"
+            f"GRPO bounded reward weights must be in [0, 1]: {invalid_diversity}"
         )
     if config.max_steps is not None and config.max_steps < 1:
         raise ValueError("max_steps must be positive when provided")

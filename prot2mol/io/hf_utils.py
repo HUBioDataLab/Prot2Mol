@@ -20,6 +20,7 @@ MODEL_CONFIG_KEYS = (
     "conditioning_dropout",
     "max_mol_len",
     "prot_max_length",
+    "generation_start_mode",
     "train_encoder_model",
     "train_projection_model",
     "train_decoder_model",

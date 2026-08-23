@@ -174,6 +174,8 @@ def test_training_property_stats_use_unique_active_training_molecules(tmp_path):
     assert stats["GT"].active_count == 2
     assert stats["AC"].logp_std > 0.0
     assert stats["AC"].sas_std > 0.0
+    assert stats["AC"].heavy_atom_mean == pytest.approx(1.5)
+    assert stats["AC"].heavy_atom_std == pytest.approx(0.5)
 
 
 def test_unique_proteins_can_validate_only_fixed_training_panel(tmp_path):
@@ -232,6 +234,7 @@ def test_empty_endpoint_chemistry_is_unavailable_not_zero():
     assert summary["qed_mean"] is None
     assert summary["sas_mean"] is None
     assert summary["logp_mean"] is None
+    assert summary["heavy_atom_count_mean"] is None
     assert grpo_train.GRPOTrainingRun._macro(
         [{"qed_mean": None}, {"qed_mean": 0.7}],
         "qed_mean",
@@ -387,9 +390,11 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "final_reward",
         "logp_penalty_factor",
         "sas_penalty_factor",
+        "heavy_atom_penalty_factor",
         "property_penalty_factor",
         "logp_violation",
         "sas_violation",
+        "heavy_atom_violation",
         "diversity_penalty_factor",
         "mean_tanimoto_similarity",
         "max_tanimoto_similarity",
@@ -403,12 +408,14 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "qed",
         "sas",
         "logp",
+        "heavy_atom_count",
     }.issubset(endpoint_rows.columns)
     assert json.loads((output / "training_summary.json").read_text())["global_step"] == 2
     logged = [values for _, values in fake_runs[0].logs]
     assert any("grpo/reward_mean" in values for values in logged)
     assert any("grpo/valid_activity_probability_mean" in values for values in logged)
     assert any("grpo/property_penalty_factor_mean" in values for values in logged)
+    assert any("grpo/heavy_atom_penalty_factor_mean" in values for values in logged)
     assert any("grpo/internal_diversity_mean" in values for values in logged)
     assert any("grpo/diversity_penalty_factor_mean" in values for values in logged)
     assert any("grpo/qed_mean" in values for values in logged)
@@ -419,6 +426,7 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("eval/fcd_macro" in values for values in logged)
     assert any("eval/activity_probability_mean_macro" in values for values in logged)
     assert any("eval/logp_violation_fraction_macro" in values for values in logged)
+    assert any("eval/heavy_atom_violation_fraction_macro" in values for values in logged)
     assert any("eval/internal_diversity_mean_macro" in values for values in logged)
     assert any("eval/exact_duplicate_fraction_macro" in values for values in logged)
     assert any("eval/global_internal_diversity_mean_macro" in values for values in logged)
