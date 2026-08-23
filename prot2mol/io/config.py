@@ -13,6 +13,12 @@ PATH_CONFIG_KEYS = {
     "resume_from_checkpoint",
     "load_pretrained_model",
     "models_base",
+    "train_parquet_path",
+    "validation_parquet_path",
+    "structure_aware_path",
+    "generator_checkpoint",
+    "output_dir",
+    "fcd_model_path",
 }
 
 

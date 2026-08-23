@@ -10,7 +10,7 @@ import selfies as sf
 import torch
 import torch.nn as nn
 
-from ..chem.utils import canonic_smiles
+from ..chem.utils import canonic_smiles, molecular_property_summary
 
 
 RewardFunction = Callable[[Sequence[str], Sequence[str]], torch.Tensor | Sequence[float]]
@@ -33,6 +33,7 @@ class GRPOConfig:
     reward_min: float = 0.0
     reward_max: float = 1.0
     reward_saturation_threshold: float = 0.01
+    require_eos_for_reward: bool = True
     precision: Literal["fp32", "bf16"] = "fp32"
 
     def __post_init__(self) -> None:
@@ -83,6 +84,8 @@ class GRPORollout:
     generated_smiles: list[str]
     reward_protein_sequences: list[str]
     reward_molecule_representation: RewardMoleculeRepresentation
+    chemically_valid_mask: torch.Tensor
+    terminated_mask: torch.Tensor
     valid_mask: torch.Tensor
     batch_size: int
     group_size: int
@@ -445,13 +448,20 @@ class GRPOTrainer:
 
         generated_selfies = self._decode(generated_ids)
         generated_smiles = [selfies_to_smiles(value) for value in generated_selfies]
-        valid_mask = torch.tensor(
+        chemically_valid_mask = torch.tensor(
             [
                 self.validity_function(value) and bool(generated_smiles[index])
                 for index, value in enumerate(generated_selfies)
             ],
             dtype=torch.bool,
             device=device,
+        )
+        eos_id = int(self.policy.config.eos_token_id)
+        terminated_mask = generated_ids[:, 1:].eq(eos_id).any(dim=1)
+        valid_mask = chemically_valid_mask & (
+            terminated_mask
+            if self.config.require_eos_for_reward
+            else torch.ones_like(terminated_mask)
         )
         rewards = self._score_rewards(
             repeated_reward_sequences,
@@ -484,6 +494,8 @@ class GRPOTrainer:
             generated_smiles=generated_smiles,
             reward_protein_sequences=repeated_reward_sequences,
             reward_molecule_representation=self.reward_molecule_representation,
+            chemically_valid_mask=chemically_valid_mask,
+            terminated_mask=terminated_mask,
             valid_mask=valid_mask,
             batch_size=batch_size,
             group_size=group_size,
@@ -497,8 +509,7 @@ class GRPOTrainer:
             group = rollout.generated_smiles[start : start + rollout.group_size]
             group_unique_fractions.append(len(set(group)) / len(group))
         action_lengths = rollout.action_mask.sum(dim=1).float()
-        eos_id = int(self.policy.config.eos_token_id)
-        eos_fraction = rollout.generated_ids[:, 1:].eq(eos_id).any(dim=1).float().mean()
+        eos_fraction = rollout.terminated_mask.float().mean()
         valid_rewards = rollout.rewards[rollout.valid_mask]
         saturation_threshold = self.config.reward_saturation_threshold
         low_saturation_limit = self.config.reward_min + saturation_threshold
@@ -511,7 +522,8 @@ class GRPOTrainer:
             )
             if is_valid
         ]
-        return {
+        property_metrics = molecular_property_summary(valid_smiles)
+        metrics = {
             "grpo/precision_bf16": float(self.config.precision == "bf16"),
             "grpo/reused_policy_protein_embeddings": float(
                 rollout.protein_embeddings is not None
@@ -556,6 +568,17 @@ class GRPOTrainer:
                 rollout.advantages.ne(0).float().mean().detach().cpu()
             ),
             "grpo/valid_fraction": float(rollout.valid_mask.float().mean().cpu()),
+            "grpo/chemical_valid_fraction": float(
+                rollout.chemically_valid_mask.float().mean().cpu()
+            ),
+            "grpo/valid_and_terminated_fraction": float(
+                (rollout.chemically_valid_mask & rollout.terminated_mask)
+                .float()
+                .mean()
+                .cpu()
+            ),
+            "grpo/terminated_fraction": float(eos_fraction.cpu()),
+            "grpo/truncated_fraction": float((1.0 - eos_fraction).cpu()),
             "grpo/selfies_unique_fraction": len(set(rollout.generated_selfies))
             / len(rollout.generated_selfies),
             "grpo/unique_fraction": len(set(rollout.generated_smiles))
@@ -571,6 +594,13 @@ class GRPOTrainer:
             "grpo/num_sequences": float(rollout.rewards.numel()),
             "grpo/num_action_tokens": float(rollout.action_mask.sum().cpu()),
         }
+        metrics.update(
+            {
+                f"grpo/{'property_count' if name == 'count' else name}": value
+                for name, value in property_metrics.items()
+            }
+        )
+        return metrics
 
     def step(
         self,
@@ -673,7 +703,7 @@ class GRPOTrainer:
                     per_sequence_change.abs().mean().detach().cpu()
                 ),
                 "grpo/optimization_iterations": float(self.config.num_iterations),
-                "grpo/step": float(self.global_step),
+                "grpo/step": float(self.global_step + 1),
             }
         )
         self.global_step += 1

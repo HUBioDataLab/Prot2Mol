@@ -282,6 +282,12 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
     assert result.metrics["grpo/num_sequences"] == 16.0
     assert result.metrics["grpo/valid_fraction"] == 1.0
     assert result.metrics["grpo/group_unique_fraction"] == 1.0
+    assert result.metrics["grpo/terminated_fraction"] == 1.0
+    assert result.metrics["grpo/truncated_fraction"] == 0.0
+    assert result.metrics["grpo/property_count"] == 16.0
+    assert 0.0 <= result.metrics["grpo/qed_mean"] <= 1.0
+    assert result.metrics["grpo/sas_mean"] > 0.0
+    assert math.isfinite(result.metrics["grpo/logp_mean"])
     assert result.metrics["grpo/zero_variance_group_fraction"] == 0.0
     assert result.metrics["grpo/grad_norm"] > 0.0
     assert result.metrics["grpo/mean_abs_logprob_change"] > 0.0
@@ -299,6 +305,58 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
     assert all(
         not parameter.requires_grad for parameter in reference_policy.parameters()
     )
+
+
+def test_grpo_requires_eos_before_a_chemically_valid_generation_can_be_rewarded(
+    monkeypatch,
+):
+    policy, tokenizer = _tiny_gpt2_policy(monkeypatch)
+    reference_policy = copy.deepcopy(policy)
+    fixed_generations = torch.tensor(
+        [
+            [1, 3, 2, 0, 0],
+            [1, 3, 3, 3, 3],
+        ],
+        dtype=torch.long,
+    )
+
+    def deterministic_generate(self, protein_embeddings, prot_attention_mask, **kwargs):
+        return fixed_generations.to(protein_embeddings.device)
+
+    policy.generate_from_protein_embeddings = MethodType(deterministic_generate, policy)
+    reward_calls = []
+
+    def reward(proteins, molecules):
+        reward_calls.append((list(proteins), list(molecules)))
+        return [0.8]
+
+    trainer = GRPOTrainer(
+        policy=policy,
+        reference_policy=reference_policy,
+        optimizer=torch.optim.AdamW(
+            [parameter for parameter in policy.parameters() if parameter.requires_grad],
+            lr=1.0e-2,
+        ),
+        tokenizer=tokenizer,
+        reward_function=reward,
+        config=GRPOConfig(group_size=2, max_length=5, min_length=3),
+    )
+
+    rollout = trainer.collect_rollouts(
+        protein_input_ids=torch.tensor([[1, 2, 3, 0]]),
+        protein_attention_mask=torch.tensor([[1, 1, 1, 0]]),
+        protein_sequences=["AAAA"],
+    )
+    metrics = trainer._rollout_metrics(rollout)
+
+    assert rollout.chemically_valid_mask.tolist() == [True, True]
+    assert rollout.terminated_mask.tolist() == [True, False]
+    assert rollout.valid_mask.tolist() == [True, False]
+    assert rollout.rewards.tolist() == pytest.approx([0.8, 0.0])
+    assert reward_calls == [(["AAAA"], ["C"])]
+    assert metrics["grpo/chemical_valid_fraction"] == 1.0
+    assert metrics["grpo/valid_and_terminated_fraction"] == 0.5
+    assert metrics["grpo/truncated_fraction"] == 0.5
 
 
 def test_fusiondti_ablation_runs_structure_aware_reward_feedback_to_gpt2(monkeypatch):

@@ -112,7 +112,7 @@ def test_target_resolution_requires_existing_identifier(tmp_path, monkeypatch):
 
 
 def test_cli_and_meta_entrypoint_do_not_expose_affinity_prediction(tmp_path):
-    assert set(COMMANDS) == {"train", "generate"}
+    assert set(COMMANDS) == {"train", "grpo", "generate"}
     with pytest.raises(SystemExit):
         parse_arguments(
             [

@@ -67,6 +67,35 @@ def canonicalize_smiles_list(
     return [value for value in canonical if value] if drop_invalid else canonical
 
 
+def molecular_property_summary(smiles_list: Iterable[object]) -> dict[str, float]:
+    """Summarize QED, synthetic-accessibility score, and logP.
+
+    Invalid inputs are excluded. ``count`` makes the denominator explicit so a
+    caller can distinguish an empty/invalid batch from a real batch whose mean
+    happens to be zero.
+    """
+
+    molecules = [get_mol(value) for value in smiles_list]
+    molecules = [molecule for molecule in molecules if molecule is not None]
+    values = {
+        "qed": [float(QED.qed(molecule)) for molecule in molecules],
+        "sas": [float(sascorer.calculateScore(molecule)) for molecule in molecules],
+        "logp": [float(Crippen.MolLogP(molecule)) for molecule in molecules],
+    }
+    summary = {"count": float(len(molecules))}
+    for name, property_values in values.items():
+        array = np.asarray(property_values, dtype=np.float64)
+        summary.update(
+            {
+                f"{name}_mean": float(array.mean()) if len(array) else 0.0,
+                f"{name}_std": float(array.std()) if len(array) else 0.0,
+                f"{name}_min": float(array.min()) if len(array) else 0.0,
+                f"{name}_max": float(array.max()) if len(array) else 0.0,
+            }
+        )
+    return summary
+
+
 def _reference_smiles(data_source) -> list[str]:
     if data_source is None:
         return []

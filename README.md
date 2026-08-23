@@ -55,6 +55,7 @@ Examples:
 
 ```bash
 python prot2mol/main.py train --help
+python prot2mol/main.py grpo --help
 python prot2mol/main.py generate --help
 ```
 
@@ -243,7 +244,58 @@ Set `PROT2MOL_RUN_FUSIONDTI_LIVE=1` to run the heavyweight tests with the real
 pinned SaProt, SELFormer, tokenizer, and BindingDB checkpoint, including an
 8-molecule FusionDTI reward group that drives an actual GPT-2 GRPO update.
 
-### 3.2 Selectable Training Execution Mode
+### 3.2 Full random-assay GRPO training
+
+The full runner derives one row per unique `protein_sequence` from the
+target-aware random-assay **training** split and samples one eight-molecule group
+per optimizer step. It freezes ESM2, the conditioning projection, the initial
+reference policy, and FusionDTI; only the GPT-2 molecule decoder is optimized.
+
+The current random-assay Parquet has plain amino-acid sequences but no
+Foldseek/SaProt representation. Before launch, provide
+`structure_aware_proteins.parquet` with these columns:
+
+| column | meaning |
+| --- | --- |
+| `protein_accession` | join key present in the random-assay split |
+| `structure_aware_sequence` | SaProt residue/3Di paired string, for example `MdEvLp` |
+
+The runner validates complete coverage and rejects plain amino-acid strings in
+that column. Launch with:
+
+```bash
+python prot2mol/main.py grpo --config prot2mol/configs/grpo.yaml
+```
+
+The supplied config matches the downloaded GPT-2 checkpoint: 12 layers, 16
+heads, hidden size 1280, protein length 1000, molecule length 200, BF16, group
+size 8, and protein batch size 1. A fixed-seed evaluation is logged at step 0,
+every 500 updates, and at the end. AKT1 (`P31749` / `CHEMBL4282`) is included in
+the default four-protein panel; it has 315 unique active references in this
+validation split. Add or replace `eval_protein_ids` to track other named targets.
+
+W&B receives every GRPO loss/reward/KL/advantage/update metric plus EOS,
+truncation, validity, valid uniqueness, QED, SAS, logP, step time, process RAM,
+and CUDA allocated/reserved/peak memory. Periodic evaluation adds macro reward,
+validity, uniqueness, QED, SAS, logP, target-conditional FCD, and an
+`eval/per_protein` table. FCD is not computed from an eight-molecule training
+group; the default evaluation generates 4 x 64 = 256 molecules and compares
+each protein only with its own validation actives.
+The fixed panel also gets per-target scalar series under
+`eval/targets/<protein_accession>/...`, so AKT1 FCD/reward/QED/SAS/logP can be
+plotted directly rather than recovered from the table.
+
+Intermediate checkpoints contain the trainable decoder, optimizer, scheduler,
+RNG, epoch/protein position, W&B run ID, and base-checkpoint identity. Resume
+without changing the base generator or training split:
+
+```bash
+python prot2mol/main.py grpo \
+  --config prot2mol/configs/grpo.yaml \
+  --resume_from_checkpoint outputs/prot2mol-grpo/random-assay-fusiondti-gpt2/checkpoint-500
+```
+
+### 3.3 Selectable Training Execution Mode
 
 `train` supports explicit execution mode control through `--training_mode` (or `train.training_mode` in YAML):
 

@@ -1,0 +1,77 @@
+grpo:
+  # Unique plain protein sequences are derived directly from this training split.
+  train_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/train.parquet
+  validation_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/val.parquet
+  protein_id_column: protein_accession
+  protein_sequence_column: protein_sequence
+  smiles_column: smiles
+  label_column: binary_label
+
+  # Required for FusionDTI. The random-assay files do not contain this column.
+  # The mapping must contain protein_accession + structure_aware_sequence, where
+  # structure_aware_sequence is the SaProt residue/3Di paired string.
+  structure_aware_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced/structure_aware_proteins.parquet
+  structure_aware_key_column: protein_accession
+  structure_aware_sequence_column: structure_aware_sequence
+
+  generator_checkpoint: ../../models/prot_comp_set_pchembl_6_protlen_1000_human_False_emb_esm2_dec_gpt_lr_5e-05_bs_6_layers_12_heads_16_20250706_235311
+  prot_emb_model: esm2
+  protein_model_id: facebook/esm2_t33_650M_UR50D
+  decoder_type: gpt2
+  decoder_model_id: zjunlp/MolGen-large
+  n_layer: 12
+  n_head: 16
+  n_emb: 1280
+  conditioning_dropout: 0.1
+  models_base: null
+  max_mol_len: 200
+  min_mol_len: 3
+  prot_max_length: 1000
+
+  fusiondti_dataset: BindingDB
+  reward_batch_size: 8
+  reward_max_length: 512
+  local_files_only: false
+
+  # One optimizer step = one unique protein x eight generated molecules.
+  epochs: 1
+  max_steps: null
+  group_size: 8
+  learning_rate: 1.0e-6
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  clip_epsilon: 0.2
+  kl_beta: 0.01
+  advantage_epsilon: 1.0e-6
+  num_iterations: 1
+  max_grad_norm: 1.0
+  temperature: 1.0
+  top_p: 0.9
+  precision: bf16
+  seed: 42
+  device: cuda
+
+  # Fixed-seed baseline at step 0, then periodic target-conditional evaluation.
+  # Four proteins x 64 generations gives 256 molecules per evaluation pass.
+  eval_at_start: true
+  eval_steps: 500
+  eval_proteins: 4
+  # AKT1/P31749 is always included; the remaining three are seed-selected.
+  eval_protein_ids:
+    - P31749
+  eval_samples_per_protein: 64
+  eval_seed: 17
+  min_fcd_reference_actives: 2
+  fcd_batch_size: 256
+  fcd_num_workers: 1
+  fcd_model_path: null
+
+  output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-gpt2
+  resume_from_checkpoint: null
+  logging_steps: 1
+  save_steps: 500
+  wandb_project: prot2mol-grpo
+  wandb_entity: null
+  wandb_run_name: random-assay-fusiondti-gpt2
+  wandb_mode: online
+  log_level: INFO
