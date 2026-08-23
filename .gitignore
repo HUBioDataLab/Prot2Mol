@@ -14,3 +14,4 @@ analysis/
 *.ipynb
 prot2mol_env/
 wandb/
+outputs/

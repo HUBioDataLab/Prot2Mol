@@ -15,6 +15,7 @@ from ..chem.utils import canonic_smiles, molecular_property_summary
 
 RewardFunction = Callable[[Sequence[str], Sequence[str]], torch.Tensor | Sequence[float]]
 RewardMoleculeRepresentation = Literal["smiles", "selfies"]
+GRPOLossType = Literal["grpo", "bnpo"]
 ValidityFunction = Callable[[str], bool]
 
 
@@ -28,7 +29,8 @@ class GRPOConfig:
     min_length: int = 3
     temperature: float = 1.0
     top_p: float = 1.0
-    num_iterations: int = 1
+    num_iterations: int = 2
+    loss_type: GRPOLossType = "grpo"
     max_grad_norm: float = 1.0
     reward_min: float = 0.0
     reward_max: float = 1.0
@@ -55,6 +57,8 @@ class GRPOConfig:
             raise ValueError("top_p must be in (0, 1]")
         if self.num_iterations < 1:
             raise ValueError("num_iterations must be positive")
+        if self.loss_type not in {"grpo", "bnpo"}:
+            raise ValueError("loss_type must be 'grpo' or 'bnpo'")
         if self.max_grad_norm <= 0.0:
             raise ValueError("max_grad_norm must be positive")
         if self.reward_min >= self.reward_max:
@@ -174,6 +178,23 @@ def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (values * mask.to(dtype=values.dtype)).sum() / denominator
 
 
+def _sequence_normalized_mean(
+    values: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    """Average tokens within each completion, then average completions equally."""
+
+    if values.shape != mask.shape:
+        raise ValueError("values and mask must have the same shape")
+    lengths = mask.sum(dim=1)
+    if lengths.numel() == 0 or bool(lengths.eq(0).any().detach().cpu()):
+        raise ValueError("every GRPO completion must contain an action token")
+    per_sequence = (values * mask.to(dtype=values.dtype)).sum(dim=1) / lengths.to(
+        dtype=values.dtype
+    )
+    return per_sequence.mean()
+
+
 def compute_grpo_loss(
     current_log_probs: torch.Tensor,
     old_log_probs: torch.Tensor,
@@ -183,6 +204,7 @@ def compute_grpo_loss(
     *,
     clip_epsilon: float,
     kl_beta: float,
+    loss_type: GRPOLossType = "grpo",
 ) -> GRPOLossOutput:
     if not (
         current_log_probs.shape
@@ -193,20 +215,24 @@ def compute_grpo_loss(
         raise ValueError("all token tensors must have the same shape")
     if advantages.ndim != 1 or advantages.numel() != current_log_probs.size(0):
         raise ValueError("advantages must contain one scalar per generated sequence")
+    if loss_type not in {"grpo", "bnpo"}:
+        raise ValueError("loss_type must be 'grpo' or 'bnpo'")
+
+    loss_reducer = _sequence_normalized_mean if loss_type == "grpo" else _masked_mean
 
     log_ratio = (current_log_probs - old_log_probs).clamp(min=-20.0, max=20.0)
     ratio = log_ratio.exp()
     token_advantages = advantages.to(current_log_probs).unsqueeze(1)
     unclipped = ratio * token_advantages
     clipped = ratio.clamp(1.0 - clip_epsilon, 1.0 + clip_epsilon) * token_advantages
-    policy_loss = -_masked_mean(torch.minimum(unclipped, clipped), action_mask)
+    policy_loss = -loss_reducer(torch.minimum(unclipped, clipped), action_mask)
 
     reference_log_ratio = (reference_log_probs - current_log_probs).clamp(
         min=-20.0,
         max=20.0,
     )
     per_token_kl = reference_log_ratio.exp() - reference_log_ratio - 1.0
-    kl = _masked_mean(per_token_kl, action_mask)
+    kl = loss_reducer(per_token_kl, action_mask)
     loss = policy_loss + kl_beta * kl
 
     clipped_tokens = ratio.sub(1.0).abs().gt(clip_epsilon)
@@ -236,6 +262,7 @@ def compute_grpo_loss(
         "grpo/mean_sequence_log_prob": float(
             (current_log_probs * action_mask).sum(dim=1).mean().detach().cpu()
         ),
+        "grpo/sequence_normalized_loss": float(loss_type == "grpo"),
     }
     return GRPOLossOutput(
         loss=loss,
@@ -254,6 +281,7 @@ class GRPOTrainer:
         policy: nn.Module,
         reference_policy: nn.Module,
         optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
         tokenizer,
         reward_function: RewardFunction,
         config: GRPOConfig | None = None,
@@ -265,6 +293,7 @@ class GRPOTrainer:
         self.policy = policy
         self.reference_policy = reference_policy
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.tokenizer = tokenizer
         self.reward_function = reward_function
         self.config = config or GRPOConfig()
@@ -282,6 +311,7 @@ class GRPOTrainer:
                 "reward_molecule_representation must be 'smiles' or 'selfies'"
             )
         self.global_step = 0
+        self.optimization_step = 0
 
         policy_device = next(self.policy.parameters()).device
         reference_device = next(self.reference_policy.parameters()).device
@@ -503,6 +533,7 @@ class GRPOTrainer:
 
     def _rollout_metrics(self, rollout: GRPORollout) -> dict[str, float]:
         grouped_rewards = rollout.rewards.reshape(rollout.batch_size, rollout.group_size)
+        group_means = grouped_rewards.mean(dim=1)
         group_standard_deviations = grouped_rewards.std(dim=1, unbiased=False)
         group_unique_fractions = []
         for start in range(0, len(rollout.generated_smiles), rollout.group_size):
@@ -537,6 +568,10 @@ class GRPOTrainer:
             ),
             "grpo/reward_min": float(rollout.rewards.min().detach().cpu()),
             "grpo/reward_max": float(rollout.rewards.max().detach().cpu()),
+            "grpo/group_reward_mean": float(group_means.mean().detach().cpu()),
+            "grpo/group_reward_mean_std": float(
+                group_means.std(unbiased=False).detach().cpu()
+            ),
             "grpo/valid_reward_mean": float(
                 valid_rewards.mean().detach().cpu() if valid_rewards.numel() else 0.0
             ),
@@ -644,6 +679,7 @@ class GRPOTrainer:
                     rollout.advantages,
                     clip_epsilon=self.config.clip_epsilon,
                     kl_beta=self.config.kl_beta,
+                    loss_type=self.config.loss_type,
                 )
             self.optimizer.zero_grad(set_to_none=True)
             loss_output.loss.backward()
@@ -653,6 +689,9 @@ class GRPOTrainer:
             )
             last_grad_norm = float(torch.as_tensor(grad_norm).detach().cpu())
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
+            self.optimization_step += 1
             iteration_metrics.append(loss_output.metrics)
 
         with torch.no_grad(), self._autocast_context(
@@ -677,6 +716,7 @@ class GRPOTrainer:
                 rollout.advantages,
                 clip_epsilon=self.config.clip_epsilon,
                 kl_beta=self.config.kl_beta,
+                loss_type=self.config.loss_type,
             )
 
         for key in iteration_metrics[0]:
@@ -703,6 +743,7 @@ class GRPOTrainer:
                     per_sequence_change.abs().mean().detach().cpu()
                 ),
                 "grpo/optimization_iterations": float(self.config.num_iterations),
+                "grpo/optimizer_step": float(self.optimization_step),
                 "grpo/step": float(self.global_step + 1),
             }
         )

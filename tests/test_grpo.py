@@ -119,6 +119,39 @@ def test_grpo_reports_clipped_out_of_range_policy_ratios():
     assert output.metrics["grpo/old_policy_approx_kl"] > 0.0
 
 
+def test_real_grpo_normalizes_each_completion_before_batch_mean():
+    zeros = torch.zeros(2, 3)
+    action_mask = torch.tensor(
+        [[True, False, False], [True, True, True]],
+    )
+    advantages = torch.tensor([1.0, -1.0])
+
+    grpo = compute_grpo_loss(
+        zeros,
+        zeros,
+        zeros,
+        action_mask,
+        advantages,
+        clip_epsilon=0.2,
+        kl_beta=0.0,
+        loss_type="grpo",
+    )
+    token_normalized = compute_grpo_loss(
+        zeros,
+        zeros,
+        zeros,
+        action_mask,
+        advantages,
+        clip_epsilon=0.2,
+        kl_beta=0.0,
+        loss_type="bnpo",
+    )
+
+    assert grpo.policy_loss.item() == pytest.approx(0.0)
+    assert token_normalized.policy_loss.item() == pytest.approx(0.5)
+    assert grpo.metrics["grpo/sequence_normalized_loss"] == 1.0
+
+
 def test_reward_probability_scorer_freezes_reward_model():
     class FakeRewardModel(torch.nn.Module):
         def __init__(self):

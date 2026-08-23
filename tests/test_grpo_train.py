@@ -201,6 +201,59 @@ def test_structure_mapping_rejects_plain_amino_acid_values(tmp_path):
         )
 
 
+def test_structure_mapping_rejects_mismatched_amino_acid_track(tmp_path):
+    train, _, structures = _write_random_split(tmp_path)
+    frame = pd.read_parquet(structures)
+    frame.loc[frame["protein_accession"] == "P1", "structure_aware_sequence"] = "GaTa"
+    frame.to_parquet(structures, index=False)
+
+    with pytest.raises(ValueError, match="does not exactly match"):
+        grpo_train.load_unique_training_proteins(
+            train,
+            structure_aware_path=structures,
+        )
+
+
+def test_empty_endpoint_chemistry_is_unavailable_not_zero():
+    summary = grpo_train._evaluation_property_summary([""])
+
+    assert summary["count"] == 0.0
+    assert summary["qed_mean"] is None
+    assert summary["sas_mean"] is None
+    assert summary["logp_mean"] is None
+    assert grpo_train.GRPOTrainingRun._macro(
+        [{"qed_mean": None}, {"qed_mean": 0.7}],
+        "qed_mean",
+    ) == pytest.approx(0.7)
+
+
+def test_grpo_run_refuses_existing_material_outputs_and_stale_checkpoints(tmp_path):
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "training_summary.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        grpo_train.GRPOTrainingRun(
+            SimpleNamespace(
+                device="cpu",
+                output_dir=str(output),
+                resume_from_checkpoint=None,
+            )
+        )
+
+    clean_output = tmp_path / "clean-output"
+    runner = grpo_train.GRPOTrainingRun(
+        SimpleNamespace(
+            device="cpu",
+            output_dir=str(clean_output),
+            resume_from_checkpoint=None,
+        )
+    )
+    runner.trainer = SimpleNamespace(global_step=3)
+    (clean_output / "checkpoint-3").mkdir()
+    with pytest.raises(FileExistsError, match="pre-existing GRPO checkpoint"):
+        runner.save_checkpoint(epoch=0, next_index=0)
+
+
 def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     tmp_path,
     monkeypatch,
@@ -328,14 +381,19 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("grpo/qed_mean" in values for values in logged)
     assert any("grpo/sas_mean" in values for values in logged)
     assert any("grpo/valid_unique_fraction" in values for values in logged)
+    assert any(values.get("grpo/optimization_iterations") == 2.0 for values in logged)
+    assert any(values.get("grpo/sequence_normalized_loss") == 1.0 for values in logged)
     assert any("eval/fcd_macro" in values for values in logged)
     assert any("eval/per_protein" in values for values in logged)
     assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True
 
+    resumed_output = tmp_path / "resumed-output"
     resume_config = grpo_train.parse_arguments(
         [
             *arguments,
+            "--output_dir",
+            str(resumed_output),
             "--resume_from_checkpoint",
             str(output / "checkpoint-1"),
         ]

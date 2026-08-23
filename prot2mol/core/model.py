@@ -8,7 +8,7 @@ from typing import Any, Mapping
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModelForSeq2SeqLM, GPT2Config, GPT2LMHeadModel
+from transformers import AutoConfig, AutoModelForSeq2SeqLM, GPT2Config, GPT2LMHeadModel
 from transformers.modeling_outputs import BaseModelOutput
 
 from ..io.hf_utils import infer_decoder_type, resolve_model_path
@@ -34,10 +34,22 @@ class Prot2MolModel(nn.Module):
         self._trainable_decoder = bool(config.get("train_decoder_model", True))
         self.decoder_type = infer_decoder_type(config)
 
+        protein_encoder_kwargs = {}
+        if "initialize_protein_encoder_from_pretrained" in config:
+            protein_encoder_kwargs["pretrained"] = bool(
+                config["initialize_protein_encoder_from_pretrained"]
+            )
+        if config.get("protein_model_revision") is not None:
+            protein_encoder_kwargs["revision"] = config["protein_model_revision"]
+        if config.get("models_base") is not None:
+            protein_encoder_kwargs["models_base"] = config["models_base"]
+        if bool(config.get("local_files_only", False)):
+            protein_encoder_kwargs["local_files_only"] = True
         self.protein_encoder = get_protein_encoder(
             model_name=config["prot_emb_model"],
             model_id=config.get("protein_model_id"),
             active=self._trainable_encoder,
+            **protein_encoder_kwargs,
         )
 
         tokenizer = config["mol_tokenizer"]
@@ -75,9 +87,31 @@ class Prot2MolModel(nn.Module):
             )
             self.molecule_decoder = GPT2LMHeadModel(gpt_config)
         else:
-            self.molecule_decoder = AutoModelForSeq2SeqLM.from_pretrained(
-                resolve_model_path(decoder_model_id)
+            decoder_model_path = resolve_model_path(
+                decoder_model_id,
+                models_base=config.get("models_base"),
+                revision=config.get("decoder_model_revision"),
             )
+            decoder_kwargs = {}
+            if config.get("decoder_model_revision") is not None:
+                decoder_kwargs["revision"] = config["decoder_model_revision"]
+            if config.get("models_base") is not None:
+                decoder_kwargs["cache_dir"] = config["models_base"]
+            if bool(config.get("local_files_only", False)):
+                decoder_kwargs["local_files_only"] = True
+            if bool(config.get("initialize_decoder_from_pretrained", True)):
+                self.molecule_decoder = AutoModelForSeq2SeqLM.from_pretrained(
+                    decoder_model_path,
+                    **decoder_kwargs,
+                )
+            else:
+                decoder_config = AutoConfig.from_pretrained(
+                    decoder_model_path,
+                    **decoder_kwargs,
+                )
+                self.molecule_decoder = AutoModelForSeq2SeqLM.from_config(
+                    decoder_config
+                )
             if not hasattr(self.molecule_decoder, "model") or not hasattr(
                 self.molecule_decoder.model, "encoder"
             ):

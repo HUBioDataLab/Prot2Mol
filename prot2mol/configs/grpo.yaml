@@ -17,8 +17,10 @@ grpo:
   generator_checkpoint: ../../models/prot_comp_set_pchembl_6_protlen_1000_human_False_emb_esm2_dec_gpt_lr_5e-05_bs_6_layers_12_heads_16_20250706_235311
   prot_emb_model: esm2
   protein_model_id: facebook/esm2_t33_650M_UR50D
+  protein_model_revision: 08e4846e537177426273712802403f7ba8261b6c
   decoder_type: gpt2
   decoder_model_id: zjunlp/MolGen-large
+  decoder_model_revision: 3c6e8fb91a783853a3782552a85efc4df6f96d0a
   n_layer: 12
   n_head: 16
   n_emb: 1280
@@ -31,9 +33,13 @@ grpo:
   fusiondti_dataset: BindingDB
   reward_batch_size: 8
   reward_max_length: 512
+  # FusionDTI adds CLS/EOS, so 510 residues is its strict no-truncation limit.
+  reward_protein_max_residues: 510
+  reward_protein_cache_size: 64
   local_files_only: false
 
-  # One optimizer step = one unique protein x eight generated molecules.
+  # One rollout = one unique protein x eight generated molecules; the rollout
+  # is reused for num_iterations decoder optimizer updates.
   epochs: 1
   max_steps: null
   group_size: 8
@@ -43,7 +49,9 @@ grpo:
   clip_epsilon: 0.2
   kl_beta: 0.01
   advantage_epsilon: 1.0e-6
-  num_iterations: 1
+  # Reuse each rollout once after the first update so PPO clipping is active.
+  num_iterations: 2
+  loss_type: grpo
   max_grad_norm: 1.0
   temperature: 1.0
   top_p: 0.9
@@ -65,47 +73,48 @@ grpo:
     - Q9BY41
     - P21917
     - P45452
-    - P22455
     - Q13547
-    - Q06187
     - P32245
-    - P05067
-    - P09960
     - P00797
     - P00746
-    - Q8NI77
-    - Q08345
     - P00742
     - P49682
-    - P41595
-    - P23975
     - P36897
-    - Q13822
-    - Q9Y5Z0
     - O43570
     - P28482
     - P49761
     - P41144
     - P28223
     - P56817
-    - P03951
-    - P06276
     - Q96RI0
-    - Q01959
-    - P20309
     - Q16539
     - Q9NWZ3
     - P41143
-    - P34913
-    - Q8NER1
     - Q99705
+    - O15552
+    - P11802
+    - P43490
+    - P06239
+    - Q60492
+    - P21554
+    - P11309
+    - P34972
+    - Q05941
+    - P61169
+    - P35414
+    - Q96RI1
+    - P35348
+    - P0DMS8
+    - O14757
+    - P56373
   # Only these two get individual scalar plots; all 40 stay in one W&B table.
   wandb_target_metric_ids:
     - P31749
     - P24941
   eval_samples_per_protein: 64
   eval_seed: 17
-  min_fcd_reference_actives: 200
+  # Strictly more than 200 unique active validation molecules.
+  min_fcd_reference_actives: 201
   fcd_batch_size: 256
   fcd_num_workers: 1
   fcd_model_path: null
@@ -113,7 +122,7 @@ grpo:
   output_dir: ../../outputs/prot2mol-grpo/random-assay-fusiondti-gpt2
   resume_from_checkpoint: null
   logging_steps: 1
-  save_steps: 500
+  save_steps: 5
   wandb_project: prot2mol-grpo
   wandb_entity: null
   wandb_run_name: random-assay-fusiondti-gpt2

@@ -333,6 +333,8 @@ def test_inference_loader_strict_fallback_is_explicit(tmp_path, monkeypatch):
         allow_strict_fallback=True,
     )
     assert loaded.strict_values == [True, False]
+    assert loaded.config_seen["initialize_protein_encoder_from_pretrained"] is False
+    assert loaded.config_seen["initialize_decoder_from_pretrained"] is False
 
 
 def test_saved_config_uses_new_architecture_fields_and_ignores_legacy_affinity(tmp_path):

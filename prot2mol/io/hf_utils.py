@@ -9,8 +9,10 @@ SUPPORTED_DECODER_TYPES = {"gpt2", "molgen"}
 MODEL_CONFIG_KEYS = (
     "prot_emb_model",
     "protein_model_id",
+    "protein_model_revision",
     "decoder_type",
     "decoder_model_id",
+    "decoder_model_revision",
     "n_layer",
     "n_head",
     "n_emb",
@@ -102,7 +104,12 @@ def prepare_prot2mol_state_dict(
     return migrated
 
 
-def resolve_model_path(model_name: str, models_base: Optional[str] = None, fallback_bases: Optional[Sequence[str]] = None) -> str:
+def resolve_model_path(
+    model_name: str,
+    models_base: Optional[str] = None,
+    fallback_bases: Optional[Sequence[str]] = None,
+    revision: Optional[str] = None,
+) -> str:
     """
     Resolve a local HuggingFace cache path for a given model name.
 
@@ -139,6 +146,10 @@ def resolve_model_path(model_name: str, models_base: Optional[str] = None, fallb
         model_dir = os.path.join(base, f"models--{cache_name}")
         snapshots_dir = os.path.join(model_dir, "snapshots")
         if os.path.isdir(snapshots_dir):
+            if revision:
+                pinned_snapshot = os.path.join(snapshots_dir, revision)
+                if os.path.isdir(pinned_snapshot):
+                    return pinned_snapshot
             main_ref = os.path.join(model_dir, "refs", "main")
             if os.path.isfile(main_ref):
                 with open(main_ref, "r", encoding="utf-8") as handle:
@@ -167,6 +178,8 @@ def load_molgen_tokenizer(
     fallback_bases: Optional[Sequence[str]] = None,
     padding_side: str = "right",
     model_id: str = "zjunlp/MolGen-large",
+    revision: Optional[str] = None,
+    local_files_only: bool = False,
 ):
     """Load the tokenizer from the same MolGen checkpoint as the decoder."""
     from transformers import AutoTokenizer
@@ -175,8 +188,16 @@ def load_molgen_tokenizer(
         model_id,
         models_base=models_base,
         fallback_bases=fallback_bases,
+        revision=revision,
     )
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer_kwargs = {}
+    if revision is not None:
+        tokenizer_kwargs["revision"] = revision
+    if models_base is not None:
+        tokenizer_kwargs["cache_dir"] = models_base
+    if local_files_only:
+        tokenizer_kwargs["local_files_only"] = True
+    tokenizer = AutoTokenizer.from_pretrained(model_path, **tokenizer_kwargs)
     tokenizer.padding_side = padding_side
     return tokenizer
 
@@ -261,12 +282,16 @@ def load_prot2mol_inference_model(
     max_mol_len: int,
     prot_max_length: int,
     protein_model_id: Optional[str] = None,
+    protein_model_revision: Optional[str] = None,
     decoder_type: str = "gpt2",
     decoder_model_id: str = "zjunlp/MolGen-large",
+    decoder_model_revision: Optional[str] = None,
     n_layer: int = 1,
     n_head: int = 16,
     n_emb: Optional[int] = None,
     conditioning_dropout: float = 0.1,
+    models_base: Optional[str] = None,
+    local_files_only: bool = False,
     strict: bool = True,
     allow_strict_fallback: bool = False,
     logger=None,
@@ -285,17 +310,27 @@ def load_prot2mol_inference_model(
     checkpoint_file = _resolve_checkpoint_file(model_path)
     if checkpoint_file.endswith(".safetensors"):
         from safetensors.torch import load_file
-        model_state = load_file(checkpoint_file)
+        model_state = load_file(checkpoint_file, device="cpu")
     else:
-        model_state = torch.load(checkpoint_file, map_location=device)
+        try:
+            model_state = torch.load(
+                checkpoint_file,
+                map_location="cpu",
+                weights_only=True,
+                mmap=True,
+            )
+        except TypeError:  # pragma: no cover - older PyTorch compatibility
+            model_state = torch.load(checkpoint_file, map_location="cpu")
 
     saved_model_config = load_saved_model_config(model_path, logger=logger)
 
     model_config = {
         "prot_emb_model": prot_emb_model,
         "protein_model_id": protein_model_id,
+        "protein_model_revision": protein_model_revision,
         "decoder_type": decoder_type,
         "decoder_model_id": decoder_model_id,
+        "decoder_model_revision": decoder_model_revision,
         "n_layer": n_layer,
         "n_head": n_head,
         "n_emb": n_emb,
@@ -305,12 +340,20 @@ def load_prot2mol_inference_model(
         "train_encoder_model": False,
         "train_projection_model": False,
         "train_decoder_model": False,
+        "initialize_protein_encoder_from_pretrained": False,
+        "initialize_decoder_from_pretrained": False,
+        "models_base": models_base,
+        "local_files_only": local_files_only,
         "mol_tokenizer": mol_tokenizer,
     }
     model_config.update(saved_model_config)
     model_config["train_encoder_model"] = False
     model_config["train_projection_model"] = False
     model_config["train_decoder_model"] = False
+    model_config["initialize_protein_encoder_from_pretrained"] = False
+    model_config["initialize_decoder_from_pretrained"] = False
+    model_config["models_base"] = models_base
+    model_config["local_files_only"] = local_files_only
     model_config["mol_tokenizer"] = mol_tokenizer
 
     resolved_decoder_type = infer_decoder_type(model_config)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -436,18 +437,6 @@ def load_fusiondti_head(
     return head
 
 
-def _unique_with_inverse(values: Sequence[str]) -> tuple[list[str], torch.Tensor]:
-    unique: list[str] = []
-    positions: dict[str, int] = {}
-    inverse: list[int] = []
-    for value in values:
-        if value not in positions:
-            positions[value] = len(unique)
-            unique.append(value)
-        inverse.append(positions[value])
-    return unique, torch.tensor(inverse, dtype=torch.long)
-
-
 class FusionDTIActivityScorer(nn.Module):
     """Frozen structure-aware-protein/SELFIES binary probability scorer."""
 
@@ -464,6 +453,7 @@ class FusionDTIActivityScorer(nn.Module):
         molecule_tokenizer: FusionDTISelfiesTokenizer,
         max_length: int = 512,
         batch_size: int = 8,
+        protein_cache_size: int = 64,
         device: str | torch.device | None = None,
     ):
         super().__init__()
@@ -471,6 +461,12 @@ class FusionDTIActivityScorer(nn.Module):
             raise ValueError("FusionDTI max_length must be at least 2")
         if batch_size < 1:
             raise ValueError("FusionDTI batch_size must be positive")
+        if protein_cache_size < 1:
+            raise ValueError("FusionDTI protein_cache_size must be positive")
+        if protein_cache_size < batch_size:
+            raise ValueError(
+                "FusionDTI protein_cache_size must be at least batch_size"
+            )
         self.protein_encoder = protein_encoder
         self.molecule_encoder = molecule_encoder
         self.activity_head = activity_head
@@ -478,6 +474,11 @@ class FusionDTIActivityScorer(nn.Module):
         self.molecule_tokenizer = molecule_tokenizer
         self.max_length = max_length
         self.batch_size = batch_size
+        self.protein_cache_size = protein_cache_size
+        self._protein_cache: OrderedDict[
+            str,
+            tuple[torch.Tensor, torch.Tensor],
+        ] = OrderedDict()
         target_device = torch.device(
             device
             if device is not None
@@ -496,23 +497,88 @@ class FusionDTIActivityScorer(nn.Module):
         super().train(False)
         return self
 
+    def _apply(self, function):
+        result = super()._apply(function)
+        if hasattr(self, "_protein_cache"):
+            self._protein_cache.clear()
+        return result
+
     def _protein_inputs(self, sequences: Sequence[str]) -> dict[str, torch.Tensor]:
         if any(not isinstance(sequence, str) or not sequence for sequence in sequences):
             raise ValueError(
                 "FusionDTI protein inputs must be non-empty structure-aware strings"
+            )
+        invalid = [
+            sequence
+            for sequence in sequences
+            if len(sequence) % 2
+            or not all(character.isupper() for character in sequence[0::2])
+            or not all(
+                character.islower() or character == "#"
+                for character in sequence[1::2]
+            )
+        ]
+        if invalid:
+            raise ValueError(
+                "FusionDTI protein inputs must be residue/3Di paired strings"
+            )
+        too_long = [
+            len(sequence) // 2
+            for sequence in sequences
+            if len(sequence) // 2 > self.max_length - 2
+        ]
+        if too_long:
+            raise ValueError(
+                "FusionDTI protein sequence exceeds its no-truncation residue limit "
+                f"of {self.max_length - 2}; observed {max(too_long)}"
             )
         encoded = self.protein_tokenizer(
             list(sequences),
             add_special_tokens=True,
             max_length=self.max_length,
             padding="max_length",
-            truncation=True,
+            truncation=False,
             return_tensors="pt",
         )
         return {
             "input_ids": encoded["input_ids"].to(self.device),
             "attention_mask": encoded["attention_mask"].to(self.device),
         }
+
+    def _protein_features(
+        self,
+        sequences: Sequence[str],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        unique_sequences = list(dict.fromkeys(sequences))
+        missing = [
+            sequence
+            for sequence in unique_sequences
+            if sequence not in self._protein_cache
+        ]
+        if missing:
+            protein_inputs = self._protein_inputs(missing)
+            protein_output = self.protein_encoder(
+                **protein_inputs,
+                return_dict=True,
+            )
+            embeddings = self._encoder_output(protein_output, "logits")
+            masks = protein_inputs["attention_mask"]
+            for index, sequence in enumerate(missing):
+                self._protein_cache[sequence] = (
+                    embeddings[index].detach(),
+                    masks[index].detach(),
+                )
+                self._protein_cache.move_to_end(sequence)
+                while len(self._protein_cache) > self.protein_cache_size:
+                    self._protein_cache.popitem(last=False)
+        features = []
+        masks = []
+        for sequence in sequences:
+            embedding, mask = self._protein_cache[sequence]
+            self._protein_cache.move_to_end(sequence)
+            features.append(embedding)
+            masks.append(mask)
+        return torch.stack(features), torch.stack(masks)
 
     @staticmethod
     def _encoder_output(output, name: str) -> torch.Tensor:
@@ -527,25 +593,11 @@ class FusionDTIActivityScorer(nn.Module):
         protein_sequences: Sequence[str],
         molecule_selfies: Sequence[str],
     ) -> torch.Tensor:
-        unique_proteins, protein_inverse = _unique_with_inverse(protein_sequences)
-        protein_inputs = self._protein_inputs(unique_proteins)
+        protein_embeddings, protein_mask = self._protein_features(protein_sequences)
         molecule_inputs = self.molecule_tokenizer.batch_encode(
             molecule_selfies,
             max_length=self.max_length,
             device=self.device,
-        )
-        protein_output = self.protein_encoder(
-            **protein_inputs,
-            return_dict=True,
-        )
-        protein_embeddings = self._encoder_output(protein_output, "logits")
-        protein_embeddings = protein_embeddings.index_select(
-            0,
-            protein_inverse.to(self.device),
-        )
-        protein_mask = protein_inputs["attention_mask"].index_select(
-            0,
-            protein_inverse.to(self.device),
         )
         molecule_output = self.molecule_encoder(
             **molecule_inputs,
@@ -598,6 +650,7 @@ class FusionDTIActivityScorer(nn.Module):
         device: str | torch.device | None = None,
         batch_size: int = 8,
         max_length: int = 512,
+        protein_cache_size: int = 64,
         cache_dir: str | Path | None = None,
         local_files_only: bool = False,
     ) -> "FusionDTIActivityScorer":
@@ -645,5 +698,6 @@ class FusionDTIActivityScorer(nn.Module):
             molecule_tokenizer=molecule_tokenizer,
             max_length=max_length,
             batch_size=batch_size,
+            protein_cache_size=protein_cache_size,
             device=device,
         )

@@ -8,7 +8,13 @@ from typing import Iterable, List, Optional
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer, T5EncoderModel, T5Tokenizer
+from transformers import (
+    AutoConfig,
+    AutoModel,
+    AutoTokenizer,
+    T5EncoderModel,
+    T5Tokenizer,
+)
 
 from ..io.hf_utils import resolve_model_path
 
@@ -72,15 +78,44 @@ def get_protein_encoder(
     model_name: str,
     model_id: Optional[str] = None,
     active: bool = True,
+    *,
+    pretrained: bool = True,
+    revision: str | None = None,
+    models_base: str | None = None,
+    local_files_only: bool = False,
 ) -> ProteinEncoder:
-    """Load the selected encoder; tokenizer and model always share one checkpoint."""
+    """Build the selected encoder, optionally without downloading base weights.
+
+    Full Prot2Mol checkpoints already contain the protein encoder. In that case
+    ``pretrained=False`` reconstructs only the pinned architecture before the
+    caller loads the checkpoint state, avoiding a redundant 650M-weight load.
+    """
 
     resolved_id = resolve_protein_model_id(model_name, model_id)
-    model_path = resolve_model_path(resolved_id)
+    model_path = resolve_model_path(
+        resolved_id,
+        models_base=models_base,
+        revision=revision,
+    )
+    common_kwargs = {}
+    if revision is not None:
+        common_kwargs["revision"] = revision
+    if models_base is not None:
+        common_kwargs["cache_dir"] = models_base
+    if local_files_only:
+        common_kwargs["local_files_only"] = True
     if PROTEIN_ENCODERS[model_name].family == "t5":
-        model = T5EncoderModel.from_pretrained(model_path)
+        if pretrained:
+            model = T5EncoderModel.from_pretrained(model_path, **common_kwargs)
+        else:
+            config = AutoConfig.from_pretrained(model_path, **common_kwargs)
+            model = T5EncoderModel(config)
     else:
-        model = AutoModel.from_pretrained(model_path)
+        if pretrained:
+            model = AutoModel.from_pretrained(model_path, **common_kwargs)
+        else:
+            config = AutoConfig.from_pretrained(model_path, **common_kwargs)
+            model = AutoModel.from_config(config)
     encoder = ProteinEncoder(model)
     for parameter in encoder.parameters():
         parameter.requires_grad = bool(active)
@@ -88,20 +123,39 @@ def get_protein_encoder(
     return encoder
 
 
-def get_protein_tokenizer(model_name: str, model_id: Optional[str] = None):
+def get_protein_tokenizer(
+    model_name: str,
+    model_id: Optional[str] = None,
+    *,
+    revision: str | None = None,
+    models_base: str | None = None,
+    local_files_only: bool = False,
+):
     """Lazily load only the tokenizer matching the selected encoder."""
 
     resolved_id = resolve_protein_model_id(model_name, model_id)
-    model_path = resolve_model_path(resolved_id)
+    model_path = resolve_model_path(
+        resolved_id,
+        models_base=models_base,
+        revision=revision,
+    )
+    common_kwargs = {}
+    if revision is not None:
+        common_kwargs["revision"] = revision
+    if models_base is not None:
+        common_kwargs["cache_dir"] = models_base
+    if local_files_only:
+        common_kwargs["local_files_only"] = True
     if PROTEIN_ENCODERS[model_name].family == "t5":
         tokenizer = T5Tokenizer.from_pretrained(
             model_path,
             do_lower_case=False,
             legacy=True,
             clean_up_tokenization_spaces=True,
+            **common_kwargs,
         )
     else:
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        tokenizer = AutoTokenizer.from_pretrained(model_path, **common_kwargs)
     tokenizer.padding_side = "right"
     return tokenizer
 

@@ -39,8 +39,10 @@ class TinyProteinEncoder(torch.nn.Module):
     def __init__(self, output_dim=6):
         super().__init__()
         self.embedding = torch.nn.Embedding(32, output_dim)
+        self.calls = 0
 
     def forward(self, input_ids, attention_mask, return_dict=True):
+        self.calls += 1
         return SimpleNamespace(logits=self.embedding(input_ids))
 
 
@@ -158,6 +160,53 @@ def test_fusiondti_scorer_runs_structure_aware_strings_to_probabilities():
     scorer.train()
     assert scorer.training is False
     assert all(not parameter.requires_grad for parameter in scorer.parameters())
+
+
+def test_fusiondti_caches_frozen_protein_features_across_chunks_and_calls():
+    protein_encoder = TinyProteinEncoder()
+    scorer = FusionDTIActivityScorer(
+        protein_encoder=protein_encoder,
+        molecule_encoder=TinyMoleculeEncoder(),
+        activity_head=FusionDTIActivityHead(
+            protein_dim=6,
+            molecule_dim=5,
+            hidden_dim=8,
+            num_heads=2,
+        ),
+        protein_tokenizer=TinyProteinTokenizer(),
+        molecule_tokenizer=tiny_molecule_tokenizer(),
+        max_length=8,
+        batch_size=2,
+        protein_cache_size=4,
+        device="cpu",
+    )
+
+    scorer(["MdEvLp"] * 5, ["[C]", "[O]", "[N]", "[F]", "[C][O]"])
+    scorer(["MdEvLp"], ["[C]"])
+
+    assert protein_encoder.calls == 1
+
+
+def test_fusiondti_rejects_proteins_that_would_be_truncated():
+    scorer = FusionDTIActivityScorer(
+        protein_encoder=TinyProteinEncoder(),
+        molecule_encoder=TinyMoleculeEncoder(),
+        activity_head=FusionDTIActivityHead(
+            protein_dim=6,
+            molecule_dim=5,
+            hidden_dim=8,
+            num_heads=2,
+        ),
+        protein_tokenizer=TinyProteinTokenizer(),
+        molecule_tokenizer=tiny_molecule_tokenizer(),
+        max_length=5,
+        batch_size=1,
+        protein_cache_size=1,
+        device="cpu",
+    )
+
+    with pytest.raises(ValueError, match="no-truncation residue limit"):
+        scorer(["AaCaDaEa"], ["[C]"])
 
 
 def test_fusiondti_artifact_resolver_rejects_unknown_dataset_without_network():

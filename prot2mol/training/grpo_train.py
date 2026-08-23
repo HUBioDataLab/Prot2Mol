@@ -10,6 +10,8 @@ import json
 import logging
 import math
 import random
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,6 +222,11 @@ def load_unique_training_proteins(
                 f"Protein {protein_id!r} does not contain a SaProt residue/3Di "
                 "paired sequence; refusing to pass a plain sequence to FusionDTI"
             )
+        if reward_sequence[0::2] != sequence:
+            raise ValueError(
+                f"Protein {protein_id!r} structure-aware amino-acid track does not "
+                "exactly match its generator protein sequence"
+            )
         record = ProteinRecord(protein_id, sequence, reward_sequence)
         previous = by_sequence.setdefault(sequence, record)
         missing_mapping_sequences.pop(sequence, None)
@@ -331,7 +338,7 @@ def select_evaluation_targets(
         ]
         if too_long:
             raise ValueError(
-                "Requested evaluation proteins exceed the generator protein context: "
+                "Requested evaluation proteins exceed the allowed protein context: "
                 f"{too_long}"
             )
         selected_ids = {protein.protein_id for protein in selected}
@@ -407,6 +414,20 @@ def _cosine_warmup_lambda(step: int, *, warmup_steps: int, total_steps: int) -> 
     return 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
+def _evaluation_property_summary(
+    smiles: Sequence[str],
+) -> dict[str, float | None]:
+    """Keep unavailable endpoint chemistry out of cross-protein macro means."""
+
+    properties = molecular_property_summary(smiles)
+    if properties["count"] == 0:
+        return {
+            key: (value if key == "count" else None)
+            for key, value in properties.items()
+        }
+    return properties
+
+
 def _frechet_distance(
     mean_a: np.ndarray,
     covariance_a: np.ndarray,
@@ -468,6 +489,19 @@ class GRPOTrainingRun:
         self.config = config
         self.device = torch.device(config.device)
         self.output_dir = Path(config.output_dir).expanduser().resolve()
+        if self.output_dir.exists() and not config.resume_from_checkpoint:
+            material_outputs = [
+                path
+                for path in self.output_dir.iterdir()
+                if path.name in {"evaluation", "final", "training_summary.json"}
+                or path.name.startswith("checkpoint-")
+            ]
+            if material_outputs:
+                names = sorted(path.name for path in material_outputs)
+                raise FileExistsError(
+                    f"Refusing to overwrite an existing GRPO run in {self.output_dir}: "
+                    f"{names}"
+                )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.policy: torch.nn.Module | None = None
         self.reference_policy: torch.nn.Module | None = None
@@ -485,6 +519,7 @@ class GRPOTrainingRun:
         self.start_index = 0
         self.proteins_seen = 0
         self.wandb_run = None
+        self._saved_checkpoints: set[Path] = set()
 
     def _load_data(self) -> None:
         required_protein_ids = (
@@ -516,7 +551,10 @@ class GRPOTrainingRun:
             seed=self.config.seed,
             min_reference_actives=self.config.min_fcd_reference_actives,
             requested_protein_ids=self.config.eval_protein_ids,
-            max_protein_length=self.config.prot_max_length,
+            max_protein_length=min(
+                self.config.prot_max_length,
+                self.config.reward_protein_max_residues,
+            ),
         )
         if self.config.eval_proteins and not self.evaluation_targets:
             raise ValueError("No proteins are eligible for target-conditional evaluation")
@@ -555,7 +593,9 @@ class GRPOTrainingRun:
             "required_protein_ids": list(self.config.eval_protein_ids),
             "protein_ids": [row["protein_id"] for row in rows],
             "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
-            "max_protein_length": self.config.prot_max_length,
+            "generator_max_protein_length": self.config.prot_max_length,
+            "reward_max_protein_residues": self.config.reward_protein_max_residues,
+            "minimum_unique_active_references": self.config.min_fcd_reference_actives,
         }
         (self.output_dir / "cohort.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True),
@@ -567,10 +607,15 @@ class GRPOTrainingRun:
             models_base=self.config.models_base,
             padding_side="right",
             model_id=self.config.decoder_model_id,
+            revision=self.config.decoder_model_revision,
+            local_files_only=self.config.local_files_only,
         )
         self.protein_tokenizer = get_protein_tokenizer(
             self.config.prot_emb_model,
             model_id=self.config.protein_model_id,
+            revision=self.config.protein_model_revision,
+            models_base=self.config.models_base,
+            local_files_only=self.config.local_files_only,
         )
         self.policy = load_prot2mol_inference_model(
             model_path=self.config.generator_checkpoint,
@@ -578,12 +623,16 @@ class GRPOTrainingRun:
             mol_tokenizer=self.molecule_tokenizer,
             prot_emb_model=self.config.prot_emb_model,
             protein_model_id=self.config.protein_model_id,
+            protein_model_revision=self.config.protein_model_revision,
             decoder_type=self.config.decoder_type,
             decoder_model_id=self.config.decoder_model_id,
+            decoder_model_revision=self.config.decoder_model_revision,
             n_layer=self.config.n_layer,
             n_head=self.config.n_head,
             n_emb=self.config.n_emb,
             conditioning_dropout=self.config.conditioning_dropout,
+            models_base=self.config.models_base,
+            local_files_only=self.config.local_files_only,
             max_mol_len=self.config.max_mol_len,
             prot_max_length=self.config.prot_max_length,
             strict=True,
@@ -610,6 +659,7 @@ class GRPOTrainingRun:
             max_length=self.config.reward_max_length,
             cache_dir=self.config.models_base,
             local_files_only=self.config.local_files_only,
+            protein_cache_size=self.config.reward_protein_cache_size,
         )
         trainable_parameters = [
             parameter for parameter in self.policy.parameters() if parameter.requires_grad
@@ -621,25 +671,27 @@ class GRPOTrainingRun:
         if self.device.type == "cuda":
             optimizer_kwargs["fused"] = True
         self.optimizer = torch.optim.AdamW(trainable_parameters, **optimizer_kwargs)
-        requested_steps = self.config.epochs * len(self.proteins)
-        total_steps = (
-            min(requested_steps, self.config.max_steps)
+        requested_rollout_steps = self.config.epochs * len(self.proteins)
+        total_rollout_steps = (
+            min(requested_rollout_steps, self.config.max_steps)
             if self.config.max_steps is not None
-            else requested_steps
+            else requested_rollout_steps
         )
-        warmup_steps = int(total_steps * self.config.warmup_ratio)
+        total_optimizer_steps = total_rollout_steps * self.config.num_iterations
+        warmup_steps = int(total_optimizer_steps * self.config.warmup_ratio)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
             lr_lambda=lambda step: _cosine_warmup_lambda(
                 step,
                 warmup_steps=warmup_steps,
-                total_steps=total_steps,
+                total_steps=total_optimizer_steps,
             ),
         )
         self.trainer = GRPOTrainer(
             policy=self.policy,
             reference_policy=self.reference_policy,
             optimizer=self.optimizer,
+            scheduler=self.scheduler,
             tokenizer=self.molecule_tokenizer,
             reward_function=self.reward_scorer,
             config=GRPOConfig(
@@ -652,6 +704,7 @@ class GRPOTrainingRun:
                 temperature=self.config.temperature,
                 top_p=self.config.top_p,
                 num_iterations=self.config.num_iterations,
+                loss_type=self.config.loss_type,
                 max_grad_norm=self.config.max_grad_norm,
                 require_eos_for_reward=True,
                 precision=self.config.precision,
@@ -672,6 +725,7 @@ class GRPOTrainingRun:
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
             "global_step": self.trainer.global_step,
+            "optimization_step": self.trainer.optimization_step,
             "epoch": epoch,
             "next_index": next_index,
             "proteins_seen": self.proteins_seen,
@@ -690,30 +744,49 @@ class GRPOTrainingRun:
     def save_checkpoint(self, *, epoch: int, next_index: int) -> Path:
         assert self.trainer is not None
         destination = self.output_dir / f"checkpoint-{self.trainer.global_step}"
-        if destination.is_dir():
-            LOGGER.info("GRPO checkpoint already exists at %s", destination)
+        if destination in self._saved_checkpoints:
+            if not (destination / "trainer_state.pt").is_file():
+                raise RuntimeError(
+                    f"Current-run GRPO checkpoint became incomplete: {destination}"
+                )
             return destination
-        destination.mkdir(parents=True, exist_ok=False)
-        payload = self._checkpoint_payload(epoch=epoch, next_index=next_index)
-        torch.save(payload, destination / "trainer_state.pt")
-        metadata = {
-            key: payload[key]
-            for key in (
-                "format_version",
-                "global_step",
-                "epoch",
-                "next_index",
-                "proteins_seen",
-                "generator_checkpoint",
-                "train_parquet_path",
-                "cohort_protein_ids",
-                "wandb_run_id",
+        if destination.exists():
+            raise FileExistsError(
+                f"Refusing to reuse a pre-existing GRPO checkpoint: {destination}"
             )
-        }
-        (destination / "trainer_state.json").write_text(
-            json.dumps(metadata, indent=2, sort_keys=True),
-            encoding="utf-8",
+        temporary = Path(
+            tempfile.mkdtemp(
+                prefix=f".{destination.name}-",
+                dir=self.output_dir,
+            )
         )
+        payload = self._checkpoint_payload(epoch=epoch, next_index=next_index)
+        try:
+            torch.save(payload, temporary / "trainer_state.pt")
+            metadata = {
+                key: payload[key]
+                for key in (
+                    "format_version",
+                    "global_step",
+                    "optimization_step",
+                    "epoch",
+                    "next_index",
+                    "proteins_seen",
+                    "generator_checkpoint",
+                    "train_parquet_path",
+                    "cohort_protein_ids",
+                    "wandb_run_id",
+                )
+            }
+            (temporary / "trainer_state.json").write_text(
+                json.dumps(metadata, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary.replace(destination)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+        self._saved_checkpoints.add(destination)
         LOGGER.info("Saved GRPO checkpoint to %s", destination)
         return destination
 
@@ -742,6 +815,12 @@ class GRPOTrainingRun:
         self.optimizer.load_state_dict(payload["optimizer_state"])
         self.scheduler.load_state_dict(payload["scheduler_state"])
         self.trainer.global_step = int(payload["global_step"])
+        self.trainer.optimization_step = int(
+            payload.get(
+                "optimization_step",
+                self.trainer.global_step * self.config.num_iterations,
+            )
+        )
         self.start_epoch = int(payload["epoch"])
         self.start_index = int(payload["next_index"])
         self.proteins_seen = int(payload.get("proteins_seen", self.trainer.global_step))
@@ -890,7 +969,7 @@ class GRPOTrainingRun:
                 [selfies[index] for index in valid_indices],
             ).numpy()
             rewards[valid_indices] = reward_values
-        properties = molecular_property_summary(valid_smiles)
+        properties = _evaluation_property_summary(valid_smiles)
         aligned_properties = molecular_property_rows(
             [smiles[index] if valid[index] else "" for index in range(len(smiles))]
         )
@@ -951,18 +1030,16 @@ class GRPOTrainingRun:
         molecule_rows: Sequence[Mapping[str, Any]],
     ) -> Path:
         snapshot_dir = self.output_dir / "evaluation" / snapshot_name
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        pq.write_table(
-            pa.Table.from_pylist(list(per_protein_rows)),
-            snapshot_dir / "per_protein_metrics.parquet",
-        )
-        pq.write_table(
-            pa.Table.from_pylist(list(molecule_rows)),
-            snapshot_dir / "generated_molecules.parquet",
-        )
-        (snapshot_dir / "metrics.json").write_text(
-            json.dumps(dict(metrics), indent=2, sort_keys=True),
-            encoding="utf-8",
+        if snapshot_dir.exists():
+            raise FileExistsError(
+                f"Refusing to overwrite evaluation snapshot: {snapshot_dir}"
+            )
+        snapshot_dir.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(
+            tempfile.mkdtemp(
+                prefix=f".{snapshot_name}-",
+                dir=snapshot_dir.parent,
+            )
         )
         metadata = {
             "snapshot": snapshot_name,
@@ -974,10 +1051,27 @@ class GRPOTrainingRun:
                 Path(self.config.generator_checkpoint).expanduser().resolve()
             ),
         }
-        (snapshot_dir / "metadata.json").write_text(
-            json.dumps(metadata, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        try:
+            pq.write_table(
+                pa.Table.from_pylist(list(per_protein_rows)),
+                temporary / "per_protein_metrics.parquet",
+            )
+            pq.write_table(
+                pa.Table.from_pylist(list(molecule_rows)),
+                temporary / "generated_molecules.parquet",
+            )
+            (temporary / "metrics.json").write_text(
+                json.dumps(dict(metrics), indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            (temporary / "metadata.json").write_text(
+                json.dumps(metadata, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary.replace(snapshot_dir)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
         LOGGER.info("Saved %s evaluation snapshot to %s", snapshot_name, snapshot_dir)
         return snapshot_dir
 
@@ -1016,6 +1110,9 @@ class GRPOTrainingRun:
             "eval/qed_mean_macro": self._macro(rows, "qed_mean"),
             "eval/sas_mean_macro": self._macro(rows, "sas_mean"),
             "eval/logp_mean_macro": self._macro(rows, "logp_mean"),
+            "eval/property_available_fraction": float(
+                sum(row["count"] > 0 for row in rows) / len(rows)
+            ),
             "eval/fcd_macro": self._macro(rows, "fcd"),
             "eval/fcd_available_fraction": float(
                 sum(row["fcd"] is not None for row in rows) / len(rows)
@@ -1098,8 +1195,11 @@ class GRPOTrainingRun:
     def _save_final_model(self) -> Path:
         assert self.policy is not None
         final_dir = self.output_dir / "final"
-        final_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.policy.state_dict(), final_dir / "pytorch_model.bin")
+        if final_dir.exists():
+            raise FileExistsError(f"Refusing to overwrite final model: {final_dir}")
+        temporary = Path(
+            tempfile.mkdtemp(prefix=".final-", dir=self.output_dir)
+        )
         model_config = dict(getattr(self.policy, "_config", {}))
         model_config.update(
             {
@@ -1110,11 +1210,22 @@ class GRPOTrainingRun:
                 "train_decoder_model": False,
             }
         )
-        save_model_config(str(final_dir), model_config, logger=LOGGER)
-        (final_dir / "grpo_config.json").write_text(
-            json.dumps(self._wandb_config(), indent=2, sort_keys=True, default=str),
-            encoding="utf-8",
-        )
+        try:
+            torch.save(self.policy.state_dict(), temporary / "pytorch_model.bin")
+            save_model_config(str(temporary), model_config, logger=LOGGER)
+            (temporary / "grpo_config.json").write_text(
+                json.dumps(
+                    self._wandb_config(),
+                    indent=2,
+                    sort_keys=True,
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
+            temporary.replace(final_dir)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
         return final_dir
 
     def run(self) -> dict[str, Any]:
@@ -1159,7 +1270,6 @@ class GRPOTrainingRun:
                         protein_sequences=[protein.protein_sequence],
                         reward_protein_sequences=[protein.reward_protein_sequence],
                     )
-                    self.scheduler.step()
                     self.proteins_seen += 1
                     global_step = self.trainer.global_step
                     last_epoch = epoch
@@ -1175,6 +1285,9 @@ class GRPOTrainingRun:
                         "train/proteins_seen": float(self.proteins_seen),
                         "train/unique_proteins": float(len(self.proteins)),
                         "trainer/global_step": float(global_step),
+                        "trainer/optimization_step": float(
+                            self.trainer.optimization_step
+                        ),
                     }
                     if global_step % self.config.logging_steps == 0:
                         self.wandb_run.log(metrics, step=global_step)
@@ -1246,8 +1359,10 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     model.add_argument("--generator_checkpoint", required=True)
     model.add_argument("--prot_emb_model", choices=["esm2", "prot_t5"], default="esm2")
     model.add_argument("--protein_model_id", default="facebook/esm2_t33_650M_UR50D")
+    model.add_argument("--protein_model_revision", default=None)
     model.add_argument("--decoder_type", choices=["gpt2", "molgen"], default="gpt2")
     model.add_argument("--decoder_model_id", default="zjunlp/MolGen-large")
+    model.add_argument("--decoder_model_revision", default=None)
     model.add_argument("--n_layer", type=int, default=12)
     model.add_argument("--n_head", type=int, default=16)
     model.add_argument("--n_emb", type=int, default=1280)
@@ -1265,6 +1380,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     reward.add_argument("--reward_batch_size", type=int, default=8)
     reward.add_argument("--reward_max_length", type=int, default=512)
+    reward.add_argument("--reward_protein_max_residues", type=int, default=510)
+    reward.add_argument("--reward_protein_cache_size", type=int, default=64)
     reward.add_argument(
         "--local_files_only",
         action=argparse.BooleanOptionalAction,
@@ -1281,7 +1398,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     training.add_argument("--clip_epsilon", type=float, default=0.2)
     training.add_argument("--kl_beta", type=float, default=0.01)
     training.add_argument("--advantage_epsilon", type=float, default=1.0e-6)
-    training.add_argument("--num_iterations", type=int, default=1)
+    training.add_argument("--num_iterations", type=int, default=2)
+    training.add_argument("--loss_type", choices=["grpo", "bnpo"], default="grpo")
     training.add_argument("--max_grad_norm", type=float, default=1.0)
     training.add_argument("--temperature", type=float, default=1.0)
     training.add_argument("--top_p", type=float, default=0.9)
@@ -1308,7 +1426,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     evaluation.add_argument("--eval_samples_per_protein", type=int, default=64)
     evaluation.add_argument("--eval_seed", type=int, default=17)
-    evaluation.add_argument("--min_fcd_reference_actives", type=int, default=200)
+    evaluation.add_argument("--min_fcd_reference_actives", type=int, default=201)
     evaluation.add_argument("--fcd_batch_size", type=int, default=256)
     evaluation.add_argument("--fcd_num_workers", type=int, default=1)
     evaluation.add_argument("--fcd_model_path", default=None)
@@ -1317,7 +1435,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     output.add_argument("--output_dir", required=True)
     output.add_argument("--resume_from_checkpoint", default=None)
     output.add_argument("--logging_steps", type=int, default=1)
-    output.add_argument("--save_steps", type=int, default=500)
+    output.add_argument("--save_steps", type=int, default=5)
     output.add_argument("--wandb_project", default="prot2mol-grpo")
     output.add_argument("--wandb_entity", default=None)
     output.add_argument("--wandb_run_name", default=None)
@@ -1339,6 +1457,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "max_grad_norm": config.max_grad_norm,
         "logging_steps": config.logging_steps,
         "reward_batch_size": config.reward_batch_size,
+        "reward_protein_max_residues": config.reward_protein_max_residues,
+        "reward_protein_cache_size": config.reward_protein_cache_size,
         "eval_samples_per_protein": config.eval_samples_per_protein,
     }
     invalid = {key: value for key, value in positive.items() if value <= 0}
@@ -1350,6 +1470,11 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError("max_steps must be positive when provided")
     if not 0.0 <= config.warmup_ratio < 1.0:
         raise ValueError("warmup_ratio must be in [0, 1)")
+    if config.reward_protein_max_residues > config.reward_max_length - 2:
+        raise ValueError(
+            "reward_protein_max_residues must leave room for FusionDTI's two "
+            "protein special tokens"
+        )
     if config.max_mol_len != 200:
         LOGGER.warning(
             "This checkpoint was trained with a 200-token molecule context; got %d",
