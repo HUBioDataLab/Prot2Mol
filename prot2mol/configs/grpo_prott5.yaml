@@ -65,6 +65,7 @@ grpo:
   device: cuda
   train_on_evaluation_panel_only: true
 
+  evaluation_only: false
   eval_at_start: true
   eval_steps: 500
   eval_proteins: 40

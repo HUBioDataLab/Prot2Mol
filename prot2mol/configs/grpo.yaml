@@ -85,6 +85,7 @@ grpo:
 
   # Fixed-seed baseline at step 0, then periodic target-conditional evaluation.
   # Forty proteins x 64 generations gives 2,560 molecules per endpoint.
+  evaluation_only: false
   eval_at_start: true
   eval_steps: 500
   eval_proteins: 40

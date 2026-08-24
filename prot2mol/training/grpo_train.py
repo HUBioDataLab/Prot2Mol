@@ -1951,6 +1951,31 @@ class GRPOTrainingRun:
         last_epoch = self.start_epoch
         last_next_index = self.start_index
         try:
+            if self.config.evaluation_only:
+                if self.evaluation_targets:
+                    self.evaluate(
+                        global_step=self.trainer.global_step,
+                        snapshot_name="end",
+                    )
+                summary = {
+                    "global_step": self.trainer.global_step,
+                    "proteins_seen": self.proteins_seen,
+                    "unique_training_proteins": len(self.proteins),
+                    "cohort_protein_ids": [
+                        protein.protein_id for protein in self.proteins
+                    ],
+                    "checkpoint": None,
+                    "final_model": None,
+                    "save_final_artifacts": False,
+                    "evaluation_only": True,
+                    "start_snapshot": None,
+                    "end_snapshot": str(self.output_dir / "evaluation" / "end"),
+                }
+                (self.output_dir / "training_summary.json").write_text(
+                    json.dumps(summary, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                return summary
             if self.config.eval_at_start and self.trainer.global_step == 0:
                 self.evaluate(global_step=0, snapshot_name="start")
             stop = False
@@ -2047,6 +2072,7 @@ class GRPOTrainingRun:
                 "checkpoint": str(checkpoint) if checkpoint is not None else None,
                 "final_model": str(final_dir) if final_dir is not None else None,
                 "save_final_artifacts": self.config.save_final_artifacts,
+                "evaluation_only": False,
                 "start_snapshot": str(self.output_dir / "evaluation" / "start"),
                 "end_snapshot": str(self.output_dir / "evaluation" / "end"),
             }
@@ -2192,6 +2218,12 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
 
     evaluation = parser.add_argument_group("Periodic evaluation")
+    evaluation.add_argument(
+        "--evaluation_only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Load the configured generator and write one endpoint without training",
+    )
     evaluation.add_argument("--eval_steps", type=int, default=500)
     evaluation.add_argument("--eval_at_start", action=argparse.BooleanOptionalAction, default=True)
     evaluation.add_argument("--eval_proteins", type=int, default=4)
@@ -2298,6 +2330,10 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if config.eval_samples_per_protein % config.group_size:
         raise ValueError(
             "eval_samples_per_protein must contain complete GRPO diversity groups"
+        )
+    if config.evaluation_only and config.save_final_artifacts:
+        raise ValueError(
+            "evaluation_only requires --no-save_final_artifacts"
         )
     return config
 
