@@ -58,6 +58,37 @@ def test_internal_reward_scorer_validates_contract():
     assert scorer([], []).numel() == 0
 
 
+def test_internal_reward_loader_disables_training_only_contrastive_loss(
+    tmp_path,
+    monkeypatch,
+):
+    captured = {}
+
+    def fake_load_reward_model(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeInternalRewardModel()
+
+    monkeypatch.setattr(
+        "RewardModel.reward_model.model.load_reward_model",
+        fake_load_reward_model,
+    )
+
+    scorer = InternalRewardModelActivityScorer.from_pretrained(
+        tmp_path / "checkpoint",
+        device=torch.device("cpu"),
+        batch_size=4,
+    )
+
+    assert scorer.batch_size == 4
+    assert captured["kwargs"]["strict"] is True
+    assert captured["kwargs"]["config_overrides"] == {
+        "freeze_protein_encoder": True,
+        "freeze_molecule_encoder": True,
+        "contrastive_loss_weight": 0.0,
+    }
+
+
 @pytest.mark.parametrize("probability", [float("nan"), -0.1, 1.1])
 def test_internal_reward_scorer_rejects_invalid_probabilities(probability):
     class InvalidModel(FakeInternalRewardModel):

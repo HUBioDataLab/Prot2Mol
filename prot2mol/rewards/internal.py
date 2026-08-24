@@ -57,6 +57,10 @@ class InternalRewardModelActivityScorer(nn.Module):
             config_overrides={
                 "freeze_protein_encoder": True,
                 "freeze_molecule_encoder": True,
+                # The saved training config keeps this nonzero and otherwise
+                # requests contrastive labels during unlabeled score_pairs calls.
+                # Disabling the loss calculation does not alter activity logits.
+                "contrastive_loss_weight": 0.0,
             },
         )
         return cls(model, batch_size=batch_size)
