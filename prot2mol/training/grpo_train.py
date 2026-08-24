@@ -55,6 +55,11 @@ STRUCTURE_AWARE_COLUMN_CANDIDATES = (
 )
 
 
+def _cpu_rng_states(states: Sequence[torch.Tensor]) -> list[torch.Tensor]:
+    """Return RNG states in the CPU byte-tensor form required by PyTorch."""
+    return [state.cpu() for state in states]
+
+
 @dataclass(frozen=True)
 class ProteinRecord:
     protein_id: str
@@ -1037,7 +1042,9 @@ class GRPOTrainingRun:
         np.random.set_state(payload["numpy_rng_state"])
         torch.set_rng_state(payload["torch_rng_state"].cpu())
         if torch.cuda.is_available() and "cuda_rng_state_all" in payload:
-            torch.cuda.set_rng_state_all(payload["cuda_rng_state_all"])
+            torch.cuda.set_rng_state_all(
+                _cpu_rng_states(payload["cuda_rng_state_all"])
+            )
         LOGGER.info("Resumed GRPO from %s at step %d", path, self.trainer.global_step)
         return payload.get("wandb_run_id")
 

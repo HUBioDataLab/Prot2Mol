@@ -241,6 +241,16 @@ def test_empty_endpoint_chemistry_is_unavailable_not_zero():
     ) == pytest.approx(0.7)
 
 
+def test_cuda_rng_states_are_restored_as_cpu_byte_tensors():
+    states = [torch.tensor([1, 2, 3], dtype=torch.uint8)]
+
+    restored = grpo_train._cpu_rng_states(states)
+
+    assert len(restored) == 1
+    assert restored[0].device.type == "cpu"
+    assert restored[0].dtype == torch.uint8
+
+
 def test_grpo_run_refuses_existing_material_outputs_and_stale_checkpoints(tmp_path):
     output = tmp_path / "output"
     output.mkdir()
