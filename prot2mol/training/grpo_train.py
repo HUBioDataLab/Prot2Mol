@@ -818,7 +818,10 @@ class GRPOTrainingRun:
         if self.device.type == "cuda":
             optimizer_kwargs["fused"] = True
         self.optimizer = torch.optim.AdamW(trainable_parameters, **optimizer_kwargs)
-        requested_rollout_steps = self.config.epochs * len(self.proteins)
+        rollout_batches_per_epoch = math.ceil(
+            len(self.proteins) / self.config.protein_batch_size
+        )
+        requested_rollout_steps = self.config.epochs * rollout_batches_per_epoch
         total_rollout_steps = (
             min(requested_rollout_steps, self.config.max_steps)
             if self.config.max_steps is not None
@@ -1069,9 +1072,12 @@ class GRPOTrainingRun:
         random.Random(self.config.seed + epoch).shuffle(order)
         return order
 
-    def _tokenize(self, protein: ProteinRecord) -> tuple[torch.Tensor, torch.Tensor]:
+    def _tokenize(
+        self,
+        proteins: Sequence[ProteinRecord],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         return tokenize_protein_sequences_for_inference(
-            [protein.protein_sequence],
+            [protein.protein_sequence for protein in proteins],
             prot_tokenizer=self.protein_tokenizer,
             prot_emb_model=self.config.prot_emb_model,
             prot_max_length=self.config.prot_max_length,
@@ -1110,7 +1116,7 @@ class GRPOTrainingRun:
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         assert self.policy is not None
         assert self.reward_scorer is not None
-        protein_ids, protein_mask = self._tokenize(target.protein)
+        protein_ids, protein_mask = self._tokenize([target.protein])
         cuda_devices = (
             [self.device.index or 0] if self.device.type == "cuda" else []
         )
@@ -1935,26 +1941,34 @@ class GRPOTrainingRun:
             for epoch in range(self.start_epoch, self.config.epochs):
                 order = self._protein_order(epoch)
                 index_start = self.start_index if epoch == self.start_epoch else 0
-                for index in range(index_start, len(order)):
+                for index in range(
+                    index_start,
+                    len(order),
+                    self.config.protein_batch_size,
+                ):
                     if (
                         self.config.max_steps is not None
                         and self.trainer.global_step >= self.config.max_steps
                     ):
                         stop = True
                         break
-                    protein = order[index]
+                    proteins = order[index : index + self.config.protein_batch_size]
                     started = time.perf_counter()
-                    protein_ids, protein_mask = self._tokenize(protein)
+                    protein_ids, protein_mask = self._tokenize(proteins)
                     output = self.trainer.step(
                         protein_input_ids=protein_ids,
                         protein_attention_mask=protein_mask,
-                        protein_sequences=[protein.protein_sequence],
-                        reward_protein_sequences=[protein.reward_protein_sequence],
+                        protein_sequences=[
+                            protein.protein_sequence for protein in proteins
+                        ],
+                        reward_protein_sequences=[
+                            protein.reward_protein_sequence for protein in proteins
+                        ],
                     )
-                    self.proteins_seen += 1
+                    self.proteins_seen += len(proteins)
                     global_step = self.trainer.global_step
                     last_epoch = epoch
-                    last_next_index = index + 1
+                    last_next_index = index + len(proteins)
                     if last_next_index == len(order):
                         last_epoch = epoch + 1
                         last_next_index = 0
@@ -1962,7 +1976,10 @@ class GRPOTrainingRun:
                         **output.metrics,
                         **self._runtime_metrics(time.perf_counter() - started),
                         "train/learning_rate": float(self.optimizer.param_groups[0]["lr"]),
-                        "train/epoch": float(epoch + (index + 1) / len(order)),
+                        "train/epoch": float(
+                            epoch + (index + len(proteins)) / len(order)
+                        ),
+                        "train/protein_batch_size": float(len(proteins)),
                         "train/proteins_seen": float(self.proteins_seen),
                         "train/unique_proteins": float(len(self.proteins)),
                         "trainer/global_step": float(global_step),
@@ -1976,7 +1993,7 @@ class GRPOTrainingRun:
                             "step=%d epoch=%.4f protein=%s reward=%.4f valid=%.3f eos=%.3f",
                             global_step,
                             metrics["train/epoch"],
-                            protein.protein_id,
+                            ",".join(protein.protein_id for protein in proteins),
                             metrics["grpo/reward_mean"],
                             metrics["grpo/valid_fraction"],
                             metrics["grpo/terminated_fraction"],
@@ -2126,6 +2143,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     training = parser.add_argument_group("GRPO")
     training.add_argument("--epochs", type=int, default=1)
     training.add_argument("--max_steps", type=int, default=None)
+    training.add_argument("--protein_batch_size", type=int, default=1)
     training.add_argument("--group_size", type=int, default=8)
     training.add_argument("--learning_rate", type=float, default=1.0e-6)
     training.add_argument("--weight_decay", type=float, default=0.01)
@@ -2196,6 +2214,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     config = parse_args_with_config(parser, section="grpo", argv=argv)
     positive = {
         "epochs": config.epochs,
+        "protein_batch_size": config.protein_batch_size,
         "group_size": config.group_size,
         "learning_rate": config.learning_rate,
         "max_grad_norm": config.max_grad_norm,

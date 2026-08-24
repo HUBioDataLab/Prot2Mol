@@ -530,6 +530,8 @@ def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
             "8",
             "--max_steps",
             "1",
+            "--protein_batch_size",
+            "2",
             "--no-train_on_evaluation_panel_only",
             "--eval_proteins",
             "1",
@@ -553,6 +555,8 @@ def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
 
     assert summary["checkpoint"] is None
     assert summary["final_model"] is None
+    assert summary["global_step"] == 1
+    assert summary["proteins_seen"] == 2
     assert summary["save_final_artifacts"] is False
     assert not (output / "checkpoint-1").exists()
     assert not (output / "final").exists()
