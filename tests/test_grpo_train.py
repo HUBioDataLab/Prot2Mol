@@ -57,6 +57,23 @@ class FakeFusionDTI(torch.nn.Module):
         return torch.tensor(values).clamp(0.0, 1.0)
 
 
+class FakeInternalReward(torch.nn.Module):
+    protein_representation = "sequence"
+    molecule_representation = "selfies"
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("anchor", torch.zeros(()))
+
+    def forward(self, proteins, molecules):
+        assert all(value in {"AC", "GT"} for value in proteins)
+        assert all(value.startswith("[") for value in molecules)
+        return torch.tensor([0.4 + 0.05 * len(value) for value in molecules]).clamp(
+            0.0,
+            1.0,
+        )
+
+
 class FakeWandbRun:
     id = "test-run"
 
@@ -163,6 +180,20 @@ def test_unique_proteins_require_and_join_structure_aware_sequences(tmp_path):
     ]
     with pytest.raises(ValueError, match="requires a separate SaProt/Foldseek"):
         grpo_train.load_unique_training_proteins(train)
+
+
+def test_unique_proteins_use_plain_sequences_for_internal_reward(tmp_path):
+    train, _, _ = _write_random_split(tmp_path)
+
+    proteins = grpo_train.load_unique_training_proteins(
+        train,
+        require_structure_aware=False,
+    )
+
+    assert proteins == [
+        grpo_train.ProteinRecord("P1", "AC", "AC"),
+        grpo_train.ProteinRecord("P2", "GT", "GT"),
+    ]
 
 
 def test_training_property_stats_use_unique_active_training_molecules(tmp_path):
@@ -276,6 +307,29 @@ def test_grpo_run_refuses_existing_material_outputs_and_stale_checkpoints(tmp_pa
     (clean_output / "checkpoint-3").mkdir()
     with pytest.raises(FileExistsError, match="pre-existing GRPO checkpoint"):
         runner.save_checkpoint(epoch=0, next_index=0)
+
+
+def test_full_policy_reference_is_independent_and_frozen(monkeypatch):
+    policy, _ = _tiny_policy(monkeypatch)
+    policy.update_trainable_components(
+        trainable_encoder=True,
+        trainable_projection=True,
+        trainable_decoder=True,
+    )
+
+    reference = grpo_train._build_reference_policy(
+        policy,
+        share_conditioner=False,
+    )
+
+    assert reference.protein_encoder is not policy.protein_encoder
+    assert reference.conditioning_projection is not policy.conditioning_projection
+    assert reference.molecule_decoder is not policy.molecule_decoder
+    assert all(not parameter.requires_grad for parameter in reference.parameters())
+    before = next(reference.protein_encoder.parameters()).detach().clone()
+    with torch.no_grad():
+        next(policy.protein_encoder.parameters()).add_(1.0)
+    assert torch.equal(next(reference.protein_encoder.parameters()), before)
 
 
 def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
@@ -411,6 +465,7 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "reward_eligible",
         "activity_reward",
         "activity_probability",
+        "predicted_active",
         "property_shaped_reward",
         "final_reward",
         "logp_penalty_factor",
@@ -439,6 +494,10 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     logged = [values for _, values in fake_runs[0].logs]
     assert any("grpo/reward_mean" in values for values in logged)
     assert any("grpo/valid_activity_probability_mean" in values for values in logged)
+    assert any(
+        "grpo/valid_activity_probability_active_fraction" in values
+        for values in logged
+    )
     assert any("grpo/property_penalty_factor_mean" in values for values in logged)
     assert any("grpo/heavy_atom_penalty_factor_mean" in values for values in logged)
     assert any("grpo/internal_diversity_mean" in values for values in logged)
@@ -450,6 +509,10 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any(values.get("grpo/sequence_normalized_loss") == 1.0 for values in logged)
     assert any("eval/fcd_macro" in values for values in logged)
     assert any("eval/activity_probability_mean_macro" in values for values in logged)
+    assert any(
+        "eval/activity_probability_active_fraction_macro" in values
+        for values in logged
+    )
     assert any("eval/logp_violation_fraction_macro" in values for values in logged)
     assert any("eval/heavy_atom_violation_fraction_macro" in values for values in logged)
     assert any("eval/internal_diversity_mean_macro" in values for values in logged)
@@ -602,3 +665,135 @@ def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
     assert not (output / "final").exists()
     assert not (output / "evaluation" / "start").exists()
     assert (output / "evaluation" / "end" / "metrics.json").exists()
+
+
+def test_internal_reward_runner_uses_plain_proteins_and_selfies(tmp_path, monkeypatch):
+    train, validation, _ = _write_random_split(tmp_path)
+    generator = tmp_path / "generator"
+    generator.mkdir()
+    reward_checkpoint = tmp_path / "reward"
+    reward_checkpoint.mkdir()
+    output = tmp_path / "internal-reward"
+    policy, molecule_tokenizer = _tiny_policy(monkeypatch)
+
+    monkeypatch.setattr(
+        grpo_train,
+        "load_molgen_tokenizer",
+        lambda **kwargs: molecule_tokenizer,
+    )
+    monkeypatch.setattr(
+        grpo_train,
+        "get_protein_tokenizer",
+        lambda *args, **kwargs: ProteinTokenizer(),
+    )
+    monkeypatch.setattr(
+        grpo_train,
+        "load_prot2mol_inference_model",
+        lambda **kwargs: policy,
+    )
+    monkeypatch.setattr(
+        grpo_train.InternalRewardModelActivityScorer,
+        "from_pretrained",
+        lambda *args, **kwargs: FakeInternalReward(),
+    )
+    monkeypatch.setattr(grpo_train.wandb, "init", lambda **kwargs: FakeWandbRun())
+    monkeypatch.setattr(
+        grpo_train.wandb,
+        "Table",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    config = grpo_train.parse_arguments(
+        [
+            "--train_parquet_path",
+            str(train),
+            "--validation_parquet_path",
+            str(validation),
+            "--generator_checkpoint",
+            str(generator),
+            "--reward_backend",
+            "internal",
+            "--internal_reward_model_path",
+            str(reward_checkpoint),
+            "--output_dir",
+            str(output),
+            "--device",
+            "cpu",
+            "--precision",
+            "fp32",
+            "--max_mol_len",
+            "5",
+            "--prot_max_length",
+            "4",
+            "--n_layer",
+            "1",
+            "--n_head",
+            "2",
+            "--n_emb",
+            "8",
+            "--evaluation_only",
+            "--no-train_on_evaluation_panel_only",
+            "--eval_proteins",
+            "1",
+            "--eval_samples_per_protein",
+            "8",
+            "--min_fcd_reference_actives",
+            "2",
+            "--eval_steps",
+            "0",
+            "--save_steps",
+            "0",
+            "--no-save_final_artifacts",
+            "--wandb_mode",
+            "disabled",
+        ]
+    )
+    runner = grpo_train.GRPOTrainingRun(config)
+    runner._fcd = lambda ref, gen: float(len(ref) + len(gen))
+
+    summary = runner.run()
+
+    assert summary["evaluation_only"] is True
+    cohort = pd.read_parquet(output / "cohort.parquet")
+    assert cohort["reward_protein_representation"].tolist() == ["sequence"]
+    assert cohort["reward_protein_sequence"].tolist() == ["AC"]
+    assert cohort["structure_aware_sequence"].isna().all()
+    rows = pd.read_parquet(
+        output / "evaluation" / "end" / "generated_molecules.parquet"
+    )
+    assert rows["activity_probability"].gt(0.0).all()
+    assert rows["predicted_active"].all()
+
+
+def test_internal_reward_cli_contract_requires_checkpoint(tmp_path):
+    base = [
+        "--train_parquet_path",
+        str(tmp_path / "train.parquet"),
+        "--validation_parquet_path",
+        str(tmp_path / "validation.parquet"),
+        "--generator_checkpoint",
+        str(tmp_path / "generator"),
+        "--output_dir",
+        str(tmp_path / "output"),
+        "--reward_backend",
+        "internal",
+    ]
+
+    with pytest.raises(ValueError, match="internal reward backend requires"):
+        grpo_train.parse_arguments(base)
+
+    config = grpo_train.parse_arguments(
+        [*base, "--internal_reward_model_path", str(tmp_path / "reward")]
+    )
+    assert config.reward_backend == "internal"
+    assert config.activity_probability_threshold == pytest.approx(0.5)
+
+    with pytest.raises(ValueError, match="activity_probability_threshold"):
+        grpo_train.parse_arguments(
+            [
+                *base,
+                "--internal_reward_model_path",
+                str(tmp_path / "reward"),
+                "--activity_probability_threshold",
+                "1.0",
+            ]
+        )

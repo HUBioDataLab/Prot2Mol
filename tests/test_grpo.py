@@ -318,6 +318,9 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
     assert result.metrics["grpo/terminated_fraction"] == 1.0
     assert result.metrics["grpo/truncated_fraction"] == 0.0
     assert result.metrics["grpo/property_count"] == 16.0
+    assert result.metrics[
+        "grpo/valid_activity_probability_active_fraction"
+    ] == pytest.approx(0.625)
     assert 0.0 <= result.metrics["grpo/qed_mean"] <= 1.0
     assert result.metrics["grpo/sas_mean"] > 0.0
     assert math.isfinite(result.metrics["grpo/logp_mean"])
@@ -336,6 +339,13 @@ def test_fake_gpt2_grpo_step_runs_rollout_reward_and_policy_update(monkeypatch):
         torch.equal(parameter, reference_before[name])
         for name, parameter in reference_policy.named_parameters()
     )
+
+
+def test_grpo_activity_probability_threshold_must_be_internal_probability():
+    with pytest.raises(ValueError, match="activity_probability_threshold"):
+        GRPOConfig(activity_probability_threshold=0.0)
+    with pytest.raises(ValueError, match="activity_probability_threshold"):
+        GRPOConfig(activity_probability_threshold=1.0)
 
 
 def test_legacy_pad_rollout_uses_pad_start_and_scores_prefix_actions(monkeypatch):

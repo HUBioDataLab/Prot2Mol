@@ -26,7 +26,7 @@ def _print_help() -> None:
     print("")
     print("Commands:")
     print("  train     Run training pipeline")
-    print("  grpo      Run FusionDTI-rewarded GRPO post-training")
+    print("  grpo      Run activity-rewarded GRPO post-training")
     print("  generate  Run molecule generation pipeline")
     print("")
     print("Examples:")

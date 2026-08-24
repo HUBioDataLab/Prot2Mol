@@ -38,6 +38,7 @@ from ..io.hf_utils import (
 )
 from ..rewards import (
     FusionDTIActivityScorer,
+    InternalRewardModelActivityScorer,
     TargetActivePropertyStats,
     TargetPropertyShapedActivityScorer,
     internal_diversity_factors,
@@ -154,6 +155,7 @@ def load_unique_training_proteins(
     structure_aware_key_column: str = "protein_accession",
     structure_aware_sequence_column: str | None = None,
     required_protein_ids: Sequence[str] | None = None,
+    require_structure_aware: bool = True,
 ) -> list[ProteinRecord]:
     """Load one stable record per unique amino-acid sequence from the train split."""
 
@@ -168,18 +170,22 @@ def load_unique_training_proteins(
 
     embedded_structure_column = structure_aware_sequence_column
     structure_mapping: dict[str, str] | None = None
-    if structure_aware_path is not None:
+    if require_structure_aware and structure_aware_path is not None:
         structure_mapping, embedded_structure_column = _load_structure_mapping(
             Path(structure_aware_path).expanduser().resolve(),
             key_column=structure_aware_key_column,
             sequence_column=structure_aware_sequence_column,
         )
-    elif embedded_structure_column is None:
+    elif require_structure_aware and embedded_structure_column is None:
         embedded_structure_column = _first_available(
             names,
             STRUCTURE_AWARE_COLUMN_CANDIDATES,
         )
-    if structure_mapping is None and embedded_structure_column not in names:
+    if (
+        require_structure_aware
+        and structure_mapping is None
+        and embedded_structure_column not in names
+    ):
         raise ValueError(
             "FusionDTI requires a separate SaProt/Foldseek structure-aware sequence. "
             f"The random-split train file contains only plain amino-acid sequences. "
@@ -203,7 +209,11 @@ def load_unique_training_proteins(
         )
     if structure_mapping is not None and lookup_column not in columns:
         columns.append(lookup_column)
-    if structure_mapping is None and embedded_structure_column not in columns:
+    if (
+        require_structure_aware
+        and structure_mapping is None
+        and embedded_structure_column not in columns
+    ):
         columns.append(str(embedded_structure_column))
 
     by_sequence: dict[str, ProteinRecord] = {}
@@ -215,7 +225,9 @@ def load_unique_training_proteins(
             continue
         if required_ids is not None and protein_id not in required_ids:
             continue
-        if structure_mapping is not None:
+        if not require_structure_aware:
+            reward_sequence = sequence
+        elif structure_mapping is not None:
             mapping_key = str(row[lookup_column] or "").strip()
             reward_sequence = structure_mapping.get(mapping_key, "")
             if not reward_sequence:
@@ -228,12 +240,14 @@ def load_unique_training_proteins(
                 if sequence not in by_sequence:
                     missing_mapping_sequences.setdefault(sequence, protein_id)
                 continue
-        if not _looks_like_structure_aware_sequence(reward_sequence):
+        if require_structure_aware and not _looks_like_structure_aware_sequence(
+            reward_sequence
+        ):
             raise ValueError(
                 f"Protein {protein_id!r} does not contain a SaProt residue/3Di "
                 "paired sequence; refusing to pass a plain sequence to FusionDTI"
             )
-        if reward_sequence[0::2] != sequence:
+        if require_structure_aware and reward_sequence[0::2] != sequence:
             raise ValueError(
                 f"Protein {protein_id!r} structure-aware amino-acid track does not "
                 "exactly match its generator protein sequence"
@@ -246,7 +260,7 @@ def load_unique_training_proteins(
                 "One amino-acid sequence maps to multiple structure-aware sequences: "
                 f"{previous.protein_id!r}, {protein_id!r}"
             )
-    if missing_mapping_sequences:
+    if require_structure_aware and missing_mapping_sequences:
         examples = sorted(missing_mapping_sequences.values())[:5]
         raise ValueError(
             f"Structure-aware mapping is incomplete for {len(missing_mapping_sequences)} "
@@ -258,7 +272,7 @@ def load_unique_training_proteins(
         missing_ids = sorted(required_ids.difference(found_ids))
         if missing_ids:
             raise ValueError(
-                f"Required protein IDs were not found with structure mappings: {missing_ids[:5]}"
+                f"Required protein IDs were not found in the usable cohort: {missing_ids[:5]}"
             )
     if not proteins:
         raise ValueError("No usable unique proteins were found in the training split")
@@ -434,8 +448,18 @@ def select_evaluation_targets(
     ]
 
 
-def _build_reference_policy(policy: torch.nn.Module) -> torch.nn.Module:
-    """Copy only the decoder while sharing the already-frozen conditioner."""
+def _build_reference_policy(
+    policy: torch.nn.Module,
+    *,
+    share_conditioner: bool = True,
+) -> torch.nn.Module:
+    """Build a fixed reference, sharing only conditioners that stay frozen."""
+
+    if not share_conditioner:
+        reference = copy.deepcopy(policy)
+        reference.requires_grad_(False)
+        reference.eval()
+        return reference
 
     reference = copy.copy(policy)
     reference._modules = policy._modules.copy()
@@ -615,10 +639,15 @@ class GRPOTrainingRun:
             self.config.train_parquet_path,
             protein_id_column=self.config.protein_id_column,
             protein_sequence_column=self.config.protein_sequence_column,
-            structure_aware_path=self.config.structure_aware_path,
+            structure_aware_path=(
+                self.config.structure_aware_path
+                if self.config.reward_backend == "fusiondti"
+                else None
+            ),
             structure_aware_key_column=self.config.structure_aware_key_column,
             structure_aware_sequence_column=self.config.structure_aware_sequence_column,
             required_protein_ids=required_protein_ids,
+            require_structure_aware=self.config.reward_backend == "fusiondti",
         )
         references = load_active_references(
             self.config.validation_parquet_path,
@@ -675,7 +704,17 @@ class GRPOTrainingRun:
                 "cohort_index": index,
                 "protein_id": target.protein.protein_id,
                 "protein_sequence": target.protein.protein_sequence,
-                "structure_aware_sequence": target.protein.reward_protein_sequence,
+                "structure_aware_sequence": (
+                    target.protein.reward_protein_sequence
+                    if self.config.reward_backend == "fusiondti"
+                    else None
+                ),
+                "reward_protein_sequence": target.protein.reward_protein_sequence,
+                "reward_protein_representation": (
+                    "structure_aware"
+                    if self.config.reward_backend == "fusiondti"
+                    else "sequence"
+                ),
                 "protein_length": len(target.protein.protein_sequence),
                 "validation_active_reference_count": len(
                     target.active_reference_smiles
@@ -701,6 +740,11 @@ class GRPOTrainingRun:
             "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
             "generator_max_protein_length": self.config.prot_max_length,
             "reward_max_protein_residues": self.config.reward_protein_max_residues,
+            "reward_backend": self.config.reward_backend,
+            "internal_reward_model_path": self.config.internal_reward_model_path,
+            "activity_probability_threshold": (
+                self.config.activity_probability_threshold
+            ),
             "minimum_unique_active_references": self.config.min_fcd_reference_actives,
             "property_reward_shaping": self.config.property_reward_shaping,
             "property_statistics_source": "unique canonical training-split actives",
@@ -785,21 +829,31 @@ class GRPOTrainingRun:
                 f"Requested molecule length {self.config.max_mol_len} exceeds the "
                 f"checkpoint position limit {position_limit}"
             )
-        self.reference_policy = _build_reference_policy(self.policy)
         self.policy.update_trainable_components(
-            trainable_encoder=False,
-            trainable_projection=False,
+            trainable_encoder=self.config.train_policy_encoder,
+            trainable_projection=self.config.train_policy_encoder,
             trainable_decoder=True,
         )
-        activity_scorer = FusionDTIActivityScorer.from_pretrained(
-            dataset=self.config.fusiondti_dataset,
-            device=self.device,
-            batch_size=self.config.reward_batch_size,
-            max_length=self.config.reward_max_length,
-            cache_dir=self.config.models_base,
-            local_files_only=self.config.local_files_only,
-            protein_cache_size=self.config.reward_protein_cache_size,
+        self.reference_policy = _build_reference_policy(
+            self.policy,
+            share_conditioner=not self.config.train_policy_encoder,
         )
+        if self.config.reward_backend == "fusiondti":
+            activity_scorer = FusionDTIActivityScorer.from_pretrained(
+                dataset=self.config.fusiondti_dataset,
+                device=self.device,
+                batch_size=self.config.reward_batch_size,
+                max_length=self.config.reward_max_length,
+                cache_dir=self.config.models_base,
+                local_files_only=self.config.local_files_only,
+                protein_cache_size=self.config.reward_protein_cache_size,
+            )
+        else:
+            activity_scorer = InternalRewardModelActivityScorer.from_pretrained(
+                self.config.internal_reward_model_path,
+                device=self.device,
+                batch_size=self.config.reward_batch_size,
+            )
         self.reward_scorer = (
             TargetPropertyShapedActivityScorer(
                 activity_scorer,
@@ -881,13 +935,21 @@ class GRPOTrainingRun:
                 ),
                 diversity_morgan_radius=self.config.diversity_morgan_radius,
                 diversity_morgan_bits=self.config.diversity_morgan_bits,
+                activity_probability_threshold=(
+                    self.config.activity_probability_threshold
+                ),
                 precision=self.config.precision,
                 generation_start_mode=self.config.generation_start_mode,
             ),
         )
         counts = self.policy.parameter_counts()
         LOGGER.info("Policy parameters: %s", counts)
-        LOGGER.info("Only the molecule decoder is trainable")
+        LOGGER.info(
+            "Trainable policy scope: %s",
+            "protein encoder + projection + decoder"
+            if self.config.train_policy_encoder
+            else "molecule decoder only",
+        )
 
     def _property_reward_contract(self) -> dict[str, Any]:
         rows = [
@@ -905,6 +967,20 @@ class GRPOTrainingRun:
         ).hexdigest()
         return {
             "enabled": self.config.property_reward_shaping,
+            "reward_backend": self.config.reward_backend,
+            "internal_reward_model_path": (
+                str(
+                    Path(self.config.internal_reward_model_path)
+                    .expanduser()
+                    .resolve()
+                )
+                if self.config.internal_reward_model_path
+                else None
+            ),
+            "activity_probability_threshold": (
+                self.config.activity_probability_threshold
+            ),
+            "train_policy_encoder": self.config.train_policy_encoder,
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
@@ -1058,7 +1134,9 @@ class GRPOTrainingRun:
                 "unique_training_proteins": len(self.proteins),
                 "source_unique_proteins": self.source_unique_protein_count,
                 "evaluation_proteins": len(self.evaluation_targets),
-                "reward_requires_structure_aware_sequence": True,
+                "reward_requires_structure_aware_sequence": (
+                    self.config.reward_backend == "fusiondti"
+                ),
                 "reward_requires_eos": True,
             }
         )
@@ -1207,9 +1285,19 @@ class GRPOTrainingRun:
             for name in diagnostic_names
         }
         if valid_indices:
+            reward_molecule_representation = getattr(
+                self.reward_scorer,
+                "molecule_representation",
+                "smiles",
+            )
+            reward_molecules = (
+                selfies
+                if reward_molecule_representation == "selfies"
+                else smiles
+            )
             reward_values = self.reward_scorer(
                 [target.protein.reward_protein_sequence] * len(valid_indices),
-                [selfies[index] for index in valid_indices],
+                [reward_molecules[index] for index in valid_indices],
             ).numpy()
             rewards[valid_indices] = reward_values
             diagnostics_provider = getattr(
@@ -1217,17 +1305,21 @@ class GRPOTrainingRun:
                 "last_diagnostics",
                 None,
             )
+            valid_diagnostics: Mapping[str, Any] = {}
             if callable(diagnostics_provider):
                 valid_diagnostics = diagnostics_provider()
                 for name in diagnostic_names:
+                    if name not in valid_diagnostics:
+                        continue
                     values = np.asarray(valid_diagnostics[name], dtype=np.float32)
                     if len(values) != len(valid_indices):
                         raise ValueError(
                             f"Evaluation reward diagnostic {name!r} is misaligned"
                         )
                     diagnostics[name][valid_indices] = values
-            else:
+            if "activity_probability" not in valid_diagnostics:
                 diagnostics["activity_probability"][valid_indices] = reward_values
+            if "logp_penalty_factor" not in valid_diagnostics:
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
                 diagnostics["heavy_atom_penalty_factor"][valid_indices] = 1.0
@@ -1301,9 +1393,25 @@ class GRPOTrainingRun:
             "activity_probability_mean": float(
                 diagnostics["activity_probability"].mean()
             ),
+            "activity_probability_active_fraction": float(
+                np.mean(
+                    diagnostics["activity_probability"]
+                    >= self.config.activity_probability_threshold
+                )
+            ),
             "valid_activity_probability_mean": (
                 float(
                     diagnostics["activity_probability"][valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "valid_activity_probability_active_fraction": (
+                float(
+                    np.mean(
+                        diagnostics["activity_probability"][valid_indices]
+                        >= self.config.activity_probability_threshold
+                    )
                 )
                 if valid_indices
                 else 0.0
@@ -1486,6 +1594,10 @@ class GRPOTrainingRun:
                 "activity_probability": float(
                     diagnostics["activity_probability"][index]
                 ),
+                "predicted_active": bool(
+                    diagnostics["activity_probability"][index]
+                    >= self.config.activity_probability_threshold
+                ),
                 "property_shaped_reward": float(property_rewards[index]),
                 "final_reward": float(rewards[index]),
                 "logp_penalty_factor": float(
@@ -1593,6 +1705,10 @@ class GRPOTrainingRun:
             "generator_checkpoint": str(
                 Path(self.config.generator_checkpoint).expanduser().resolve()
             ),
+            "reward_backend": self.config.reward_backend,
+            "activity_probability_threshold": (
+                self.config.activity_probability_threshold
+            ),
         }
         try:
             pq.write_table(
@@ -1662,9 +1778,17 @@ class GRPOTrainingRun:
                 rows,
                 "activity_probability_mean",
             ),
+            "eval/activity_probability_active_fraction_macro": self._macro(
+                rows,
+                "activity_probability_active_fraction",
+            ),
             "eval/valid_activity_probability_mean_macro": self._macro(
                 rows,
                 "valid_activity_probability_mean",
+            ),
+            "eval/valid_activity_probability_active_fraction_macro": self._macro(
+                rows,
+                "valid_activity_probability_active_fraction",
             ),
             "eval/property_penalty_factor_mean_macro": self._macro(
                 rows,
@@ -1803,7 +1927,9 @@ class GRPOTrainingRun:
                 "property_shaped_reward_mean",
                 "valid_property_shaped_reward_mean",
                 "activity_probability_mean",
+                "activity_probability_active_fraction",
                 "valid_activity_probability_mean",
+                "valid_activity_probability_active_fraction",
                 "property_penalty_factor_mean",
                 "logp_penalty_factor_mean",
                 "sas_penalty_factor_mean",
@@ -2121,6 +2247,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     model.add_argument("--min_mol_len", type=int, default=3)
     model.add_argument("--prot_max_length", type=int, default=1000)
     model.add_argument(
+        "--train_policy_encoder",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Train the generator protein encoder and conditioning projection in "
+            "addition to the molecule decoder"
+        ),
+    )
+    model.add_argument(
         "--generation_start_mode",
         choices=["tokenizer_bos", "legacy_pad"],
         default="tokenizer_bos",
@@ -2130,7 +2265,13 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
 
-    reward = parser.add_argument_group("Frozen FusionDTI reward")
+    reward = parser.add_argument_group("Frozen activity reward")
+    reward.add_argument(
+        "--reward_backend",
+        choices=["fusiondti", "internal"],
+        default="fusiondti",
+    )
+    reward.add_argument("--internal_reward_model_path", default=None)
     reward.add_argument(
         "--fusiondti_dataset",
         choices=["BindingDB", "Biosnap", "Human"],
@@ -2140,6 +2281,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     reward.add_argument("--reward_max_length", type=int, default=512)
     reward.add_argument("--reward_protein_max_residues", type=int, default=510)
     reward.add_argument("--reward_protein_cache_size", type=int, default=64)
+    reward.add_argument("--activity_probability_threshold", type=float, default=0.5)
     reward.add_argument(
         "--property_reward_shaping",
         action=argparse.BooleanOptionalAction,
@@ -2327,11 +2469,20 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError("lr_schedule_steps must be positive when provided")
     if not 0.0 <= config.warmup_ratio < 1.0:
         raise ValueError("warmup_ratio must be in [0, 1)")
-    if config.reward_protein_max_residues > config.reward_max_length - 2:
+    if (
+        config.reward_backend == "fusiondti"
+        and config.reward_protein_max_residues > config.reward_max_length - 2
+    ):
         raise ValueError(
             "reward_protein_max_residues must leave room for FusionDTI's two "
             "protein special tokens"
         )
+    if config.reward_backend == "internal" and not config.internal_reward_model_path:
+        raise ValueError(
+            "internal reward backend requires --internal_reward_model_path"
+        )
+    if not 0.0 < config.activity_probability_threshold < 1.0:
+        raise ValueError("activity_probability_threshold must be in (0, 1)")
     if config.max_mol_len != 200:
         LOGGER.warning(
             "This checkpoint was trained with a 200-token molecule context; got %d",

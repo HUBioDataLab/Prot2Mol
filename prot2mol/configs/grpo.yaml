@@ -29,16 +29,22 @@ grpo:
   max_mol_len: 200
   min_mol_len: 3
   prot_max_length: 1000
+  # Decoder-only is the memory-efficient default. Enable to optimize the
+  # protein encoder and conditioning projection with a fully copied reference.
+  train_policy_encoder: false
   # These July 2025 GPT-2 checkpoints were trained on fixed-width left-padded
   # molecule rows and historically sampled from PAD token 1.
   generation_start_mode: legacy_pad
 
+  reward_backend: fusiondti
+  internal_reward_model_path: null
   fusiondti_dataset: BindingDB
   reward_batch_size: 8
   reward_max_length: 512
   # FusionDTI adds CLS/EOS, so 510 residues is its strict no-truncation limit.
   reward_protein_max_residues: 510
   reward_protein_cache_size: 64
+  activity_probability_threshold: 0.5
   # Shape FusionDTI activity with target-specific training-active chemistry.
   # LogP is unpenalized inside mean +/- 2 std; SAS is unpenalized below
   # mean + 2 std. Heavy atoms use a soft target-specific mean +/- 2 std

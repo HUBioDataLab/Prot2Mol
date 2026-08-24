@@ -37,6 +37,7 @@ class GRPOConfig:
     reward_min: float = 0.0
     reward_max: float = 1.0
     reward_saturation_threshold: float = 0.01
+    activity_probability_threshold: float = 0.5
     require_eos_for_reward: bool = True
     diversity_reward_shaping: bool = False
     diversity_reward_weight: float = 0.5
@@ -86,6 +87,8 @@ class GRPOConfig:
                 "reward_saturation_threshold must be nonnegative and smaller "
                 "than half the reward range"
             )
+        if not 0.0 < self.activity_probability_threshold < 1.0:
+            raise ValueError("activity_probability_threshold must be in (0, 1)")
         if self.precision not in {"fp32", "bf16"}:
             raise ValueError("GRPO precision must be 'fp32' or 'bf16'")
         if self.generation_start_mode not in {"tokenizer_bos", "legacy_pad"}:
@@ -446,6 +449,14 @@ class GRPOTrainer:
                     )
                     aligned[torch.tensor(valid_indices, device=device)] = valid_values
                     diagnostics[name] = aligned
+            if "activity_probability" not in diagnostics:
+                aligned_activity = torch.zeros(
+                    len(generated_smiles),
+                    dtype=torch.float32,
+                    device=device,
+                )
+                aligned_activity[torch.tensor(valid_indices, device=device)] = scored
+                diagnostics["activity_probability"] = aligned_activity
         if diagnostics or self.config.diversity_reward_shaping:
             diagnostics.setdefault(
                 "property_shaped_reward",
@@ -748,6 +759,17 @@ class GRPOTrainer:
                 {
                     "grpo/valid_activity_probability_mean": diagnostic_mean(
                         "activity_probability"
+                    ),
+                    "grpo/valid_activity_probability_active_fraction": (
+                        float(
+                            activity.ge(self.config.activity_probability_threshold)
+                            .float()
+                            .mean()
+                            .detach()
+                            .cpu()
+                        )
+                        if activity is not None and activity.numel()
+                        else 0.0
                     ),
                     "grpo/valid_activity_probability_high_saturation_fraction": (
                         float(

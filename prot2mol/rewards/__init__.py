@@ -20,6 +20,7 @@ from .fusiondti import (
     download_fusiondti_artifacts,
     load_fusiondti_head,
 )
+from .internal import InternalRewardModelActivityScorer
 from .property_shaping import (
     TargetActivePropertyStats,
     TargetPropertyShapedActivityScorer,
@@ -40,6 +41,7 @@ __all__ = [
     "load_fusiondti_head",
     "TargetActivePropertyStats",
     "TargetPropertyShapedActivityScorer",
+    "InternalRewardModelActivityScorer",
     "InternalDiversityResult",
     "internal_diversity_factors",
     "scaffold_diversity_summary",
