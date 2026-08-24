@@ -1982,7 +1982,10 @@ class GRPOTrainingRun:
                             metrics["grpo/terminated_fraction"],
                         )
                     if self.config.eval_steps and global_step % self.config.eval_steps == 0:
-                        self.evaluate(global_step=global_step)
+                        self.evaluate(
+                            global_step=global_step,
+                            snapshot_name=f"step-{global_step:06d}",
+                        )
                     if self.config.save_steps and global_step % self.config.save_steps == 0:
                         self.save_checkpoint(epoch=last_epoch, next_index=last_next_index)
                 self.start_index = 0

@@ -372,6 +372,18 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert (output / "cohort.parquet").exists()
     assert (output / "evaluation" / "start" / "generated_molecules.parquet").exists()
     assert (output / "evaluation" / "start" / "per_protein_metrics.parquet").exists()
+    assert (
+        output
+        / "evaluation"
+        / "step-000001"
+        / "generated_molecules.parquet"
+    ).exists()
+    assert (
+        output
+        / "evaluation"
+        / "step-000002"
+        / "per_protein_metrics.parquet"
+    ).exists()
     assert (output / "evaluation" / "end" / "generated_molecules.parquet").exists()
     assert (output / "evaluation" / "end" / "per_protein_metrics.parquet").exists()
     endpoint_rows = pd.read_parquet(
