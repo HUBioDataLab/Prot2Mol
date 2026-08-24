@@ -149,6 +149,7 @@ grpo:
   # The server has room for checkpoints 200/400 plus the final model while
   # preserving the previous ablation run.
   save_steps: 200
+  save_final_checkpoint: true
   wandb_project: prot2mol-grpo
   wandb_entity: null
   wandb_run_name: esm2-legacy-hac-g16-20ep

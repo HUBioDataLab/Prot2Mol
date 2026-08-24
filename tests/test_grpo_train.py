@@ -288,7 +288,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     output = tmp_path / "output"
     policy, molecule_tokenizer = _tiny_policy(monkeypatch)
     resumed_policy, _ = _tiny_policy(monkeypatch)
-    policies = iter((policy, resumed_policy))
+    model_only_policy, _ = _tiny_policy(monkeypatch)
+    policies = iter((policy, resumed_policy, model_only_policy))
     fake_runs = []
     wandb_init_calls = []
 
@@ -479,6 +480,31 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert wandb_init_calls[1]["id"] == "test-run"
     assert wandb_init_calls[1]["resume"] == "must"
     assert fake_runs[1].finished is True
+
+    model_only_output = tmp_path / "model-only-output"
+    model_only_config = grpo_train.parse_arguments(
+        [
+            *arguments,
+            "--output_dir",
+            str(model_only_output),
+            "--resume_from_checkpoint",
+            str(output / "checkpoint-1"),
+            "--save_steps",
+            "0",
+            "--no-save_final_checkpoint",
+        ]
+    )
+    model_only_runner = grpo_train.GRPOTrainingRun(model_only_config)
+    model_only_runner._fcd = lambda ref, gen: float(len(ref) + len(gen))
+
+    model_only_summary = model_only_runner.run()
+
+    assert model_only_summary["global_step"] == 2
+    assert model_only_summary["checkpoint"] is None
+    assert model_only_summary["save_final_checkpoint"] is False
+    assert (model_only_output / "final" / "pytorch_model.bin").exists()
+    assert not (model_only_output / "checkpoint-2").exists()
+    assert fake_runs[2].finished is True
 
 
 def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):

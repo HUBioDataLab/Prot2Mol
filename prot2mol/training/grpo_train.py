@@ -2057,10 +2057,11 @@ class GRPOTrainingRun:
             checkpoint = None
             final_dir = None
             if self.config.save_final_artifacts:
-                checkpoint = self.save_checkpoint(
-                    epoch=last_epoch,
-                    next_index=last_next_index,
-                )
+                if self.config.save_final_checkpoint:
+                    checkpoint = self.save_checkpoint(
+                        epoch=last_epoch,
+                        next_index=last_next_index,
+                    )
                 final_dir = self._save_final_model()
             summary = {
                 "global_step": self.trainer.global_step,
@@ -2072,6 +2073,7 @@ class GRPOTrainingRun:
                 "checkpoint": str(checkpoint) if checkpoint is not None else None,
                 "final_model": str(final_dir) if final_dir is not None else None,
                 "save_final_artifacts": self.config.save_final_artifacts,
+                "save_final_checkpoint": self.config.save_final_checkpoint,
                 "evaluation_only": False,
                 "start_snapshot": str(self.output_dir / "evaluation" / "start"),
                 "end_snapshot": str(self.output_dir / "evaluation" / "end"),
@@ -2253,6 +2255,16 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Save the final resumable trainer checkpoint and full model; disable "
             "for metrics-only tuning trials"
+        ),
+    )
+    output.add_argument(
+        "--save_final_checkpoint",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Save the final resumable optimizer checkpoint before exporting the "
+            "full model; disable when an earlier checkpoint is sufficient for "
+            "resume and storage is constrained"
         ),
     )
     output.add_argument("--wandb_project", default="prot2mol-grpo")
