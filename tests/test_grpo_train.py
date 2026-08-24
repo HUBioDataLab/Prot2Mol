@@ -455,3 +455,94 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert wandb_init_calls[1]["id"] == "test-run"
     assert wandb_init_calls[1]["resume"] == "must"
     assert fake_runs[1].finished is True
+
+
+def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
+    train, validation, structures = _write_random_split(tmp_path)
+    generator = tmp_path / "generator"
+    generator.mkdir()
+    output = tmp_path / "metrics-only"
+    policy, molecule_tokenizer = _tiny_policy(monkeypatch)
+
+    monkeypatch.setattr(
+        grpo_train,
+        "load_molgen_tokenizer",
+        lambda **kwargs: molecule_tokenizer,
+    )
+    monkeypatch.setattr(
+        grpo_train,
+        "get_protein_tokenizer",
+        lambda *args, **kwargs: ProteinTokenizer(),
+    )
+    monkeypatch.setattr(
+        grpo_train,
+        "load_prot2mol_inference_model",
+        lambda **kwargs: policy,
+    )
+    monkeypatch.setattr(
+        grpo_train.FusionDTIActivityScorer,
+        "from_pretrained",
+        lambda **kwargs: FakeFusionDTI(),
+    )
+    monkeypatch.setattr(grpo_train.wandb, "init", lambda **kwargs: FakeWandbRun())
+    monkeypatch.setattr(
+        grpo_train.wandb,
+        "Table",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    config = grpo_train.parse_arguments(
+        [
+            "--train_parquet_path",
+            str(train),
+            "--validation_parquet_path",
+            str(validation),
+            "--structure_aware_path",
+            str(structures),
+            "--generator_checkpoint",
+            str(generator),
+            "--output_dir",
+            str(output),
+            "--device",
+            "cpu",
+            "--precision",
+            "fp32",
+            "--max_mol_len",
+            "5",
+            "--prot_max_length",
+            "4",
+            "--n_layer",
+            "1",
+            "--n_head",
+            "2",
+            "--n_emb",
+            "8",
+            "--max_steps",
+            "1",
+            "--no-train_on_evaluation_panel_only",
+            "--eval_proteins",
+            "1",
+            "--eval_samples_per_protein",
+            "8",
+            "--min_fcd_reference_actives",
+            "2",
+            "--eval_steps",
+            "0",
+            "--save_steps",
+            "0",
+            "--no-save_final_artifacts",
+            "--wandb_mode",
+            "disabled",
+        ]
+    )
+    runner = grpo_train.GRPOTrainingRun(config)
+    runner._fcd = lambda ref, gen: float(len(ref) + len(gen))
+
+    summary = runner.run()
+
+    assert summary["checkpoint"] is None
+    assert summary["final_model"] is None
+    assert summary["save_final_artifacts"] is False
+    assert not (output / "checkpoint-1").exists()
+    assert not (output / "final").exists()
+    assert (output / "evaluation" / "start" / "metrics.json").exists()
+    assert (output / "evaluation" / "end" / "metrics.json").exists()
