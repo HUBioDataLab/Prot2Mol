@@ -46,6 +46,7 @@ grpo:
 
   epochs: 20
   max_steps: null
+  lr_schedule_steps: null
   protein_batch_size: 1
   group_size: 16
   learning_rate: 1.0e-6

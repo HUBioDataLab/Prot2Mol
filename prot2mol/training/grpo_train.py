@@ -827,7 +827,16 @@ class GRPOTrainingRun:
             if self.config.max_steps is not None
             else requested_rollout_steps
         )
-        total_optimizer_steps = total_rollout_steps * self.config.num_iterations
+        schedule_rollout_steps = (
+            self.config.lr_schedule_steps
+            if self.config.lr_schedule_steps is not None
+            else total_rollout_steps
+        )
+        if schedule_rollout_steps < total_rollout_steps:
+            raise ValueError(
+                "lr_schedule_steps cannot be shorter than the executed rollout steps"
+            )
+        total_optimizer_steps = schedule_rollout_steps * self.config.num_iterations
         warmup_steps = int(total_optimizer_steps * self.config.warmup_ratio)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
@@ -2143,6 +2152,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     training = parser.add_argument_group("GRPO")
     training.add_argument("--epochs", type=int, default=1)
     training.add_argument("--max_steps", type=int, default=None)
+    training.add_argument(
+        "--lr_schedule_steps",
+        type=int,
+        default=None,
+        help=(
+            "Optional planned rollout-step horizon for the LR schedule, allowing "
+            "an early-stopped run to reproduce a longer tuning trajectory"
+        ),
+    )
     training.add_argument("--protein_batch_size", type=int, default=1)
     training.add_argument("--group_size", type=int, default=8)
     training.add_argument("--learning_rate", type=float, default=1.0e-6)
@@ -2254,6 +2272,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     if config.max_steps is not None and config.max_steps < 1:
         raise ValueError("max_steps must be positive when provided")
+    if config.lr_schedule_steps is not None and config.lr_schedule_steps < 1:
+        raise ValueError("lr_schedule_steps must be positive when provided")
     if not 0.0 <= config.warmup_ratio < 1.0:
         raise ValueError("warmup_ratio must be in [0, 1)")
     if config.reward_protein_max_residues > config.reward_max_length - 2:

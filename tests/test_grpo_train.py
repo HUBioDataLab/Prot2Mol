@@ -342,6 +342,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
             "8",
             "--max_steps",
             "2",
+            "--lr_schedule_steps",
+            "4",
             "--no-train_on_evaluation_panel_only",
             "--eval_proteins",
             "1",
