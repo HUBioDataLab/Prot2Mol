@@ -745,6 +745,9 @@ class GRPOTrainingRun:
             "activity_probability_threshold": (
                 self.config.activity_probability_threshold
             ),
+            "activity_threshold_bonus_weight": (
+                self.config.activity_threshold_bonus_weight
+            ),
             "minimum_unique_active_references": self.config.min_fcd_reference_actives,
             "property_reward_shaping": self.config.property_reward_shaping,
             "property_statistics_source": "unique canonical training-split actives",
@@ -752,7 +755,10 @@ class GRPOTrainingRun:
             "property_penalty_strength": self.config.property_penalty_strength,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "property_reward_formula": (
-                "activity_probability * exp(-strength * logp_excess_z^2) * "
+                "((1 - activity_threshold_bonus_weight) * "
+                "activity_probability + activity_threshold_bonus_weight * "
+                "I(activity_probability >= activity_probability_threshold)) * "
+                "exp(-strength * logp_excess_z^2) * "
                 "exp(-strength * sas_excess_z^2) * "
                 "(1 - heavy_atom_penalty_weight * "
                 "(1 - exp(-0.5 * heavy_atom_excess_z^2)))"
@@ -862,6 +868,12 @@ class GRPOTrainingRun:
                 penalty_strength=self.config.property_penalty_strength,
                 heavy_atom_penalty_weight=(
                     self.config.heavy_atom_penalty_weight
+                ),
+                activity_probability_threshold=(
+                    self.config.activity_probability_threshold
+                ),
+                activity_threshold_bonus_weight=(
+                    self.config.activity_threshold_bonus_weight
                 ),
             )
             if self.config.property_reward_shaping
@@ -979,6 +991,9 @@ class GRPOTrainingRun:
             ),
             "activity_probability_threshold": (
                 self.config.activity_probability_threshold
+            ),
+            "activity_threshold_bonus_weight": (
+                self.config.activity_threshold_bonus_weight
             ),
             "train_policy_encoder": self.config.train_policy_encoder,
             "allowed_sigma": self.config.property_allowed_sigma,
@@ -1267,6 +1282,7 @@ class GRPOTrainingRun:
         rewards = np.zeros(len(selfies), dtype=np.float32)
         diagnostic_names = (
             "activity_probability",
+            "activity_optimization_reward",
             "logp_penalty_factor",
             "sas_penalty_factor",
             "heavy_atom_penalty_factor",
@@ -1319,6 +1335,10 @@ class GRPOTrainingRun:
                     diagnostics[name][valid_indices] = values
             if "activity_probability" not in valid_diagnostics:
                 diagnostics["activity_probability"][valid_indices] = reward_values
+            if "activity_optimization_reward" not in valid_diagnostics:
+                diagnostics["activity_optimization_reward"][
+                    valid_indices
+                ] = reward_values
             if "logp_penalty_factor" not in valid_diagnostics:
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
@@ -1399,6 +1419,9 @@ class GRPOTrainingRun:
                     >= self.config.activity_probability_threshold
                 )
             ),
+            "activity_optimization_reward_mean": float(
+                diagnostics["activity_optimization_reward"].mean()
+            ),
             "valid_activity_probability_mean": (
                 float(
                     diagnostics["activity_probability"][valid_indices].mean()
@@ -1412,6 +1435,15 @@ class GRPOTrainingRun:
                         diagnostics["activity_probability"][valid_indices]
                         >= self.config.activity_probability_threshold
                     )
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "valid_activity_optimization_reward_mean": (
+                float(
+                    diagnostics["activity_optimization_reward"][
+                        valid_indices
+                    ].mean()
                 )
                 if valid_indices
                 else 0.0
@@ -1594,6 +1626,9 @@ class GRPOTrainingRun:
                 "activity_probability": float(
                     diagnostics["activity_probability"][index]
                 ),
+                "activity_optimization_reward": float(
+                    diagnostics["activity_optimization_reward"][index]
+                ),
                 "predicted_active": bool(
                     diagnostics["activity_probability"][index]
                     >= self.config.activity_probability_threshold
@@ -1709,6 +1744,9 @@ class GRPOTrainingRun:
             "activity_probability_threshold": (
                 self.config.activity_probability_threshold
             ),
+            "activity_threshold_bonus_weight": (
+                self.config.activity_threshold_bonus_weight
+            ),
         }
         try:
             pq.write_table(
@@ -1782,6 +1820,10 @@ class GRPOTrainingRun:
                 rows,
                 "activity_probability_active_fraction",
             ),
+            "eval/activity_optimization_reward_mean_macro": self._macro(
+                rows,
+                "activity_optimization_reward_mean",
+            ),
             "eval/valid_activity_probability_mean_macro": self._macro(
                 rows,
                 "valid_activity_probability_mean",
@@ -1789,6 +1831,10 @@ class GRPOTrainingRun:
             "eval/valid_activity_probability_active_fraction_macro": self._macro(
                 rows,
                 "valid_activity_probability_active_fraction",
+            ),
+            "eval/valid_activity_optimization_reward_mean_macro": self._macro(
+                rows,
+                "valid_activity_optimization_reward_mean",
             ),
             "eval/property_penalty_factor_mean_macro": self._macro(
                 rows,
@@ -1928,8 +1974,10 @@ class GRPOTrainingRun:
                 "valid_property_shaped_reward_mean",
                 "activity_probability_mean",
                 "activity_probability_active_fraction",
+                "activity_optimization_reward_mean",
                 "valid_activity_probability_mean",
                 "valid_activity_probability_active_fraction",
+                "valid_activity_optimization_reward_mean",
                 "property_penalty_factor_mean",
                 "logp_penalty_factor_mean",
                 "sas_penalty_factor_mean",
@@ -2283,6 +2331,16 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     reward.add_argument("--reward_protein_cache_size", type=int, default=64)
     reward.add_argument("--activity_probability_threshold", type=float, default=0.5)
     reward.add_argument(
+        "--activity_threshold_bonus_weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Mix this weight of the binary activity-threshold indicator into "
+            "the activity optimization reward while retaining raw probability "
+            "for metrics"
+        ),
+    )
+    reward.add_argument(
         "--property_reward_shaping",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -2446,6 +2504,9 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError("group_size must be at least 2")
     bounded_diversity = {
         "heavy_atom_penalty_weight": config.heavy_atom_penalty_weight,
+        "activity_threshold_bonus_weight": (
+            config.activity_threshold_bonus_weight
+        ),
         "diversity_reward_weight": config.diversity_reward_weight,
         "diversity_mean_similarity_weight": (
             config.diversity_mean_similarity_weight

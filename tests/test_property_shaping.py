@@ -105,6 +105,53 @@ def test_property_shaping_requires_target_statistics():
     with pytest.raises(ValueError, match="Missing target"):
         scorer(["Bb"], ["[C]"])
 
+    with pytest.raises(ValueError, match="activity_threshold_bonus_weight"):
+        TargetPropertyShapedActivityScorer(
+            FakeActivityScorer(),
+            scorer.property_stats,
+            activity_threshold_bonus_weight=1.1,
+        )
+
+
+def test_property_shaping_can_reward_crossing_activity_threshold(monkeypatch):
+    monkeypatch.setattr(
+        property_shaping,
+        "molecular_property_rows",
+        lambda smiles: [
+            {"qed": 0.5, "logp": 2.0, "sas": 3.0, "heavy_atom_count": 20.0},
+            {"qed": 0.5, "logp": 2.0, "sas": 3.0, "heavy_atom_count": 20.0},
+        ],
+    )
+    base = FakeActivityScorer()
+    base.forward = lambda proteins, molecules: torch.tensor([0.49, 0.51])
+    scorer = TargetPropertyShapedActivityScorer(
+        base,
+        {
+            "Aa": TargetActivePropertyStats(
+                active_count=10,
+                logp_mean=2.0,
+                logp_std=1.0,
+                sas_mean=3.0,
+                sas_std=1.0,
+                heavy_atom_mean=20.0,
+                heavy_atom_std=2.0,
+            )
+        },
+        activity_probability_threshold=0.5,
+        activity_threshold_bonus_weight=0.5,
+    )
+
+    rewards = scorer(["Aa", "Aa"], ["[C]", "[O]"])
+    diagnostics = scorer.last_diagnostics()
+
+    assert rewards.tolist() == pytest.approx([0.245, 0.755])
+    assert diagnostics["activity_probability"].tolist() == pytest.approx(
+        [0.49, 0.51]
+    )
+    assert diagnostics["activity_optimization_reward"].tolist() == pytest.approx(
+        [0.245, 0.755]
+    )
+
 
 def test_zero_variance_heavy_atom_reference_uses_one_atom_soft_scale(monkeypatch):
     monkeypatch.setattr(

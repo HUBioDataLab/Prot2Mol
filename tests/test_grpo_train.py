@@ -465,6 +465,7 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "reward_eligible",
         "activity_reward",
         "activity_probability",
+        "activity_optimization_reward",
         "predicted_active",
         "property_shaped_reward",
         "final_reward",
@@ -495,6 +496,10 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("grpo/reward_mean" in values for values in logged)
     assert any("grpo/valid_activity_probability_mean" in values for values in logged)
     assert any(
+        "grpo/valid_activity_optimization_reward_mean" in values
+        for values in logged
+    )
+    assert any(
         "grpo/valid_activity_probability_active_fraction" in values
         for values in logged
     )
@@ -511,6 +516,10 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("eval/activity_probability_mean_macro" in values for values in logged)
     assert any(
         "eval/activity_probability_active_fraction_macro" in values
+        for values in logged
+    )
+    assert any(
+        "eval/activity_optimization_reward_mean_macro" in values
         for values in logged
     )
     assert any("eval/logp_violation_fraction_macro" in values for values in logged)

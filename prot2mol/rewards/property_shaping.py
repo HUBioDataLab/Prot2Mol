@@ -80,6 +80,8 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         allowed_sigma: float = 2.0,
         penalty_strength: float = 0.5,
         heavy_atom_penalty_weight: float = 0.15,
+        activity_probability_threshold: float = 0.5,
+        activity_threshold_bonus_weight: float = 0.0,
     ):
         super().__init__()
         if allowed_sigma <= 0.0:
@@ -88,6 +90,10 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             raise ValueError("penalty_strength must be positive")
         if not 0.0 <= heavy_atom_penalty_weight <= 1.0:
             raise ValueError("heavy_atom_penalty_weight must be in [0, 1]")
+        if not 0.0 < activity_probability_threshold < 1.0:
+            raise ValueError("activity_probability_threshold must be in (0, 1)")
+        if not 0.0 <= activity_threshold_bonus_weight <= 1.0:
+            raise ValueError("activity_threshold_bonus_weight must be in [0, 1]")
         if not property_stats:
             raise ValueError("Property shaping requires target property statistics")
         self.activity_scorer = activity_scorer
@@ -95,6 +101,12 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         self.allowed_sigma = float(allowed_sigma)
         self.penalty_strength = float(penalty_strength)
         self.heavy_atom_penalty_weight = float(heavy_atom_penalty_weight)
+        self.activity_probability_threshold = float(
+            activity_probability_threshold
+        )
+        self.activity_threshold_bonus_weight = float(
+            activity_threshold_bonus_weight
+        )
         self.protein_representation = getattr(
             activity_scorer,
             "protein_representation",
@@ -188,6 +200,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
 
         diagnostics = {
             "activity_probability": [],
+            "activity_optimization_reward": [],
             "logp_penalty_factor": [],
             "sas_penalty_factor": [],
             "heavy_atom_penalty_factor": [],
@@ -249,9 +262,21 @@ class TargetPropertyShapedActivityScorer(nn.Module):
                     1.0 - heavy_atom_gate
                 )
             property_factor = logp_factor * sas_factor * heavy_atom_factor
-            shaped_reward = float(activity[index]) * property_factor
+            activity_probability = float(activity[index])
+            threshold_bonus = float(
+                activity_probability >= self.activity_probability_threshold
+            )
+            activity_optimization_reward = (
+                (1.0 - self.activity_threshold_bonus_weight)
+                * activity_probability
+                + self.activity_threshold_bonus_weight * threshold_bonus
+            )
+            shaped_reward = activity_optimization_reward * property_factor
             rewards.append(shaped_reward)
-            diagnostics["activity_probability"].append(float(activity[index]))
+            diagnostics["activity_probability"].append(activity_probability)
+            diagnostics["activity_optimization_reward"].append(
+                activity_optimization_reward
+            )
             diagnostics["logp_penalty_factor"].append(logp_factor)
             diagnostics["sas_penalty_factor"].append(sas_factor)
             diagnostics["heavy_atom_penalty_factor"].append(heavy_atom_factor)

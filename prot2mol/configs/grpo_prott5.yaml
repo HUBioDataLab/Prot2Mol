@@ -32,6 +32,8 @@ grpo:
   reward_max_length: 512
   reward_protein_max_residues: 510
   reward_protein_cache_size: 64
+  activity_probability_threshold: 0.5
+  activity_threshold_bonus_weight: 0.0
   property_reward_shaping: true
   property_allowed_sigma: 2.0
   property_penalty_strength: 0.5

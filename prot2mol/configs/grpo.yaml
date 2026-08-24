@@ -45,6 +45,8 @@ grpo:
   reward_protein_max_residues: 510
   reward_protein_cache_size: 64
   activity_probability_threshold: 0.5
+  # Optional decision-boundary bonus. Zero preserves pure probability reward.
+  activity_threshold_bonus_weight: 0.0
   # Shape FusionDTI activity with target-specific training-active chemistry.
   # LogP is unpenalized inside mean +/- 2 std; SAS is unpenalized below
   # mean + 2 std. Heavy atoms use a soft target-specific mean +/- 2 std

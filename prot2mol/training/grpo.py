@@ -760,6 +760,9 @@ class GRPOTrainer:
                     "grpo/valid_activity_probability_mean": diagnostic_mean(
                         "activity_probability"
                     ),
+                    "grpo/valid_activity_optimization_reward_mean": diagnostic_mean(
+                        "activity_optimization_reward"
+                    ),
                     "grpo/valid_activity_probability_active_fraction": (
                         float(
                             activity.ge(self.config.activity_probability_threshold)
