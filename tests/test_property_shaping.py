@@ -54,6 +54,9 @@ def test_property_shaping_uses_soft_z_excess_and_zeroes_invalid(monkeypatch):
         {
             "Aa": TargetActivePropertyStats(
                 active_count=100,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
                 logp_mean=3.0,
                 logp_std=1.0,
                 sas_mean=3.0,
@@ -92,6 +95,9 @@ def test_property_shaping_requires_target_statistics():
         {
             "Aa": TargetActivePropertyStats(
                 active_count=2,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
                 logp_mean=2.0,
                 logp_std=1.0,
                 sas_mean=3.0,
@@ -129,6 +135,9 @@ def test_property_shaping_can_reward_crossing_activity_threshold(monkeypatch):
         {
             "Aa": TargetActivePropertyStats(
                 active_count=10,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
                 logp_mean=2.0,
                 logp_std=1.0,
                 sas_mean=3.0,
@@ -153,6 +162,47 @@ def test_property_shaping_can_reward_crossing_activity_threshold(monkeypatch):
     )
 
 
+def test_qed_penalty_uses_target_lower_bound_and_updates_band(monkeypatch):
+    monkeypatch.setattr(
+        property_shaping,
+        "molecular_property_rows",
+        lambda smiles: [
+            {"qed": 0.2, "logp": 2.0, "sas": 3.0, "heavy_atom_count": 20.0},
+            {"qed": 0.3, "logp": 2.0, "sas": 3.0, "heavy_atom_count": 20.0},
+        ],
+    )
+    base = FakeActivityScorer()
+    scorer = TargetPropertyShapedActivityScorer(
+        base,
+        {
+            "Aa": TargetActivePropertyStats(
+                active_count=10,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
+                logp_mean=2.0,
+                logp_std=1.0,
+                sas_mean=3.0,
+                sas_std=1.0,
+                heavy_atom_mean=20.0,
+                heavy_atom_std=2.0,
+            )
+        },
+        qed_penalty_strength=2.0,
+    )
+
+    rewards = scorer(["Aa", "Aa"], ["[C]", "[O]"])
+    diagnostics = scorer.last_diagnostics()
+
+    assert rewards.tolist() == pytest.approx([0.8 * math.exp(-2.0), 0.6])
+    assert diagnostics["qed_penalty_factor"].tolist() == pytest.approx(
+        [math.exp(-2.0), 1.0]
+    )
+    assert diagnostics["qed_deficit_z"].tolist() == pytest.approx([1.0, 0.0])
+    assert diagnostics["qed_violation"].tolist() == [1.0, 0.0]
+    assert diagnostics["property_band_eligible"].tolist() == [0.0, 1.0]
+
+
 def test_activity_threshold_bonus_can_require_target_property_bands(monkeypatch):
     monkeypatch.setattr(
         property_shaping,
@@ -169,6 +219,9 @@ def test_activity_threshold_bonus_can_require_target_property_bands(monkeypatch)
         {
             "Aa": TargetActivePropertyStats(
                 active_count=10,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
                 logp_mean=2.0,
                 logp_std=1.0,
                 sas_mean=3.0,
@@ -211,6 +264,9 @@ def test_zero_variance_heavy_atom_reference_uses_one_atom_soft_scale(monkeypatch
         {
             "Aa": TargetActivePropertyStats(
                 active_count=2,
+                qed_mean=0.5,
+                qed_std=0.1,
+                qed_lower_bound=0.3,
                 logp_mean=2.0,
                 logp_std=1.0,
                 sas_mean=3.0,

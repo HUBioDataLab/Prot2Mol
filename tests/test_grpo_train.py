@@ -203,6 +203,8 @@ def test_training_property_stats_use_unique_active_training_molecules(tmp_path):
 
     assert stats["AC"].active_count == 2
     assert stats["GT"].active_count == 2
+    assert 0.0 <= stats["AC"].qed_lower_bound <= stats["AC"].qed_mean <= 1.0
+    assert stats["AC"].qed_std > 0.0
     assert stats["AC"].logp_std > 0.0
     assert stats["AC"].sas_std > 0.0
     assert stats["AC"].heavy_atom_mean == pytest.approx(1.5)
@@ -613,10 +615,13 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         "activity_threshold_bonus_eligible",
         "property_shaped_reward",
         "final_reward",
+        "qed_penalty_factor",
         "logp_penalty_factor",
         "sas_penalty_factor",
         "heavy_atom_penalty_factor",
         "property_penalty_factor",
+        "qed_deficit_z",
+        "qed_violation",
         "logp_violation",
         "sas_violation",
         "heavy_atom_violation",
@@ -652,6 +657,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
         for values in logged
     )
     assert any("grpo/property_penalty_factor_mean" in values for values in logged)
+    assert any("grpo/qed_penalty_factor_mean" in values for values in logged)
+    assert any("grpo/qed_violation_fraction" in values for values in logged)
     assert any("grpo/heavy_atom_penalty_factor_mean" in values for values in logged)
     assert any("grpo/internal_diversity_mean" in values for values in logged)
     assert any("grpo/diversity_penalty_factor_mean" in values for values in logged)

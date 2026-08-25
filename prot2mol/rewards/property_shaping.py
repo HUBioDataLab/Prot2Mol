@@ -18,6 +18,9 @@ class TargetActivePropertyStats:
     """Property distribution of one target's unique training-set actives."""
 
     active_count: int
+    qed_mean: float
+    qed_std: float
+    qed_lower_bound: float
     logp_mean: float
     logp_std: float
     sas_mean: float
@@ -27,6 +30,9 @@ class TargetActivePropertyStats:
 
     def __post_init__(self) -> None:
         values = (
+            self.qed_mean,
+            self.qed_std,
+            self.qed_lower_bound,
             self.logp_mean,
             self.logp_std,
             self.sas_mean,
@@ -38,6 +44,12 @@ class TargetActivePropertyStats:
             raise ValueError("Property shaping requires at least two active molecules")
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Target active-property statistics must be finite")
+        if not 0.0 <= self.qed_mean <= 1.0:
+            raise ValueError("Target active QED mean must be in [0, 1]")
+        if self.qed_std <= 0.0:
+            raise ValueError("Target active QED standard deviation must be positive")
+        if not 0.0 <= self.qed_lower_bound <= 1.0:
+            raise ValueError("Target active QED lower bound must be in [0, 1]")
         if self.logp_std <= 0.0 or self.sas_std <= 0.0:
             raise ValueError(
                 "Target active-property standard deviations must be positive"
@@ -48,6 +60,9 @@ class TargetActivePropertyStats:
     def as_dict(self, *, allowed_sigma: float) -> dict[str, float | int]:
         return {
             "training_active_property_reference_count": self.active_count,
+            "training_active_qed_mean": self.qed_mean,
+            "training_active_qed_std": self.qed_std,
+            "training_active_qed_lower": self.qed_lower_bound,
             "training_active_logp_mean": self.logp_mean,
             "training_active_logp_std": self.logp_std,
             "training_active_logp_lower": self.logp_mean
@@ -79,6 +94,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         *,
         allowed_sigma: float = 2.0,
         penalty_strength: float = 0.5,
+        qed_penalty_strength: float = 0.0,
         heavy_atom_penalty_weight: float = 0.15,
         activity_probability_threshold: float = 0.5,
         activity_threshold_bonus_weight: float = 0.0,
@@ -89,6 +105,8 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             raise ValueError("allowed_sigma must be positive")
         if penalty_strength <= 0.0:
             raise ValueError("penalty_strength must be positive")
+        if qed_penalty_strength < 0.0:
+            raise ValueError("qed_penalty_strength must be nonnegative")
         if not 0.0 <= heavy_atom_penalty_weight <= 1.0:
             raise ValueError("heavy_atom_penalty_weight must be in [0, 1]")
         if not 0.0 < activity_probability_threshold < 1.0:
@@ -101,6 +119,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         self.property_stats = dict(property_stats)
         self.allowed_sigma = float(allowed_sigma)
         self.penalty_strength = float(penalty_strength)
+        self.qed_penalty_strength = float(qed_penalty_strength)
         self.heavy_atom_penalty_weight = float(heavy_atom_penalty_weight)
         self.activity_probability_threshold = float(
             activity_probability_threshold
@@ -174,7 +193,8 @@ class TargetPropertyShapedActivityScorer(nn.Module):
 
         properties = molecular_property_rows(self._smiles(molecule_sequences))
         property_valid = [
-            row["logp"] is not None
+            row["qed"] is not None
+            and row["logp"] is not None
             and row["sas"] is not None
             and row["heavy_atom_count"] is not None
             for row in properties
@@ -207,16 +227,19 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             "activity_optimization_reward": [],
             "property_band_eligible": [],
             "activity_threshold_bonus_eligible": [],
+            "qed_penalty_factor": [],
             "logp_penalty_factor": [],
             "sas_penalty_factor": [],
             "heavy_atom_penalty_factor": [],
             "property_penalty_factor": [],
+            "qed_deficit_z": [],
             "logp_excess_z": [],
             "sas_excess_z": [],
             "heavy_atom_excess_z": [],
             "logp_violation": [],
             "sas_violation": [],
             "heavy_atom_violation": [],
+            "qed_violation": [],
             "heavy_atom_count": [],
             "property_valid": [],
             "property_shaped_reward": [],
@@ -224,17 +247,33 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         rewards = []
         for index, (protein, row) in enumerate(zip(protein_sequences, properties)):
             stats = self.property_stats[protein]
+            qed = row["qed"]
             logp = row["logp"]
             sas = row["sas"]
             heavy_atom_count = row["heavy_atom_count"]
-            if logp is None or sas is None or heavy_atom_count is None:
+            if (
+                qed is None
+                or logp is None
+                or sas is None
+                or heavy_atom_count is None
+            ):
+                qed_deficit = 0.0
                 logp_excess = 0.0
                 sas_excess = 0.0
                 heavy_atom_excess = 0.0
+                qed_factor = 0.0
                 logp_factor = 0.0
                 sas_factor = 0.0
                 heavy_atom_factor = 0.0
             else:
+                qed_deficit = max(
+                    0.0,
+                    (stats.qed_lower_bound - float(qed))
+                    / max(stats.qed_std, 0.05),
+                )
+                qed_factor = math.exp(
+                    -self.qed_penalty_strength * qed_deficit * qed_deficit
+                )
                 logp_excess = max(
                     0.0,
                     abs(float(logp) - stats.logp_mean) / stats.logp_std
@@ -267,9 +306,14 @@ class TargetPropertyShapedActivityScorer(nn.Module):
                 heavy_atom_factor = 1.0 - self.heavy_atom_penalty_weight * (
                     1.0 - heavy_atom_gate
                 )
-            property_factor = logp_factor * sas_factor * heavy_atom_factor
+            property_factor = (
+                qed_factor * logp_factor * sas_factor * heavy_atom_factor
+            )
             property_band_eligible = float(
                 property_valid[index]
+                and (
+                    self.qed_penalty_strength == 0.0 or qed_deficit == 0.0
+                )
                 and logp_excess == 0.0
                 and sas_excess == 0.0
                 and heavy_atom_excess == 0.0
@@ -300,10 +344,12 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             diagnostics["activity_threshold_bonus_eligible"].append(
                 threshold_bonus_eligible
             )
+            diagnostics["qed_penalty_factor"].append(qed_factor)
             diagnostics["logp_penalty_factor"].append(logp_factor)
             diagnostics["sas_penalty_factor"].append(sas_factor)
             diagnostics["heavy_atom_penalty_factor"].append(heavy_atom_factor)
             diagnostics["property_penalty_factor"].append(property_factor)
+            diagnostics["qed_deficit_z"].append(qed_deficit)
             diagnostics["logp_excess_z"].append(logp_excess)
             diagnostics["sas_excess_z"].append(sas_excess)
             diagnostics["heavy_atom_excess_z"].append(heavy_atom_excess)
@@ -312,6 +358,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
             diagnostics["heavy_atom_violation"].append(
                 float(heavy_atom_excess > 0.0)
             )
+            diagnostics["qed_violation"].append(float(qed_deficit > 0.0))
             diagnostics["heavy_atom_count"].append(
                 float(heavy_atom_count) if heavy_atom_count is not None else 0.0
             )

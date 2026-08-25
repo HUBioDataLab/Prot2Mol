@@ -41,6 +41,8 @@ grpo:
   property_reward_shaping: true
   property_allowed_sigma: 2.0
   property_penalty_strength: 0.5
+  qed_lower_quantile: 0.1
+  qed_penalty_strength: 0.0
   heavy_atom_penalty_weight: 0.15
   diversity_reward_shaping: true
   diversity_reward_weight: 0.5

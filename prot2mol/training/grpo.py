@@ -794,6 +794,9 @@ class GRPOTrainer:
                     "grpo/property_penalty_factor_mean": diagnostic_mean(
                         "property_penalty_factor"
                     ),
+                    "grpo/qed_penalty_factor_mean": diagnostic_mean(
+                        "qed_penalty_factor"
+                    ),
                     "grpo/logp_penalty_factor_mean": diagnostic_mean(
                         "logp_penalty_factor"
                     ),
@@ -812,6 +815,11 @@ class GRPOTrainer:
                     "grpo/heavy_atom_violation_fraction": diagnostic_mean(
                         "heavy_atom_violation"
                     ),
+                    "grpo/qed_violation_fraction": diagnostic_mean(
+                        "qed_violation"
+                    ),
+                    "grpo/qed_deficit_z_mean": diagnostic_mean("qed_deficit_z"),
+                    "grpo/qed_deficit_z_max": diagnostic_max("qed_deficit_z"),
                     "grpo/logp_excess_z_mean": diagnostic_mean("logp_excess_z"),
                     "grpo/logp_excess_z_max": diagnostic_max("logp_excess_z"),
                     "grpo/sas_excess_z_mean": diagnostic_mean("sas_excess_z"),

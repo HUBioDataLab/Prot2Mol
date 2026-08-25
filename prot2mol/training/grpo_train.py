@@ -318,6 +318,7 @@ def load_training_active_property_stats(
     protein_sequence_column: str = "protein_sequence",
     smiles_column: str = "smiles",
     label_column: str = "binary_label",
+    qed_lower_quantile: float = 0.1,
 ) -> dict[str, TargetActivePropertyStats]:
     """Calculate target-property distributions from unique training actives."""
 
@@ -332,6 +333,8 @@ def load_training_active_property_stats(
     requested = {str(sequence).strip().upper() for sequence in protein_sequences}
     if not requested:
         raise ValueError("Property shaping requires at least one target protein")
+    if not 0.0 < qed_lower_quantile < 0.5:
+        raise ValueError("qed_lower_quantile must be in (0, 0.5)")
     active_smiles: dict[str, set[str]] = {sequence: set() for sequence in requested}
     for row in _iter_parquet_rows(path, columns):
         if int(row[label_column] or 0) != 1:
@@ -351,6 +354,7 @@ def load_training_active_property_stats(
             insufficient.append((sequence, len(smiles)))
             continue
         rows = molecular_property_rows(smiles)
+        qed = np.asarray([row["qed"] for row in rows], dtype=np.float64)
         logp = np.asarray([row["logp"] for row in rows], dtype=np.float64)
         sas = np.asarray([row["sas"] for row in rows], dtype=np.float64)
         heavy_atom_count = np.asarray(
@@ -359,6 +363,9 @@ def load_training_active_property_stats(
         )
         stats[sequence] = TargetActivePropertyStats(
             active_count=len(smiles),
+            qed_mean=float(qed.mean()),
+            qed_std=float(qed.std(ddof=0)),
+            qed_lower_bound=float(np.quantile(qed, qed_lower_quantile)),
             logp_mean=float(logp.mean()),
             logp_std=float(logp.std(ddof=0)),
             sas_mean=float(sas.mean()),
@@ -713,6 +720,7 @@ class GRPOTrainingRun:
                 protein_sequence_column=self.config.protein_sequence_column,
                 smiles_column=self.config.smiles_column,
                 label_column=self.config.label_column,
+                qed_lower_quantile=self.config.qed_lower_quantile,
             )
             self.property_stats_by_reward_sequence = {
                 protein.reward_protein_sequence: self.property_stats_by_sequence[
@@ -801,12 +809,15 @@ class GRPOTrainingRun:
             "property_statistics_source": "unique canonical training-split actives",
             "property_allowed_sigma": self.config.property_allowed_sigma,
             "property_penalty_strength": self.config.property_penalty_strength,
+            "qed_lower_quantile": self.config.qed_lower_quantile,
+            "qed_penalty_strength": self.config.qed_penalty_strength,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "property_reward_formula": (
                 "((1 - activity_threshold_bonus_weight) * "
                 "activity_probability + activity_threshold_bonus_weight * "
                 "I(activity_probability >= activity_probability_threshold) * "
                 "bonus_property_band_eligibility) * "
+                "exp(-qed_penalty_strength * qed_deficit_z^2) * "
                 "exp(-strength * logp_excess_z^2) * "
                 "exp(-strength * sas_excess_z^2) * "
                 "(1 - heavy_atom_penalty_weight * "
@@ -924,6 +935,7 @@ class GRPOTrainingRun:
                 self.property_stats_by_reward_sequence,
                 allowed_sigma=self.config.property_allowed_sigma,
                 penalty_strength=self.config.property_penalty_strength,
+                qed_penalty_strength=self.config.qed_penalty_strength,
                 heavy_atom_penalty_weight=(
                     self.config.heavy_atom_penalty_weight
                 ),
@@ -1073,6 +1085,8 @@ class GRPOTrainingRun:
             "decoder_train_scope": self.config.decoder_train_scope,
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
+            "qed_lower_quantile": self.config.qed_lower_quantile,
+            "qed_penalty_strength": self.config.qed_penalty_strength,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "generation_start_mode": self.config.generation_start_mode,
             "training_active_statistics_sha256": digest,
@@ -1415,16 +1429,19 @@ class GRPOTrainingRun:
             "activity_optimization_reward",
             "property_band_eligible",
             "activity_threshold_bonus_eligible",
+            "qed_penalty_factor",
             "logp_penalty_factor",
             "sas_penalty_factor",
             "heavy_atom_penalty_factor",
             "property_penalty_factor",
+            "qed_deficit_z",
             "logp_excess_z",
             "sas_excess_z",
             "heavy_atom_excess_z",
             "logp_violation",
             "sas_violation",
             "heavy_atom_violation",
+            "qed_violation",
             "heavy_atom_count",
             "property_shaped_reward",
         )
@@ -1479,6 +1496,7 @@ class GRPOTrainingRun:
                     >= self.config.activity_probability_threshold
                 ).astype(np.float32)
             if "logp_penalty_factor" not in valid_diagnostics:
+                diagnostics["qed_penalty_factor"][valid_indices] = 1.0
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
                 diagnostics["heavy_atom_penalty_factor"][valid_indices] = 1.0
@@ -1608,6 +1626,11 @@ class GRPOTrainingRun:
                 if valid_indices
                 else 0.0
             ),
+            "qed_penalty_factor_mean": (
+                float(diagnostics["qed_penalty_factor"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
             "logp_penalty_factor_mean": (
                 float(diagnostics["logp_penalty_factor"][valid_indices].mean())
                 if valid_indices
@@ -1637,6 +1660,11 @@ class GRPOTrainingRun:
             ),
             "heavy_atom_violation_fraction": (
                 float(diagnostics["heavy_atom_violation"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "qed_violation_fraction": (
+                float(diagnostics["qed_violation"][valid_indices].mean())
                 if valid_indices
                 else 0.0
             ),
@@ -1794,6 +1822,9 @@ class GRPOTrainingRun:
                 ),
                 "property_shaped_reward": float(property_rewards[index]),
                 "final_reward": float(rewards[index]),
+                "qed_penalty_factor": float(
+                    diagnostics["qed_penalty_factor"][index]
+                ),
                 "logp_penalty_factor": float(
                     diagnostics["logp_penalty_factor"][index]
                 ),
@@ -1806,6 +1837,7 @@ class GRPOTrainingRun:
                 "property_penalty_factor": float(
                     diagnostics["property_penalty_factor"][index]
                 ),
+                "qed_deficit_z": float(diagnostics["qed_deficit_z"][index]),
                 "logp_excess_z": float(diagnostics["logp_excess_z"][index]),
                 "sas_excess_z": float(diagnostics["sas_excess_z"][index]),
                 "heavy_atom_excess_z": float(
@@ -1816,6 +1848,7 @@ class GRPOTrainingRun:
                 "heavy_atom_violation": bool(
                     diagnostics["heavy_atom_violation"][index]
                 ),
+                "qed_violation": bool(diagnostics["qed_violation"][index]),
                 "diversity_penalty_factor": float(
                     diagnostics["diversity_penalty_factor"][index]
                 ),
@@ -2010,6 +2043,10 @@ class GRPOTrainingRun:
                 rows,
                 "property_penalty_factor_mean",
             ),
+            "eval/qed_penalty_factor_mean_macro": self._macro(
+                rows,
+                "qed_penalty_factor_mean",
+            ),
             "eval/logp_penalty_factor_mean_macro": self._macro(
                 rows,
                 "logp_penalty_factor_mean",
@@ -2029,6 +2066,10 @@ class GRPOTrainingRun:
             "eval/sas_violation_fraction_macro": self._macro(
                 rows,
                 "sas_violation_fraction",
+            ),
+            "eval/qed_violation_fraction_macro": self._macro(
+                rows,
+                "qed_violation_fraction",
             ),
             "eval/heavy_atom_violation_fraction_macro": self._macro(
                 rows,
@@ -2151,12 +2192,14 @@ class GRPOTrainingRun:
                 "valid_property_band_eligible_fraction",
                 "valid_activity_threshold_bonus_eligible_fraction",
                 "property_penalty_factor_mean",
+                "qed_penalty_factor_mean",
                 "logp_penalty_factor_mean",
                 "sas_penalty_factor_mean",
                 "heavy_atom_penalty_factor_mean",
                 "logp_violation_fraction",
                 "sas_violation_fraction",
                 "heavy_atom_violation_fraction",
+                "qed_violation_fraction",
                 "diversity_penalty_factor_mean",
                 "internal_diversity_mean",
                 "mean_tanimoto_similarity",
@@ -2555,6 +2598,16 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     reward.add_argument("--property_allowed_sigma", type=float, default=2.0)
     reward.add_argument("--property_penalty_strength", type=float, default=0.5)
+    reward.add_argument("--qed_lower_quantile", type=float, default=0.1)
+    reward.add_argument(
+        "--qed_penalty_strength",
+        type=float,
+        default=0.0,
+        help=(
+            "Softly penalize QED below the target training-actives lower "
+            "quantile; zero preserves the historical reward"
+        ),
+    )
     reward.add_argument(
         "--heavy_atom_penalty_weight",
         type=float,
@@ -2709,6 +2762,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "reward_protein_cache_size": config.reward_protein_cache_size,
         "property_allowed_sigma": config.property_allowed_sigma,
         "property_penalty_strength": config.property_penalty_strength,
+        "qed_lower_quantile": config.qed_lower_quantile,
         "diversity_morgan_radius": config.diversity_morgan_radius,
         "diversity_morgan_bits": config.diversity_morgan_bits,
         "eval_samples_per_protein": config.eval_samples_per_protein,
@@ -2786,6 +2840,10 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         or config.train_policy_decoder
     ):
         raise ValueError("GRPO requires at least one trainable policy component")
+    if not 0.0 < config.qed_lower_quantile < 0.5:
+        raise ValueError("qed_lower_quantile must be in (0, 0.5)")
+    if config.qed_penalty_strength < 0.0:
+        raise ValueError("qed_penalty_strength must be nonnegative")
     return config
 
 
