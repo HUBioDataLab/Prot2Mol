@@ -1357,7 +1357,11 @@ class GRPOTrainingRun:
         )
         was_training = self.policy.training
         self.policy.eval()
-        with torch.random.fork_rng(devices=cuda_devices), torch.inference_mode():
+        # ESM creates and caches rotary-position tensors during its first
+        # forward pass.  Tensors created under inference_mode cannot later be
+        # consumed by an autograd-enabled encoder pass, so evaluation must use
+        # no_grad when encoder post-training is selectable.
+        with torch.random.fork_rng(devices=cuda_devices), torch.no_grad():
             torch.manual_seed(seed)
             if self.device.type == "cuda":
                 torch.cuda.manual_seed_all(seed)

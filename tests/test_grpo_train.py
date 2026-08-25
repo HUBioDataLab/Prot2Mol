@@ -737,6 +737,14 @@ def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
     generator.mkdir()
     output = tmp_path / "metrics-only"
     policy, molecule_tokenizer = _tiny_policy(monkeypatch)
+    evaluation_inference_modes = []
+    original_encode_protein = policy.encode_protein
+
+    def encode_protein_without_inference_cache(*args, **kwargs):
+        evaluation_inference_modes.append(torch.is_inference_mode_enabled())
+        return original_encode_protein(*args, **kwargs)
+
+    policy.encode_protein = encode_protein_without_inference_cache
 
     monkeypatch.setattr(
         grpo_train,
@@ -826,6 +834,8 @@ def test_metrics_only_run_skips_large_final_artifacts(tmp_path, monkeypatch):
     assert not (output / "final").exists()
     assert not (output / "evaluation" / "start").exists()
     assert (output / "evaluation" / "end" / "metrics.json").exists()
+    assert evaluation_inference_modes
+    assert not any(evaluation_inference_modes)
 
 
 def test_internal_reward_runner_uses_plain_proteins_and_selfies(tmp_path, monkeypatch):
