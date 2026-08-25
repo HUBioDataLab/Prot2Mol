@@ -740,6 +740,15 @@ class GRPOTrainingRun:
             "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
             "train_policy_encoder": self.config.train_policy_encoder,
             "decoder_train_scope": self.config.decoder_train_scope,
+            "policy_initialization_checkpoint": (
+                str(
+                    Path(self.config.initialize_policy_from_checkpoint)
+                    .expanduser()
+                    .resolve()
+                )
+                if self.config.initialize_policy_from_checkpoint
+                else None
+            ),
             "generator_max_protein_length": self.config.prot_max_length,
             "reward_max_protein_residues": self.config.reward_protein_max_residues,
             "reward_backend": self.config.reward_backend,
@@ -1042,6 +1051,15 @@ class GRPOTrainingRun:
             "train_parquet_path": str(Path(self.config.train_parquet_path).resolve()),
             "cohort_protein_ids": [protein.protein_id for protein in self.proteins],
             "property_reward_contract": self._property_reward_contract(),
+            "policy_initialization_checkpoint": (
+                str(
+                    Path(self.config.initialize_policy_from_checkpoint)
+                    .expanduser()
+                    .resolve()
+                )
+                if self.config.initialize_policy_from_checkpoint
+                else None
+            ),
             "wandb_run_id": self.wandb_run.id if self.wandb_run is not None else None,
         }
         if torch.cuda.is_available():
@@ -1083,6 +1101,7 @@ class GRPOTrainingRun:
                     "train_parquet_path",
                     "cohort_protein_ids",
                     "property_reward_contract",
+                    "policy_initialization_checkpoint",
                     "wandb_run_id",
                 )
             }
@@ -1145,6 +1164,36 @@ class GRPOTrainingRun:
             )
         LOGGER.info("Resumed GRPO from %s at step %d", path, self.trainer.global_step)
         return payload.get("wandb_run_id")
+
+    def _load_policy_initialization_checkpoint(self) -> str | None:
+        """Warm-start policy weights without claiming trainer-state continuity."""
+
+        if not self.config.initialize_policy_from_checkpoint:
+            return None
+        assert self.policy is not None
+        path = (
+            Path(self.config.initialize_policy_from_checkpoint)
+            .expanduser()
+            .resolve()
+        )
+        state_path = path / "trainer_state.pt"
+        if not state_path.is_file():
+            raise FileNotFoundError(f"Missing GRPO initialization state: {state_path}")
+        payload = torch.load(state_path, map_location=self.device, weights_only=False)
+        expected_base = str(Path(self.config.generator_checkpoint).resolve())
+        if payload.get("generator_checkpoint") != expected_base:
+            raise ValueError(
+                "Policy initialization checkpoint was created from a different "
+                "generator"
+            )
+        _load_trainable_state_dict(self.policy, payload["policy_trainable_state"])
+        LOGGER.info(
+            "Initialized policy weights from %s at source step %d; optimizer, "
+            "scheduler, RNG, and global step start fresh",
+            path,
+            int(payload.get("global_step", -1)),
+        )
+        return str(path)
 
     def _wandb_config(self) -> dict[str, Any]:
         values = vars(self.config).copy()
@@ -2125,6 +2174,7 @@ class GRPOTrainingRun:
 
         self._load_data()
         self._load_models()
+        initialization_checkpoint = self._load_policy_initialization_checkpoint()
         resume_id = self._load_resume_checkpoint()
         self._init_wandb(resume_id)
         assert self.trainer is not None
@@ -2150,6 +2200,7 @@ class GRPOTrainingRun:
                     "final_model": None,
                     "save_final_artifacts": False,
                     "evaluation_only": True,
+                    "policy_initialization_checkpoint": initialization_checkpoint,
                     "start_snapshot": None,
                     "end_snapshot": str(self.output_dir / "evaluation" / "end"),
                 }
@@ -2257,6 +2308,7 @@ class GRPOTrainingRun:
                 "save_final_artifacts": self.config.save_final_artifacts,
                 "save_final_checkpoint": self.config.save_final_checkpoint,
                 "evaluation_only": False,
+                "policy_initialization_checkpoint": initialization_checkpoint,
                 "start_snapshot": str(self.output_dir / "evaluation" / "start"),
                 "end_snapshot": str(self.output_dir / "evaluation" / "end"),
             }
@@ -2463,6 +2515,14 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     output = parser.add_argument_group("Logging and checkpoints")
     output.add_argument("--output_dir", required=True)
     output.add_argument("--resume_from_checkpoint", default=None)
+    output.add_argument(
+        "--initialize_policy_from_checkpoint",
+        default=None,
+        help=(
+            "Warm-start only the trainable policy weights from a GRPO checkpoint; "
+            "optimizer, scheduler, RNG, global step, cohort, and W&B run start fresh"
+        ),
+    )
     output.add_argument("--logging_steps", type=int, default=1)
     output.add_argument("--save_steps", type=int, default=5)
     output.add_argument(
@@ -2575,6 +2635,11 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if config.evaluation_only and config.save_final_artifacts:
         raise ValueError(
             "evaluation_only requires --no-save_final_artifacts"
+        )
+    if config.resume_from_checkpoint and config.initialize_policy_from_checkpoint:
+        raise ValueError(
+            "resume_from_checkpoint and initialize_policy_from_checkpoint are "
+            "mutually exclusive"
         )
     return config
 

@@ -309,6 +309,81 @@ def test_grpo_run_refuses_existing_material_outputs_and_stale_checkpoints(tmp_pa
         runner.save_checkpoint(epoch=0, next_index=0)
 
 
+def test_policy_checkpoint_warm_start_loads_only_trainable_weights(
+    tmp_path,
+    monkeypatch,
+):
+    generator = tmp_path / "generator"
+    generator.mkdir()
+    checkpoint = tmp_path / "checkpoint-7"
+    checkpoint.mkdir()
+    source, _ = _tiny_policy(monkeypatch)
+    source.update_trainable_components(
+        trainable_encoder=False,
+        trainable_projection=False,
+        trainable_decoder=True,
+    )
+    with torch.no_grad():
+        for parameter in source.parameters():
+            if parameter.requires_grad:
+                parameter.add_(0.25)
+    expected = grpo_train._trainable_state_dict(source)
+    torch.save(
+        {
+            "generator_checkpoint": str(generator.resolve()),
+            "global_step": 7,
+            "policy_trainable_state": expected,
+        },
+        checkpoint / "trainer_state.pt",
+    )
+
+    policy, _ = _tiny_policy(monkeypatch)
+    policy.update_trainable_components(
+        trainable_encoder=False,
+        trainable_projection=False,
+        trainable_decoder=True,
+    )
+    runner = grpo_train.GRPOTrainingRun(
+        SimpleNamespace(
+            device="cpu",
+            output_dir=str(tmp_path / "warm-start-output"),
+            resume_from_checkpoint=None,
+            initialize_policy_from_checkpoint=str(checkpoint),
+            generator_checkpoint=str(generator),
+        )
+    )
+    runner.policy = policy
+
+    loaded = runner._load_policy_initialization_checkpoint()
+
+    assert loaded == str(checkpoint.resolve())
+    assert runner.start_epoch == 0
+    assert runner.proteins_seen == 0
+    actual = grpo_train._trainable_state_dict(policy)
+    assert actual.keys() == expected.keys()
+    assert all(torch.equal(actual[name], expected[name]) for name in expected)
+
+
+def test_policy_checkpoint_warm_start_and_resume_are_mutually_exclusive(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        grpo_train.parse_arguments(
+            [
+                "--train_parquet_path",
+                str(tmp_path / "train.parquet"),
+                "--validation_parquet_path",
+                str(tmp_path / "validation.parquet"),
+                "--generator_checkpoint",
+                str(tmp_path / "generator"),
+                "--output_dir",
+                str(tmp_path / "output"),
+                "--resume_from_checkpoint",
+                str(tmp_path / "resume"),
+                "--initialize_policy_from_checkpoint",
+                str(tmp_path / "initialize"),
+            ]
+        )
+
+
 def test_full_policy_reference_is_independent_and_frozen(monkeypatch):
     policy, _ = _tiny_policy(monkeypatch)
     policy.update_trainable_components(
