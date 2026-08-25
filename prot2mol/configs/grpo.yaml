@@ -32,6 +32,9 @@ grpo:
   # Decoder-only is the memory-efficient default. Enable to optimize the
   # protein encoder and conditioning projection with a fully copied reference.
   train_policy_encoder: false
+  # These can be selected independently for conditioning-only ablations.
+  train_policy_projection: false
+  train_policy_decoder: true
   decoder_train_scope: full
   # These July 2025 GPT-2 checkpoints were trained on fixed-width left-padded
   # molecule rows and historically sampled from PAD token 1.

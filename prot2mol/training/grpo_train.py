@@ -451,23 +451,31 @@ def select_evaluation_targets(
 def _build_reference_policy(
     policy: torch.nn.Module,
     *,
-    share_conditioner: bool = True,
+    share_encoder: bool = True,
+    share_projection: bool = True,
+    share_decoder: bool = False,
 ) -> torch.nn.Module:
-    """Build a fixed reference, sharing only conditioners that stay frozen."""
-
-    if not share_conditioner:
-        reference = copy.deepcopy(policy)
-        reference.requires_grad_(False)
-        reference.eval()
-        return reference
+    """Build a fixed reference, sharing only components that stay frozen."""
 
     reference = copy.copy(policy)
     reference._modules = policy._modules.copy()
     reference._parameters = policy._parameters.copy()
     reference._buffers = policy._buffers.copy()
-    reference.molecule_decoder = copy.deepcopy(policy.molecule_decoder)
-    reference.protein_encoder = policy.protein_encoder
-    reference.conditioning_projection = policy.conditioning_projection
+    reference.protein_encoder = (
+        policy.protein_encoder
+        if share_encoder
+        else copy.deepcopy(policy.protein_encoder)
+    )
+    reference.conditioning_projection = (
+        policy.conditioning_projection
+        if share_projection
+        else copy.deepcopy(policy.conditioning_projection)
+    )
+    reference.molecule_decoder = (
+        policy.molecule_decoder
+        if share_decoder
+        else copy.deepcopy(policy.molecule_decoder)
+    )
     reference.requires_grad_(False)
     reference.eval()
     return reference
@@ -763,6 +771,8 @@ class GRPOTrainingRun:
             "protein_ids": [row["protein_id"] for row in rows],
             "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
             "train_policy_encoder": self.config.train_policy_encoder,
+            "train_policy_projection": self.config.train_policy_projection,
+            "train_policy_decoder": self.config.train_policy_decoder,
             "decoder_train_scope": self.config.decoder_train_scope,
             "policy_initialization_checkpoint": (
                 str(
@@ -876,13 +886,21 @@ class GRPOTrainingRun:
             )
         self.policy.update_trainable_components(
             trainable_encoder=self.config.train_policy_encoder,
-            trainable_projection=self.config.train_policy_encoder,
-            trainable_decoder=True,
+            trainable_projection=(
+                self.config.train_policy_encoder
+                or self.config.train_policy_projection
+            ),
+            trainable_decoder=self.config.train_policy_decoder,
             decoder_train_scope=self.config.decoder_train_scope,
         )
         self.reference_policy = _build_reference_policy(
             self.policy,
-            share_conditioner=not self.config.train_policy_encoder,
+            share_encoder=not self.config.train_policy_encoder,
+            share_projection=not (
+                self.config.train_policy_encoder
+                or self.config.train_policy_projection
+            ),
+            share_decoder=not self.config.train_policy_decoder,
         )
         if self.config.reward_backend == "fusiondti":
             activity_scorer = FusionDTIActivityScorer.from_pretrained(
@@ -999,14 +1017,19 @@ class GRPOTrainingRun:
         )
         counts = self.policy.parameter_counts()
         LOGGER.info("Policy parameters: %s", counts)
+        trainable_scope = []
+        if self.config.train_policy_encoder:
+            trainable_scope.append("protein encoder")
+        if (
+            self.config.train_policy_encoder
+            or self.config.train_policy_projection
+        ):
+            trainable_scope.append("conditioning projection")
+        if self.config.train_policy_decoder:
+            trainable_scope.append(f"{self.config.decoder_train_scope} decoder")
         LOGGER.info(
             "Trainable policy scope: %s",
-            (
-                "protein encoder + projection + "
-                f"{self.config.decoder_train_scope} decoder"
-                if self.config.train_policy_encoder
-                else f"{self.config.decoder_train_scope} decoder only"
-            ),
+            " + ".join(trainable_scope),
         )
 
     def _property_reward_contract(self) -> dict[str, Any]:
@@ -1045,6 +1068,8 @@ class GRPOTrainingRun:
                 self.config.activity_threshold_bonus_requires_property_band
             ),
             "train_policy_encoder": self.config.train_policy_encoder,
+            "train_policy_projection": self.config.train_policy_projection,
+            "train_policy_decoder": self.config.train_policy_decoder,
             "decoder_train_scope": self.config.decoder_train_scope,
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
@@ -2445,9 +2470,24 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "Train the generator protein encoder and conditioning projection in "
-            "addition to the molecule decoder"
+            "Train the generator protein encoder and conditioning projection; "
+            "decoder training is selected independently"
         ),
+    )
+    model.add_argument(
+        "--train_policy_projection",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Train the protein-to-decoder conditioning projection without "
+            "requiring the protein encoder to be trainable"
+        ),
+    )
+    model.add_argument(
+        "--train_policy_decoder",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Train the molecular decoder during GRPO",
     )
     model.add_argument(
         "--decoder_train_scope",
@@ -2736,6 +2776,12 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "resume_from_checkpoint and initialize_policy_from_checkpoint are "
             "mutually exclusive"
         )
+    if not (
+        config.train_policy_encoder
+        or config.train_policy_projection
+        or config.train_policy_decoder
+    ):
+        raise ValueError("GRPO requires at least one trainable policy component")
     return config
 
 

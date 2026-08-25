@@ -26,6 +26,8 @@ grpo:
   min_mol_len: 3
   prot_max_length: 1000
   train_policy_encoder: false
+  train_policy_projection: false
+  train_policy_decoder: true
   decoder_train_scope: full
   generation_start_mode: legacy_pad
 

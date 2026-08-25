@@ -395,6 +395,25 @@ def test_policy_checkpoint_warm_start_and_resume_are_mutually_exclusive(tmp_path
         )
 
 
+def test_grpo_requires_a_trainable_policy_component(tmp_path):
+    with pytest.raises(ValueError, match="at least one trainable policy component"):
+        grpo_train.parse_arguments(
+            [
+                "--train_parquet_path",
+                str(tmp_path / "train.parquet"),
+                "--validation_parquet_path",
+                str(tmp_path / "validation.parquet"),
+                "--generator_checkpoint",
+                str(tmp_path / "generator"),
+                "--output_dir",
+                str(tmp_path / "output"),
+                "--no-train_policy_encoder",
+                "--no-train_policy_projection",
+                "--no-train_policy_decoder",
+            ]
+        )
+
+
 def test_full_policy_reference_is_independent_and_frozen(monkeypatch):
     policy, _ = _tiny_policy(monkeypatch)
     policy.update_trainable_components(
@@ -405,7 +424,9 @@ def test_full_policy_reference_is_independent_and_frozen(monkeypatch):
 
     reference = grpo_train._build_reference_policy(
         policy,
-        share_conditioner=False,
+        share_encoder=False,
+        share_projection=False,
+        share_decoder=False,
     )
 
     assert reference.protein_encoder is not policy.protein_encoder
@@ -416,6 +437,41 @@ def test_full_policy_reference_is_independent_and_frozen(monkeypatch):
     with torch.no_grad():
         next(policy.protein_encoder.parameters()).add_(1.0)
     assert torch.equal(next(reference.protein_encoder.parameters()), before)
+
+
+def test_projection_only_reference_shares_frozen_encoder_and_decoder(monkeypatch):
+    policy, _ = _tiny_policy(monkeypatch)
+    # The tiny fixture normally uses Identity because both hidden sizes are 8.
+    # Install a parameterized projection so this test can verify that freezing
+    # the reference copy does not freeze the policy projection.
+    policy.conditioning_projection = torch.nn.Linear(8, 8)
+    policy.update_trainable_components(
+        trainable_encoder=False,
+        trainable_projection=True,
+        trainable_decoder=False,
+    )
+
+    reference = grpo_train._build_reference_policy(
+        policy,
+        share_encoder=True,
+        share_projection=False,
+        share_decoder=True,
+    )
+
+    assert reference.protein_encoder is policy.protein_encoder
+    assert reference.conditioning_projection is not policy.conditioning_projection
+    assert reference.molecule_decoder is policy.molecule_decoder
+    assert all(not parameter.requires_grad for parameter in reference.parameters())
+    assert any(
+        parameter.requires_grad
+        for parameter in policy.conditioning_projection.parameters()
+    )
+    assert all(
+        not parameter.requires_grad for parameter in policy.protein_encoder.parameters()
+    )
+    assert all(
+        not parameter.requires_grad for parameter in policy.molecule_decoder.parameters()
+    )
 
 
 def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
