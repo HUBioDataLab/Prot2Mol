@@ -1200,11 +1200,12 @@ class GRPOTrainingRun:
         return payload.get("wandb_run_id")
 
     def _load_policy_initialization_checkpoint(self) -> str | None:
-        """Warm-start policy weights without claiming trainer-state continuity."""
+        """Warm-start policy and its frozen KL reference from the same state."""
 
         if not self.config.initialize_policy_from_checkpoint:
             return None
         assert self.policy is not None
+        assert self.reference_policy is not None
         path = (
             Path(self.config.initialize_policy_from_checkpoint)
             .expanduser()
@@ -1224,9 +1225,16 @@ class GRPOTrainingRun:
             self.policy,
             payload["policy_trainable_state"],
         )
+        _load_policy_warm_start_state_dict(
+            self.reference_policy,
+            payload["policy_trainable_state"],
+        )
+        self.reference_policy.requires_grad_(False)
+        self.reference_policy.eval()
         LOGGER.info(
-            "Initialized policy weights from %s at source step %d; optimizer, "
-            "scheduler, RNG, and global step start fresh",
+            "Initialized policy and frozen KL reference weights from %s at "
+            "source step %d; optimizer, scheduler, RNG, and global step start "
+            "fresh",
             path,
             int(payload.get("global_step", -1)),
         )

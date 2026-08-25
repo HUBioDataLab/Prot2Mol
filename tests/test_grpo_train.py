@@ -344,6 +344,8 @@ def test_policy_checkpoint_warm_start_loads_source_weights_across_trainable_scop
         trainable_decoder=True,
         decoder_train_scope="cross_attention",
     )
+    reference, _ = _tiny_policy(monkeypatch)
+    reference.requires_grad_(False)
     runner = grpo_train.GRPOTrainingRun(
         SimpleNamespace(
             device="cpu",
@@ -354,6 +356,7 @@ def test_policy_checkpoint_warm_start_loads_source_weights_across_trainable_scop
         )
     )
     runner.policy = policy
+    runner.reference_policy = reference
 
     loaded = runner._load_policy_initialization_checkpoint()
 
@@ -364,6 +367,12 @@ def test_policy_checkpoint_warm_start_loads_source_weights_across_trainable_scop
     assert destination_trainable.keys() < expected.keys()
     parameters = dict(policy.named_parameters())
     assert all(torch.equal(parameters[name], expected[name]) for name in expected)
+    reference_parameters = dict(reference.named_parameters())
+    assert all(
+        torch.equal(reference_parameters[name], expected[name]) for name in expected
+    )
+    assert all(not parameter.requires_grad for parameter in reference.parameters())
+    assert reference.training is False
 
 
 def test_policy_checkpoint_warm_start_and_resume_are_mutually_exclusive(tmp_path):
