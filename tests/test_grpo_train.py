@@ -309,7 +309,7 @@ def test_grpo_run_refuses_existing_material_outputs_and_stale_checkpoints(tmp_pa
         runner.save_checkpoint(epoch=0, next_index=0)
 
 
-def test_policy_checkpoint_warm_start_loads_only_trainable_weights(
+def test_policy_checkpoint_warm_start_loads_source_weights_across_trainable_scopes(
     tmp_path,
     monkeypatch,
 ):
@@ -342,6 +342,7 @@ def test_policy_checkpoint_warm_start_loads_only_trainable_weights(
         trainable_encoder=False,
         trainable_projection=False,
         trainable_decoder=True,
+        decoder_train_scope="cross_attention",
     )
     runner = grpo_train.GRPOTrainingRun(
         SimpleNamespace(
@@ -359,9 +360,10 @@ def test_policy_checkpoint_warm_start_loads_only_trainable_weights(
     assert loaded == str(checkpoint.resolve())
     assert runner.start_epoch == 0
     assert runner.proteins_seen == 0
-    actual = grpo_train._trainable_state_dict(policy)
-    assert actual.keys() == expected.keys()
-    assert all(torch.equal(actual[name], expected[name]) for name in expected)
+    destination_trainable = grpo_train._trainable_state_dict(policy)
+    assert destination_trainable.keys() < expected.keys()
+    parameters = dict(policy.named_parameters())
+    assert all(torch.equal(parameters[name], expected[name]) for name in expected)
 
 
 def test_policy_checkpoint_warm_start_and_resume_are_mutually_exclusive(tmp_path):

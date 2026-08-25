@@ -505,6 +505,30 @@ def _load_trainable_state_dict(
             target.copy_(value.to(device=target.device, dtype=target.dtype))
 
 
+def _load_policy_warm_start_state_dict(
+    model: torch.nn.Module,
+    state: Mapping[str, torch.Tensor],
+) -> None:
+    """Restore every tensor changed by the source run across trainable scopes."""
+
+    parameters = dict(model.named_parameters())
+    unknown = set(state).difference(parameters)
+    if unknown:
+        raise ValueError(
+            "GRPO policy warm-start state is incompatible with this model: "
+            f"unknown={sorted(unknown)[:5]}"
+        )
+    with torch.no_grad():
+        for name, value in state.items():
+            target = parameters[name]
+            if target.shape != value.shape:
+                raise ValueError(
+                    f"GRPO policy warm-start shape mismatch for {name}: "
+                    f"expected {tuple(target.shape)}, got {tuple(value.shape)}"
+                )
+            target.copy_(value.to(device=target.device, dtype=target.dtype))
+
+
 def _cosine_warmup_lambda(step: int, *, warmup_steps: int, total_steps: int) -> float:
     if warmup_steps and step < warmup_steps:
         return max(float(step + 1) / float(warmup_steps), 1.0e-8)
@@ -1186,7 +1210,10 @@ class GRPOTrainingRun:
                 "Policy initialization checkpoint was created from a different "
                 "generator"
             )
-        _load_trainable_state_dict(self.policy, payload["policy_trainable_state"])
+        _load_policy_warm_start_state_dict(
+            self.policy,
+            payload["policy_trainable_state"],
+        )
         LOGGER.info(
             "Initialized policy weights from %s at source step %d; optimizer, "
             "scheduler, RNG, and global step start fresh",
