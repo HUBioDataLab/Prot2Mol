@@ -265,6 +265,70 @@ def test_gpt2_decoder_restores_direct_protein_cross_attention(monkeypatch):
     assert any(gradient is not None for gradient in cross_attention_grads)
 
 
+def test_gpt2_can_train_only_protein_cross_attention(monkeypatch):
+    from conftest import DummyBatchTokenizer, DummyProteinEncoder
+
+    monkeypatch.setattr(
+        model_module,
+        "get_protein_encoder",
+        lambda model_name, model_id, active: DummyProteinEncoder(hidden_size=8),
+    )
+    config = _config(DummyBatchTokenizer())
+    config.update(
+        {
+            "decoder_type": "gpt2",
+            "n_layer": 1,
+            "n_head": 2,
+            "n_emb": 8,
+        }
+    )
+    model = model_module.create_prot2mol_model(config)
+    model.update_trainable_components(
+        False,
+        False,
+        True,
+        decoder_train_scope="cross_attention",
+    )
+
+    trainable = {
+        name
+        for name, parameter in model.molecule_decoder.named_parameters()
+        if parameter.requires_grad
+    }
+    assert trainable
+    assert all(
+        ".crossattention." in f".{name}" or ".ln_cross_attn." in f".{name}"
+        for name in trainable
+    )
+    assert not model.molecule_decoder.lm_head.weight.requires_grad
+
+
+def test_bart_can_train_only_protein_cross_attention(monkeypatch):
+    from conftest import DummyBatchTokenizer
+
+    _patch_tiny_architecture(monkeypatch)
+    model = model_module.create_prot2mol_model(_config(DummyBatchTokenizer()))
+    model.update_trainable_components(
+        False,
+        False,
+        True,
+        decoder_train_scope="cross_attention",
+    )
+
+    trainable = {
+        name
+        for name, parameter in model.molecule_decoder.named_parameters()
+        if parameter.requires_grad
+    }
+    assert trainable
+    assert all(
+        ".encoder_attn." in f".{name}"
+        or ".encoder_attn_layer_norm." in f".{name}"
+        for name in trainable
+    )
+    assert not model.molecule_decoder.lm_head.weight.requires_grad
+
+
 def test_gpt2_generation_uses_protein_encoder_states(monkeypatch):
     from conftest import DummyBatchTokenizer, DummyProteinEncoder
 

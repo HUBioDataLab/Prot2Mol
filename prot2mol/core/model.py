@@ -32,6 +32,7 @@ class Prot2MolModel(nn.Module):
         self._trainable_encoder = bool(config.get("train_encoder_model", False))
         self._trainable_projection = bool(config.get("train_projection_model", True))
         self._trainable_decoder = bool(config.get("train_decoder_model", True))
+        self._decoder_train_scope = str(config.get("decoder_train_scope", "full"))
         self.decoder_type = infer_decoder_type(config)
 
         protein_encoder_kwargs = {}
@@ -153,6 +154,7 @@ class Prot2MolModel(nn.Module):
             {
                 "decoder_type": self.decoder_type,
                 "decoder_model_id": decoder_model_id,
+                "decoder_train_scope": self._decoder_train_scope,
                 "protein_model_id": config.get("protein_model_id"),
                 "decoder_hidden_size": decoder_dim,
                 "protein_hidden_size": self.protein_encoder.hidden_size,
@@ -172,6 +174,7 @@ class Prot2MolModel(nn.Module):
             trainable_encoder=self._trainable_encoder,
             trainable_projection=self._trainable_projection,
             trainable_decoder=self._trainable_decoder,
+            decoder_train_scope=self._decoder_train_scope,
         )
         self.logger.info("Prot2Mol parameters: %s", self.parameter_counts())
 
@@ -219,13 +222,41 @@ class Prot2MolModel(nn.Module):
         trainable_encoder: bool,
         trainable_projection: bool = True,
         trainable_decoder: bool = True,
+        decoder_train_scope: str | None = None,
     ) -> None:
+        scope = self._decoder_train_scope if decoder_train_scope is None else str(
+            decoder_train_scope
+        )
+        if scope not in {"full", "cross_attention"}:
+            raise ValueError(
+                "decoder_train_scope must be 'full' or 'cross_attention'"
+            )
         self._trainable_encoder = bool(trainable_encoder)
         self._trainable_projection = bool(trainable_projection)
         self._trainable_decoder = bool(trainable_decoder)
+        self._decoder_train_scope = scope
+        self._config["decoder_train_scope"] = scope
         self._set_requires_grad(self.protein_encoder, self._trainable_encoder)
         self._set_requires_grad(self.conditioning_projection, self._trainable_projection)
-        self._set_requires_grad(self.molecule_decoder, self._trainable_decoder)
+        self._set_requires_grad(
+            self.molecule_decoder,
+            self._trainable_decoder and scope == "full",
+        )
+        if self._trainable_decoder and scope == "cross_attention":
+            cross_attention_markers = (
+                (".crossattention.", ".ln_cross_attn.")
+                if self.decoder_type == "gpt2"
+                else (".encoder_attn.", ".encoder_attn_layer_norm.")
+            )
+            selected = 0
+            for name, parameter in self.molecule_decoder.named_parameters():
+                if any(marker in f".{name}" for marker in cross_attention_markers):
+                    parameter.requires_grad = True
+                    selected += parameter.numel()
+            if selected == 0:
+                raise RuntimeError(
+                    f"No {self.decoder_type} cross-attention parameters were found"
+                )
         self._freeze_unused_molecule_encoder_parameters()
         self.train(self.training)
 

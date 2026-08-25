@@ -738,6 +738,8 @@ class GRPOTrainingRun:
             "required_protein_ids": list(self.config.eval_protein_ids),
             "protein_ids": [row["protein_id"] for row in rows],
             "training_is_cohort_only": self.config.train_on_evaluation_panel_only,
+            "train_policy_encoder": self.config.train_policy_encoder,
+            "decoder_train_scope": self.config.decoder_train_scope,
             "generator_max_protein_length": self.config.prot_max_length,
             "reward_max_protein_residues": self.config.reward_protein_max_residues,
             "reward_backend": self.config.reward_backend,
@@ -839,6 +841,7 @@ class GRPOTrainingRun:
             trainable_encoder=self.config.train_policy_encoder,
             trainable_projection=self.config.train_policy_encoder,
             trainable_decoder=True,
+            decoder_train_scope=self.config.decoder_train_scope,
         )
         self.reference_policy = _build_reference_policy(
             self.policy,
@@ -958,9 +961,12 @@ class GRPOTrainingRun:
         LOGGER.info("Policy parameters: %s", counts)
         LOGGER.info(
             "Trainable policy scope: %s",
-            "protein encoder + projection + decoder"
-            if self.config.train_policy_encoder
-            else "molecule decoder only",
+            (
+                "protein encoder + projection + "
+                f"{self.config.decoder_train_scope} decoder"
+                if self.config.train_policy_encoder
+                else f"{self.config.decoder_train_scope} decoder only"
+            ),
         )
 
     def _property_reward_contract(self) -> dict[str, Any]:
@@ -996,6 +1002,7 @@ class GRPOTrainingRun:
                 self.config.activity_threshold_bonus_weight
             ),
             "train_policy_encoder": self.config.train_policy_encoder,
+            "decoder_train_scope": self.config.decoder_train_scope,
             "allowed_sigma": self.config.property_allowed_sigma,
             "penalty_strength": self.config.property_penalty_strength,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
@@ -1721,6 +1728,7 @@ class GRPOTrainingRun:
             "sampling_seed": self.config.eval_seed,
             "samples_per_protein": self.config.eval_samples_per_protein,
             "generation_start_mode": self.config.generation_start_mode,
+            "decoder_train_scope": self.config.decoder_train_scope,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
             "diversity_group_size": self.config.group_size,
             "diversity_group_count_per_protein": (
@@ -2301,6 +2309,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Train the generator protein encoder and conditioning projection in "
             "addition to the molecule decoder"
+        ),
+    )
+    model.add_argument(
+        "--decoder_train_scope",
+        choices=["full", "cross_attention"],
+        default="full",
+        help=(
+            "Train the full molecule decoder, or only its protein-facing "
+            "cross-attention and associated layer norms"
         ),
     )
     model.add_argument(
