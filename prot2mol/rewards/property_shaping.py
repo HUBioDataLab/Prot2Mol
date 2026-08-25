@@ -82,6 +82,7 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         heavy_atom_penalty_weight: float = 0.15,
         activity_probability_threshold: float = 0.5,
         activity_threshold_bonus_weight: float = 0.0,
+        activity_threshold_bonus_requires_property_band: bool = False,
     ):
         super().__init__()
         if allowed_sigma <= 0.0:
@@ -106,6 +107,9 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         )
         self.activity_threshold_bonus_weight = float(
             activity_threshold_bonus_weight
+        )
+        self.activity_threshold_bonus_requires_property_band = bool(
+            activity_threshold_bonus_requires_property_band
         )
         self.protein_representation = getattr(
             activity_scorer,
@@ -201,6 +205,8 @@ class TargetPropertyShapedActivityScorer(nn.Module):
         diagnostics = {
             "activity_probability": [],
             "activity_optimization_reward": [],
+            "property_band_eligible": [],
+            "activity_threshold_bonus_eligible": [],
             "logp_penalty_factor": [],
             "sas_penalty_factor": [],
             "heavy_atom_penalty_factor": [],
@@ -262,20 +268,37 @@ class TargetPropertyShapedActivityScorer(nn.Module):
                     1.0 - heavy_atom_gate
                 )
             property_factor = logp_factor * sas_factor * heavy_atom_factor
+            property_band_eligible = float(
+                property_valid[index]
+                and logp_excess == 0.0
+                and sas_excess == 0.0
+                and heavy_atom_excess == 0.0
+            )
             activity_probability = float(activity[index])
             threshold_bonus = float(
                 activity_probability >= self.activity_probability_threshold
             )
+            threshold_bonus_eligible = threshold_bonus * (
+                property_band_eligible
+                if self.activity_threshold_bonus_requires_property_band
+                else 1.0
+            )
             activity_optimization_reward = (
                 (1.0 - self.activity_threshold_bonus_weight)
                 * activity_probability
-                + self.activity_threshold_bonus_weight * threshold_bonus
+                + self.activity_threshold_bonus_weight * threshold_bonus_eligible
             )
             shaped_reward = activity_optimization_reward * property_factor
             rewards.append(shaped_reward)
             diagnostics["activity_probability"].append(activity_probability)
             diagnostics["activity_optimization_reward"].append(
                 activity_optimization_reward
+            )
+            diagnostics["property_band_eligible"].append(
+                property_band_eligible
+            )
+            diagnostics["activity_threshold_bonus_eligible"].append(
+                threshold_bonus_eligible
             )
             diagnostics["logp_penalty_factor"].append(logp_factor)
             diagnostics["sas_penalty_factor"].append(sas_factor)

@@ -153,6 +153,46 @@ def test_property_shaping_can_reward_crossing_activity_threshold(monkeypatch):
     )
 
 
+def test_activity_threshold_bonus_can_require_target_property_bands(monkeypatch):
+    monkeypatch.setattr(
+        property_shaping,
+        "molecular_property_rows",
+        lambda smiles: [
+            {"qed": 0.5, "logp": 2.0, "sas": 3.0, "heavy_atom_count": 20.0},
+            {"qed": 0.4, "logp": 2.0, "sas": 6.0, "heavy_atom_count": 20.0},
+        ],
+    )
+    base = FakeActivityScorer()
+    base.forward = lambda proteins, molecules: torch.tensor([0.6, 0.6])
+    scorer = TargetPropertyShapedActivityScorer(
+        base,
+        {
+            "Aa": TargetActivePropertyStats(
+                active_count=10,
+                logp_mean=2.0,
+                logp_std=1.0,
+                sas_mean=3.0,
+                sas_std=1.0,
+                heavy_atom_mean=20.0,
+                heavy_atom_std=2.0,
+            )
+        },
+        activity_probability_threshold=0.5,
+        activity_threshold_bonus_weight=0.9,
+        activity_threshold_bonus_requires_property_band=True,
+    )
+
+    rewards = scorer(["Aa", "Aa"], ["[C]", "[O]"])
+    diagnostics = scorer.last_diagnostics()
+
+    assert diagnostics["property_band_eligible"].tolist() == [1.0, 0.0]
+    assert diagnostics["activity_threshold_bonus_eligible"].tolist() == [1.0, 0.0]
+    assert diagnostics["activity_optimization_reward"].tolist() == pytest.approx(
+        [0.96, 0.06]
+    )
+    assert rewards.tolist() == pytest.approx([0.96, 0.06 * math.exp(-0.5)])
+
+
 def test_zero_variance_heavy_atom_reference_uses_one_atom_soft_scale(monkeypatch):
     monkeypatch.setattr(
         property_shaping,

@@ -774,6 +774,12 @@ class GRPOTrainer:
                         if activity is not None and activity.numel()
                         else 0.0
                     ),
+                    "grpo/valid_property_band_eligible_fraction": diagnostic_mean(
+                        "property_band_eligible"
+                    ),
+                    "grpo/valid_activity_threshold_bonus_eligible_fraction": (
+                        diagnostic_mean("activity_threshold_bonus_eligible")
+                    ),
                     "grpo/valid_activity_probability_high_saturation_fraction": (
                         float(
                             activity.ge(high_saturation_limit)

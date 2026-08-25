@@ -783,6 +783,9 @@ class GRPOTrainingRun:
             "activity_threshold_bonus_weight": (
                 self.config.activity_threshold_bonus_weight
             ),
+            "activity_threshold_bonus_requires_property_band": (
+                self.config.activity_threshold_bonus_requires_property_band
+            ),
             "minimum_unique_active_references": self.config.min_fcd_reference_actives,
             "property_reward_shaping": self.config.property_reward_shaping,
             "property_statistics_source": "unique canonical training-split actives",
@@ -792,7 +795,8 @@ class GRPOTrainingRun:
             "property_reward_formula": (
                 "((1 - activity_threshold_bonus_weight) * "
                 "activity_probability + activity_threshold_bonus_weight * "
-                "I(activity_probability >= activity_probability_threshold)) * "
+                "I(activity_probability >= activity_probability_threshold) * "
+                "bonus_property_band_eligibility) * "
                 "exp(-strength * logp_excess_z^2) * "
                 "exp(-strength * sas_excess_z^2) * "
                 "(1 - heavy_atom_penalty_weight * "
@@ -910,6 +914,9 @@ class GRPOTrainingRun:
                 ),
                 activity_threshold_bonus_weight=(
                     self.config.activity_threshold_bonus_weight
+                ),
+                activity_threshold_bonus_requires_property_band=(
+                    self.config.activity_threshold_bonus_requires_property_band
                 ),
             )
             if self.config.property_reward_shaping
@@ -1033,6 +1040,9 @@ class GRPOTrainingRun:
             ),
             "activity_threshold_bonus_weight": (
                 self.config.activity_threshold_bonus_weight
+            ),
+            "activity_threshold_bonus_requires_property_band": (
+                self.config.activity_threshold_bonus_requires_property_band
             ),
             "train_policy_encoder": self.config.train_policy_encoder,
             "decoder_train_scope": self.config.decoder_train_scope,
@@ -1366,6 +1376,8 @@ class GRPOTrainingRun:
         diagnostic_names = (
             "activity_probability",
             "activity_optimization_reward",
+            "property_band_eligible",
+            "activity_threshold_bonus_eligible",
             "logp_penalty_factor",
             "sas_penalty_factor",
             "heavy_atom_penalty_factor",
@@ -1422,6 +1434,13 @@ class GRPOTrainingRun:
                 diagnostics["activity_optimization_reward"][
                     valid_indices
                 ] = reward_values
+            if "property_band_eligible" not in valid_diagnostics:
+                diagnostics["property_band_eligible"][valid_indices] = 1.0
+            if "activity_threshold_bonus_eligible" not in valid_diagnostics:
+                diagnostics["activity_threshold_bonus_eligible"][valid_indices] = (
+                    diagnostics["activity_probability"][valid_indices]
+                    >= self.config.activity_probability_threshold
+                ).astype(np.float32)
             if "logp_penalty_factor" not in valid_diagnostics:
                 diagnostics["logp_penalty_factor"][valid_indices] = 1.0
                 diagnostics["sas_penalty_factor"][valid_indices] = 1.0
@@ -1525,6 +1544,20 @@ class GRPOTrainingRun:
             "valid_activity_optimization_reward_mean": (
                 float(
                     diagnostics["activity_optimization_reward"][
+                        valid_indices
+                    ].mean()
+                )
+                if valid_indices
+                else 0.0
+            ),
+            "valid_property_band_eligible_fraction": (
+                float(diagnostics["property_band_eligible"][valid_indices].mean())
+                if valid_indices
+                else 0.0
+            ),
+            "valid_activity_threshold_bonus_eligible_fraction": (
+                float(
+                    diagnostics["activity_threshold_bonus_eligible"][
                         valid_indices
                     ].mean()
                 )
@@ -1715,6 +1748,12 @@ class GRPOTrainingRun:
                 "predicted_active": bool(
                     diagnostics["activity_probability"][index]
                     >= self.config.activity_probability_threshold
+                ),
+                "property_band_eligible": bool(
+                    diagnostics["property_band_eligible"][index]
+                ),
+                "activity_threshold_bonus_eligible": bool(
+                    diagnostics["activity_threshold_bonus_eligible"][index]
                 ),
                 "property_shaped_reward": float(property_rewards[index]),
                 "final_reward": float(rewards[index]),
@@ -1920,6 +1959,16 @@ class GRPOTrainingRun:
                 rows,
                 "valid_activity_optimization_reward_mean",
             ),
+            "eval/valid_property_band_eligible_fraction_macro": self._macro(
+                rows,
+                "valid_property_band_eligible_fraction",
+            ),
+            "eval/valid_activity_threshold_bonus_eligible_fraction_macro": (
+                self._macro(
+                    rows,
+                    "valid_activity_threshold_bonus_eligible_fraction",
+                )
+            ),
             "eval/property_penalty_factor_mean_macro": self._macro(
                 rows,
                 "property_penalty_factor_mean",
@@ -2062,6 +2111,8 @@ class GRPOTrainingRun:
                 "valid_activity_probability_mean",
                 "valid_activity_probability_active_fraction",
                 "valid_activity_optimization_reward_mean",
+                "valid_property_band_eligible_fraction",
+                "valid_activity_threshold_bonus_eligible_fraction",
                 "property_penalty_factor_mean",
                 "logp_penalty_factor_mean",
                 "sas_penalty_factor_mean",
@@ -2434,6 +2485,15 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Mix this weight of the binary activity-threshold indicator into "
             "the activity optimization reward while retaining raw probability "
             "for metrics"
+        ),
+    )
+    reward.add_argument(
+        "--activity_threshold_bonus_requires_property_band",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Award the binary activity-threshold bonus only when LogP, SAS, and "
+            "heavy atoms are also inside the target-derived property bands"
         ),
     )
     reward.add_argument(
