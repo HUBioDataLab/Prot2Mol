@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
+from rdkit import Chem
 
+from prot2mol.rewards import diversity
 from prot2mol.rewards.diversity import (
     internal_diversity_factors,
     scaffold_diversity_summary,
@@ -70,6 +72,24 @@ def test_scaffold_metrics_ignore_acyclic_molecules_and_invalid_rows():
 
     assert summary["scaffold_available_fraction"] == pytest.approx(2.0 / 3.0)
     assert summary["scaffold_unique_fraction"] == pytest.approx(0.5)
+
+
+def test_scaffold_metrics_treat_rdkit_extraction_failures_as_unavailable(
+    monkeypatch,
+):
+    def fail_scaffold_extraction(_molecule):
+        raise Chem.rdchem.AtomValenceException("unsupported scaffold valence")
+
+    monkeypatch.setattr(
+        diversity.MurckoScaffold,
+        "GetScaffoldForMol",
+        fail_scaffold_extraction,
+    )
+
+    summary = scaffold_diversity_summary(["c1ccccc1"], [True])
+
+    assert summary["scaffold_available_fraction"] == pytest.approx(0.0)
+    assert summary["scaffold_unique_fraction"] == pytest.approx(0.0)
 
 
 def test_diversity_rejects_misaligned_or_incomplete_groups():

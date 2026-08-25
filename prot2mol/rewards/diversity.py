@@ -170,8 +170,15 @@ def scaffold_diversity_summary(
                 f"could not parse sample {index}"
             )
         valid_count += 1
-        scaffold = MurckoScaffold.GetScaffoldForMol(molecule)
-        scaffold_smiles = Chem.MolToSmiles(scaffold)
+        try:
+            scaffold = MurckoScaffold.GetScaffoldForMol(molecule)
+            scaffold_smiles = Chem.MolToSmiles(scaffold)
+        except (RuntimeError, ValueError):
+            # RDKit can parse some unusual organometallic molecules but fail
+            # later while updating the property cache for Murcko extraction.
+            # The molecule can still contribute to the other evaluation
+            # metrics; only its scaffold is unavailable.
+            continue
         if scaffold_smiles:
             scaffolds.append(scaffold_smiles)
     return {
