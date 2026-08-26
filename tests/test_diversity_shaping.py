@@ -5,6 +5,7 @@ from rdkit import Chem
 from prot2mol.rewards import diversity
 from prot2mol.rewards.diversity import (
     internal_diversity_factors,
+    reference_ecfp4_similarity,
     scaffold_diversity_summary,
 )
 
@@ -90,6 +91,23 @@ def test_scaffold_metrics_treat_rdkit_extraction_failures_as_unavailable(
 
     assert summary["scaffold_available_fraction"] == pytest.approx(0.0)
     assert summary["scaffold_unique_fraction"] == pytest.approx(0.0)
+
+
+def test_reference_ecfp4_similarity_is_target_specific_and_scaffold_aware():
+    result = reference_ecfp4_similarity(
+        ["c1ccccc1", "Cc1ccccc1", "CCO", ""],
+        [True, True, True, False],
+        ["c1ccccc1", "CCN", "c1ccccc1"],
+    )
+
+    assert result.reference_count == 2
+    assert result.reference_scaffold_count == 1
+    assert result.canonical_smiles[0] == "c1ccccc1"
+    assert result.novel == pytest.approx([0.0, 1.0, 1.0, 0.0])
+    assert result.max_tanimoto_similarity[0] == pytest.approx(1.0)
+    assert 0.0 < result.max_tanimoto_similarity[1] < 1.0
+    assert result.max_scaffold_tanimoto_similarity[:2] == pytest.approx([1.0, 1.0])
+    assert result.scaffold_comparable == pytest.approx([1.0, 1.0, 0.0, 0.0])
 
 
 def test_diversity_rejects_misaligned_or_incomplete_groups():

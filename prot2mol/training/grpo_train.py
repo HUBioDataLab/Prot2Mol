@@ -42,6 +42,7 @@ from ..rewards import (
     TargetActivePropertyStats,
     TargetPropertyShapedActivityScorer,
     internal_diversity_factors,
+    reference_ecfp4_similarity,
     scaffold_diversity_summary,
 )
 from .grpo import GRPOConfig, GRPOTrainer, selfies_to_smiles, valid_selfies
@@ -1386,20 +1387,33 @@ class GRPOTrainingRun:
             )
             with autocast:
                 embeddings = self.policy.encode_protein(protein_ids, protein_mask)
-                generated_ids = self.policy.generate_from_protein_embeddings(
-                    embeddings.repeat(self.config.eval_samples_per_protein, 1, 1),
-                    protein_mask.repeat(self.config.eval_samples_per_protein, 1),
-                    max_length=self.config.max_mol_len,
-                    min_length=self.config.min_mol_len,
-                    do_sample=True,
-                    temperature=self.config.temperature,
-                    top_p=self.config.top_p,
-                    bos_token_id=(
-                        int(self.policy.config.pad_token_id)
-                        if self.config.generation_start_mode == "legacy_pad"
-                        else int(self.policy.config.bos_token_id)
-                    ),
-                )
+                generated_batches = []
+                for start in range(
+                    0,
+                    self.config.eval_samples_per_protein,
+                    self.config.eval_generation_batch_size,
+                ):
+                    batch_size = min(
+                        self.config.eval_generation_batch_size,
+                        self.config.eval_samples_per_protein - start,
+                    )
+                    generated_batches.append(
+                        self.policy.generate_from_protein_embeddings(
+                            embeddings.repeat(batch_size, 1, 1),
+                            protein_mask.repeat(batch_size, 1),
+                            max_length=self.config.max_mol_len,
+                            min_length=self.config.min_mol_len,
+                            do_sample=True,
+                            temperature=self.config.temperature,
+                            top_p=self.config.top_p,
+                            bos_token_id=(
+                                int(self.policy.config.pad_token_id)
+                                if self.config.generation_start_mode == "legacy_pad"
+                                else int(self.policy.config.bos_token_id)
+                            ),
+                        ).detach().cpu()
+                    )
+                generated_ids = torch.cat(generated_batches)
         if was_training:
             self.policy.train()
         selfies = [
@@ -1531,6 +1545,22 @@ class GRPOTrainingRun:
         local_comparable = diagnostics["diversity_comparable"].astype(bool)
         global_comparable = global_diversity["diversity_comparable"].astype(bool)
         scaffold_metrics = scaffold_diversity_summary(smiles, valid)
+        reference_similarity = reference_ecfp4_similarity(
+            smiles,
+            valid,
+            target.active_reference_smiles,
+            morgan_bits=self.config.diversity_morgan_bits,
+        )
+        reference_scaffold_comparable = (
+            reference_similarity.scaffold_comparable.astype(bool)
+        )
+        unique_novelty = {
+            reference_similarity.canonical_smiles[index]: bool(
+                reference_similarity.novel[index]
+            )
+            for index in valid_indices
+            if reference_similarity.canonical_smiles[index]
+        }
         if self.config.diversity_reward_shaping:
             rewards *= diversity.penalty_factor
         diagnostics["final_reward"] = rewards.copy()
@@ -1556,6 +1586,36 @@ class GRPOTrainingRun:
             "terminated_fraction": float(np.mean(terminated)),
             "valid_unique_fraction": (
                 len(set(valid_smiles)) / len(valid_smiles) if valid_smiles else 0.0
+            ),
+            "novelty_reference_fraction": (
+                float(np.mean(list(unique_novelty.values())))
+                if unique_novelty
+                else 0.0
+            ),
+            "reference_ecfp4_tanimoto_mean": (
+                float(
+                    reference_similarity.max_tanimoto_similarity[
+                        valid_indices
+                    ].mean()
+                )
+                if valid_indices and reference_similarity.reference_count
+                else 0.0
+            ),
+            "reference_scaffold_ecfp4_tanimoto_mean": (
+                float(
+                    reference_similarity.max_scaffold_tanimoto_similarity[
+                        reference_scaffold_comparable
+                    ].mean()
+                )
+                if reference_scaffold_comparable.any()
+                else 0.0
+            ),
+            "reference_scaffold_comparable_fraction": (
+                float(
+                    reference_similarity.scaffold_comparable[valid_indices].mean()
+                )
+                if valid_indices
+                else 0.0
             ),
             "reward_mean": float(rewards.mean()),
             "valid_reward_mean": (
@@ -1800,9 +1860,22 @@ class GRPOTrainingRun:
                 "sample_index": index,
                 "generated_selfies": selfies[index],
                 "generated_smiles": smiles[index],
+                "canonical_smiles": reference_similarity.canonical_smiles[index],
                 "terminated": bool(terminated[index]),
                 "chemically_valid": chemically_valid[index],
                 "reward_eligible": valid[index],
+                "novel_against_target_train_actives": bool(
+                    reference_similarity.novel[index]
+                ),
+                "reference_ecfp4_tanimoto_max": float(
+                    reference_similarity.max_tanimoto_similarity[index]
+                ),
+                "reference_scaffold_ecfp4_tanimoto_max": float(
+                    reference_similarity.max_scaffold_tanimoto_similarity[index]
+                ),
+                "reference_scaffold_comparable": bool(
+                    reference_similarity.scaffold_comparable[index]
+                ),
                 "activity_reward": float(rewards[index]),
                 "activity_probability": float(
                     diagnostics["activity_probability"][index]
@@ -1912,6 +1985,7 @@ class GRPOTrainingRun:
             "global_step": global_step,
             "sampling_seed": self.config.eval_seed,
             "samples_per_protein": self.config.eval_samples_per_protein,
+            "generation_batch_size": self.config.eval_generation_batch_size,
             "generation_start_mode": self.config.generation_start_mode,
             "decoder_train_scope": self.config.decoder_train_scope,
             "heavy_atom_penalty_weight": self.config.heavy_atom_penalty_weight,
@@ -1994,6 +2068,22 @@ class GRPOTrainingRun:
             "eval/terminated_fraction_macro": self._macro(rows, "terminated_fraction"),
             "eval/valid_unique_fraction_macro": self._macro(
                 rows, "valid_unique_fraction"
+            ),
+            "eval/novelty_reference_fraction_macro": self._macro(
+                rows,
+                "novelty_reference_fraction",
+            ),
+            "eval/reference_ecfp4_tanimoto_mean_macro": self._macro(
+                rows,
+                "reference_ecfp4_tanimoto_mean",
+            ),
+            "eval/reference_scaffold_ecfp4_tanimoto_mean_macro": self._macro(
+                rows,
+                "reference_scaffold_ecfp4_tanimoto_mean",
+            ),
+            "eval/reference_scaffold_comparable_fraction_macro": self._macro(
+                rows,
+                "reference_scaffold_comparable_fraction",
             ),
             "eval/reward_mean_macro": self._macro(rows, "reward_mean"),
             "eval/valid_reward_mean_macro": self._macro(rows, "valid_reward_mean"),
@@ -2179,6 +2269,10 @@ class GRPOTrainingRun:
                 "valid_fraction",
                 "terminated_fraction",
                 "valid_unique_fraction",
+                "novelty_reference_fraction",
+                "reference_ecfp4_tanimoto_mean",
+                "reference_scaffold_ecfp4_tanimoto_mean",
+                "reference_scaffold_comparable_fraction",
                 "reward_mean",
                 "valid_reward_mean",
                 "property_shaped_reward_mean",
@@ -2698,6 +2792,12 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Panel proteins that receive individual W&B scalar series",
     )
     evaluation.add_argument("--eval_samples_per_protein", type=int, default=64)
+    evaluation.add_argument(
+        "--eval_generation_batch_size",
+        type=int,
+        default=128,
+        help="Maximum molecules generated at once during evaluation",
+    )
     evaluation.add_argument("--eval_seed", type=int, default=17)
     evaluation.add_argument("--min_fcd_reference_actives", type=int, default=201)
     evaluation.add_argument("--fcd_batch_size", type=int, default=256)
@@ -2766,6 +2866,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "diversity_morgan_radius": config.diversity_morgan_radius,
         "diversity_morgan_bits": config.diversity_morgan_bits,
         "eval_samples_per_protein": config.eval_samples_per_protein,
+        "eval_generation_batch_size": config.eval_generation_batch_size,
     }
     invalid = {key: value for key, value in positive.items() if value <= 0}
     if invalid:

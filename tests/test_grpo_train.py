@@ -560,6 +560,8 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
             "P1",
             "--eval_samples_per_protein",
             "8",
+            "--eval_generation_batch_size",
+            "3",
             "--min_fcd_reference_actives",
             "2",
             "--eval_steps",
@@ -597,6 +599,11 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     ).exists()
     assert (output / "evaluation" / "end" / "generated_molecules.parquet").exists()
     assert (output / "evaluation" / "end" / "per_protein_metrics.parquet").exists()
+    endpoint_metadata = json.loads(
+        (output / "evaluation" / "end" / "metadata.json").read_text()
+    )
+    assert endpoint_metadata["samples_per_protein"] == 8
+    assert endpoint_metadata["generation_batch_size"] == 3
     endpoint_rows = pd.read_parquet(
         output / "evaluation" / "end" / "generated_molecules.parquet"
     )
@@ -604,9 +611,14 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert {
         "generated_selfies",
         "generated_smiles",
+        "canonical_smiles",
         "terminated",
         "chemically_valid",
         "reward_eligible",
+        "novel_against_target_train_actives",
+        "reference_ecfp4_tanimoto_max",
+        "reference_scaffold_ecfp4_tanimoto_max",
+        "reference_scaffold_comparable",
         "activity_reward",
         "activity_probability",
         "activity_optimization_reward",
@@ -687,6 +699,12 @@ def test_full_grpo_runner_logs_train_eval_chemistry_fcd_and_saves_resume_state(
     assert any("eval/exact_duplicate_fraction_macro" in values for values in logged)
     assert any("eval/global_internal_diversity_mean_macro" in values for values in logged)
     assert any("eval/scaffold_unique_fraction_macro" in values for values in logged)
+    assert any("eval/novelty_reference_fraction_macro" in values for values in logged)
+    assert any("eval/reference_ecfp4_tanimoto_mean_macro" in values for values in logged)
+    assert any(
+        "eval/reference_scaffold_ecfp4_tanimoto_mean_macro" in values
+        for values in logged
+    )
     assert any("eval/per_protein" in values for values in logged)
     assert any("eval/targets/P1/fcd" in values for values in logged)
     assert fake_runs[0].finished is True

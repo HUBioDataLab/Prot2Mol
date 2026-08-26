@@ -37,6 +37,131 @@ class InternalDiversityResult:
         }
 
 
+@dataclass(frozen=True)
+class ReferenceSimilarityResult:
+    """Per-sample ECFP4 comparisons against target-specific references."""
+
+    canonical_smiles: list[str]
+    novel: np.ndarray
+    max_tanimoto_similarity: np.ndarray
+    max_scaffold_tanimoto_similarity: np.ndarray
+    scaffold_comparable: np.ndarray
+    reference_count: int
+    reference_scaffold_count: int
+
+
+def _murcko_scaffold_smiles(molecule: Chem.Mol) -> str | None:
+    try:
+        scaffold = MurckoScaffold.GetScaffoldForMol(molecule)
+        scaffold_smiles = Chem.MolToSmiles(scaffold)
+    except (RuntimeError, ValueError):
+        return None
+    return scaffold_smiles or None
+
+
+def reference_ecfp4_similarity(
+    smiles: Sequence[str],
+    valid_mask: Sequence[bool],
+    reference_smiles: Sequence[str],
+    *,
+    morgan_bits: int = 2_048,
+) -> ReferenceSimilarityResult:
+    """Compare valid molecules with target references using radius-2 Morgan FPs.
+
+    Full-molecule and Bemis-Murcko-scaffold similarities are the maximum
+    Tanimoto similarity to any target reference. Arrays remain aligned with the
+    input; invalid or scaffold-unavailable rows carry zero and are identified
+    by the validity/scaffold masks.
+    """
+
+    if len(smiles) != len(valid_mask):
+        raise ValueError("SMILES and reference-similarity validity masks must align")
+    if morgan_bits < 1:
+        raise ValueError("morgan_bits must be positive")
+
+    canonical_references: dict[str, Chem.Mol] = {}
+    for value in reference_smiles:
+        molecule = get_mol(value)
+        if molecule is not None:
+            canonical_references.setdefault(Chem.MolToSmiles(molecule), molecule)
+
+    generator = rdFingerprintGenerator.GetMorganGenerator(
+        radius=2,
+        fpSize=morgan_bits,
+    )
+    reference_fingerprints = [
+        generator.GetFingerprint(molecule)
+        for molecule in canonical_references.values()
+    ]
+    reference_scaffolds: dict[str, Chem.Mol] = {}
+    for molecule in canonical_references.values():
+        scaffold_smiles = _murcko_scaffold_smiles(molecule)
+        if scaffold_smiles is None:
+            continue
+        scaffold = get_mol(scaffold_smiles)
+        if scaffold is not None:
+            reference_scaffolds.setdefault(scaffold_smiles, scaffold)
+    reference_scaffold_fingerprints = [
+        generator.GetFingerprint(molecule)
+        for molecule in reference_scaffolds.values()
+    ]
+
+    canonical_smiles = [""] * len(smiles)
+    novel = np.zeros(len(smiles), dtype=np.float32)
+    maximum = np.zeros(len(smiles), dtype=np.float32)
+    scaffold_maximum = np.zeros(len(smiles), dtype=np.float32)
+    scaffold_comparable = np.zeros(len(smiles), dtype=np.float32)
+    reference_set = set(canonical_references)
+
+    for index, is_valid in enumerate(valid_mask):
+        if not is_valid:
+            continue
+        molecule = get_mol(smiles[index])
+        if molecule is None:
+            raise ValueError(
+                "Reference similarity received a molecule marked valid but "
+                f"RDKit could not parse sample {index}"
+            )
+        canonical = Chem.MolToSmiles(molecule)
+        canonical_smiles[index] = canonical
+        if reference_fingerprints:
+            novel[index] = float(canonical not in reference_set)
+            maximum[index] = float(
+                max(
+                    DataStructs.BulkTanimotoSimilarity(
+                        generator.GetFingerprint(molecule),
+                        reference_fingerprints,
+                    )
+                )
+            )
+
+        scaffold_smiles = _murcko_scaffold_smiles(molecule)
+        if scaffold_smiles is None or not reference_scaffold_fingerprints:
+            continue
+        scaffold = get_mol(scaffold_smiles)
+        if scaffold is None:
+            continue
+        scaffold_maximum[index] = float(
+            max(
+                DataStructs.BulkTanimotoSimilarity(
+                    generator.GetFingerprint(scaffold),
+                    reference_scaffold_fingerprints,
+                )
+            )
+        )
+        scaffold_comparable[index] = 1.0
+
+    return ReferenceSimilarityResult(
+        canonical_smiles=canonical_smiles,
+        novel=novel,
+        max_tanimoto_similarity=maximum,
+        max_scaffold_tanimoto_similarity=scaffold_maximum,
+        scaffold_comparable=scaffold_comparable,
+        reference_count=len(canonical_references),
+        reference_scaffold_count=len(reference_scaffolds),
+    )
+
+
 def internal_diversity_factors(
     smiles: Sequence[str],
     valid_mask: Sequence[bool],
@@ -170,14 +295,11 @@ def scaffold_diversity_summary(
                 f"could not parse sample {index}"
             )
         valid_count += 1
-        try:
-            scaffold = MurckoScaffold.GetScaffoldForMol(molecule)
-            scaffold_smiles = Chem.MolToSmiles(scaffold)
-        except (RuntimeError, ValueError):
-            # RDKit can parse some unusual organometallic molecules but fail
-            # later while updating the property cache for Murcko extraction.
-            # The molecule can still contribute to the other evaluation
-            # metrics; only its scaffold is unavailable.
+        scaffold_smiles = _murcko_scaffold_smiles(molecule)
+        # RDKit can parse some unusual organometallic molecules but fail later
+        # while updating the property cache for Murcko extraction. The molecule
+        # still contributes to other metrics; only its scaffold is unavailable.
+        if scaffold_smiles is None:
             continue
         if scaffold_smiles:
             scaffolds.append(scaffold_smiles)

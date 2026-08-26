@@ -150,6 +150,7 @@ grpo:
     - P31749
     - P24941
   eval_samples_per_protein: 64
+  eval_generation_batch_size: 128
   eval_seed: 17
   # Strictly more than 200 unique active validation molecules.
   min_fcd_reference_actives: 201

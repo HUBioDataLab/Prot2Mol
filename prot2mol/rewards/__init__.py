@@ -2,7 +2,9 @@
 
 from .diversity import (
     InternalDiversityResult,
+    ReferenceSimilarityResult,
     internal_diversity_factors,
+    reference_ecfp4_similarity,
     scaffold_diversity_summary,
 )
 
@@ -43,6 +45,8 @@ __all__ = [
     "TargetPropertyShapedActivityScorer",
     "InternalRewardModelActivityScorer",
     "InternalDiversityResult",
+    "ReferenceSimilarityResult",
     "internal_diversity_factors",
+    "reference_ecfp4_similarity",
     "scaffold_diversity_summary",
 ]
