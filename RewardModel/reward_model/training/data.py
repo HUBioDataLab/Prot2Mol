@@ -229,6 +229,7 @@ def _prepare_split_rows(
     *,
     activity_threshold: float = 6.0,
     molecule_input_representation: str = "selfies",
+    enforce_binary_label_threshold: bool = True,
 ) -> List[Dict[str, Any]]:
     molecule_input_column = MOLECULE_INPUT_COLUMNS[molecule_input_representation]
     prepared_rows: List[Dict[str, Any]] = []
@@ -238,7 +239,7 @@ def _prepare_split_rows(
         pchembl_value = float(row["pchembl_value"])
         binary_label = int(row["binary_label"])
         expected_label = int(pchembl_value >= activity_threshold)
-        if binary_label != expected_label:
+        if enforce_binary_label_threshold and binary_label != expected_label:
             raise ValueError(
                 "binary_label does not match the configured pChEMBL activity threshold: "
                 f"row={index}, pchembl_value={pchembl_value}, "
@@ -433,6 +434,9 @@ def prepare_tokenized_split_datasets(
             activity_threshold=model_config.activity_threshold,
             molecule_input_representation=(
                 model_config.molecule_input_representation
+            ),
+            enforce_binary_label_threshold=(
+                data_config.enforce_binary_label_threshold
             ),
         )
         tokenized = _tokenize_example_rows(

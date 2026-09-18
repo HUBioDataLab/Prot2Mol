@@ -34,6 +34,9 @@ class RewardTrainingDataConfig:
     evaluation_ranking_partitions: int = 3
     ranking_min_pchembl_span: float = 0.5
     max_classification_only_per_item: int = 16
+    # Datasets whose labels were harmonised across assays intentionally
+    # break the row-wise binary_label == (pchembl >= threshold) identity.
+    enforce_binary_label_threshold: bool = True
 
     def __post_init__(self) -> None:
         self.validate()
