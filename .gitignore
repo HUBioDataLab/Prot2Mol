@@ -15,3 +15,4 @@ analysis/
 prot2mol_env/
 wandb/
 outputs/
+artifacts/
