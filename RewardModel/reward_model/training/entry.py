@@ -35,6 +35,8 @@ _WARM_START_ARCHITECTURE_FIELDS = (
     "projection_type",
     "fusion_num_heads",
     "fusion_num_layers",
+    "fusion_output_projection",
+    "fusion_ffn_multiplier",
     "fusion_residual",
     "pooling_type",
     "protein_pooling_type",

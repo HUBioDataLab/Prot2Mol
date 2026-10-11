@@ -34,6 +34,8 @@ class TokenFusion(nn.Module):
         attention_backend: str = "manual",
         residual: bool = False,
         dropout: float = 0.0,
+        output_projection: bool = False,
+        ffn_multiplier: int = 0,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -64,6 +66,74 @@ class TokenFusion(nn.Module):
 
         self.protein_residual_norm = nn.LayerNorm(hidden_dim) if residual else None
         self.molecule_residual_norm = nn.LayerNorm(hidden_dim) if residual else None
+
+        self.output_projection = bool(output_projection)
+        self.ffn_multiplier = int(ffn_multiplier)
+        if self.ffn_multiplier < 0:
+            raise ValueError("ffn_multiplier must be >= 0")
+
+        # One W_O per attention direction, applied before the two are averaged,
+        # so self- and cross-attention can weight their heads independently.
+        if self.output_projection:
+            self.protein_self_output = nn.Linear(hidden_dim, hidden_dim)
+            self.protein_cross_output = nn.Linear(hidden_dim, hidden_dim)
+            self.molecule_self_output = nn.Linear(hidden_dim, hidden_dim)
+            self.molecule_cross_output = nn.Linear(hidden_dim, hidden_dim)
+        else:
+            self.protein_self_output = None
+            self.protein_cross_output = None
+            self.molecule_self_output = None
+            self.molecule_cross_output = None
+
+        # Position-wise feed-forward sublayer, one per stream, each with its own
+        # residual and LayerNorm so it is a self-contained second sublayer.
+        if self.ffn_multiplier > 0:
+            inner_dim = hidden_dim * self.ffn_multiplier
+            self.protein_ffn = nn.Sequential(
+                nn.Linear(hidden_dim, inner_dim),
+                nn.GELU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(inner_dim, hidden_dim),
+            )
+            self.molecule_ffn = nn.Sequential(
+                nn.Linear(hidden_dim, inner_dim),
+                nn.GELU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(inner_dim, hidden_dim),
+            )
+            self.protein_ffn_norm = nn.LayerNorm(hidden_dim)
+            self.molecule_ffn_norm = nn.LayerNorm(hidden_dim)
+        else:
+            self.protein_ffn = None
+            self.molecule_ffn = None
+            self.protein_ffn_norm = None
+            self.molecule_ffn_norm = None
+
+    def _combine_directions(
+        self,
+        self_attended: torch.Tensor,
+        cross_attended: torch.Tensor,
+        self_output: Optional[nn.Module],
+        cross_output: Optional[nn.Module],
+    ) -> torch.Tensor:
+        if self.output_projection:
+            if self_output is None or cross_output is None:
+                raise RuntimeError("Attention output projections are not initialized")
+            self_attended = self_output(self_attended)
+            cross_attended = cross_output(cross_attended)
+        return (self_attended + cross_attended) / 2.0
+
+    def _apply_ffn(
+        self,
+        tokens: torch.Tensor,
+        ffn: Optional[nn.Module],
+        norm: Optional[nn.Module],
+    ) -> torch.Tensor:
+        if ffn is None:
+            return tokens
+        if norm is None:
+            raise RuntimeError("Feed-forward normalization is not initialized")
+        return norm(tokens + ffn(tokens))
 
     def _apply_heads(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, _ = x.shape
@@ -128,38 +198,18 @@ class TokenFusion(nn.Module):
         molecule_v = self._apply_heads(self.value_m(molecule_tokens))
 
         if self.attention_backend == "sdpa":
-            fused_protein = (
-                self._sdpa(
-                    protein_q,
-                    protein_k,
-                    protein_v,
-                    protein_mask,
-                    protein_mask,
-                )
-                + self._sdpa(
-                    protein_q,
-                    molecule_k,
-                    molecule_v,
-                    protein_mask,
-                    molecule_mask,
-                )
-            ) / 2.0
-            fused_molecule = (
-                self._sdpa(
-                    molecule_q,
-                    protein_k,
-                    protein_v,
-                    molecule_mask,
-                    protein_mask,
-                )
-                + self._sdpa(
-                    molecule_q,
-                    molecule_k,
-                    molecule_v,
-                    molecule_mask,
-                    molecule_mask,
-                )
-            ) / 2.0
+            protein_self = self._sdpa(
+                protein_q, protein_k, protein_v, protein_mask, protein_mask
+            )
+            protein_cross = self._sdpa(
+                protein_q, molecule_k, molecule_v, protein_mask, molecule_mask
+            )
+            molecule_self = self._sdpa(
+                molecule_q, molecule_k, molecule_v, molecule_mask, molecule_mask
+            )
+            molecule_cross = self._sdpa(
+                molecule_q, protein_k, protein_v, molecule_mask, protein_mask
+            )
         else:
             logits_pp = torch.einsum(
                 "blhd,bkhd->blkh", protein_q, protein_k
@@ -179,20 +229,44 @@ class TokenFusion(nn.Module):
             alpha_mp = self._masked_softmax(logits_mp, molecule_mask, protein_mask)
             alpha_mm = self._masked_softmax(logits_mm, molecule_mask, molecule_mask)
 
-            fused_protein = (
-                torch.einsum("blkh,bkhd->blhd", alpha_pp, protein_v).flatten(-2)
-                + torch.einsum("blkh,bkhd->blhd", alpha_pm, molecule_v).flatten(-2)
-            ) / 2.0
-            fused_molecule = (
-                torch.einsum("blkh,bkhd->blhd", alpha_mp, protein_v).flatten(-2)
-                + torch.einsum("blkh,bkhd->blhd", alpha_mm, molecule_v).flatten(-2)
-            ) / 2.0
+            protein_self = torch.einsum(
+                "blkh,bkhd->blhd", alpha_pp, protein_v
+            ).flatten(-2)
+            protein_cross = torch.einsum(
+                "blkh,bkhd->blhd", alpha_pm, molecule_v
+            ).flatten(-2)
+            molecule_self = torch.einsum(
+                "blkh,bkhd->blhd", alpha_mm, molecule_v
+            ).flatten(-2)
+            molecule_cross = torch.einsum(
+                "blkh,bkhd->blhd", alpha_mp, protein_v
+            ).flatten(-2)
+
+        fused_protein = self._combine_directions(
+            protein_self,
+            protein_cross,
+            self.protein_self_output,
+            self.protein_cross_output,
+        )
+        fused_molecule = self._combine_directions(
+            molecule_self,
+            molecule_cross,
+            self.molecule_self_output,
+            self.molecule_cross_output,
+        )
 
         if self.residual:
             if self.protein_residual_norm is None or self.molecule_residual_norm is None:
                 raise RuntimeError("Residual fusion norms are not initialized")
             fused_protein = self.protein_residual_norm(protein_tokens + fused_protein)
             fused_molecule = self.molecule_residual_norm(molecule_tokens + fused_molecule)
+
+        fused_protein = self._apply_ffn(
+            fused_protein, self.protein_ffn, self.protein_ffn_norm
+        )
+        fused_molecule = self._apply_ffn(
+            fused_molecule, self.molecule_ffn, self.molecule_ffn_norm
+        )
 
         fused_protein = fused_protein * protein_mask.unsqueeze(-1).to(fused_protein.dtype)
         fused_molecule = fused_molecule * molecule_mask.unsqueeze(-1).to(fused_molecule.dtype)

@@ -1,0 +1,117 @@
+# fusion512 / ESM2-35M on the SCAFFOLD-COMPONENT split, LigUnity listwise ranking
+# plus classification (0.5 / 0.5), pair_scoring_mode=mlp, ONE fusion block.
+#
+# ARCHITECTURE VARIANT: OUTPUT PROJECTION + 4x FEED-FORWARD
+#
+# Adds BOTH missing pieces of a standard transformer block:
+#
+#   1. per-direction output projection W_O (four Linear(512, 512), +1,050,624)
+#   2. a position-wise feed-forward sublayer per stream, 512 -> 2048 -> 512 with
+#      GELU, each with its own residual and LayerNorm (+4,201,472)
+#
+# Total fusion block 1,574,912 -> 6,827,008 parameters. Attention only MOVES
+# information between positions; the FFN is where per-token nonlinear
+# transformation happens, and the baseline block has none at all.
+#
+# Measured peak memory is 86.3 GiB at 12 x 4, too close to the 97.9 GiB card, so
+# batch is 8 with accumulation 6. Effective batch is 8 x 6 = 48 items, IDENTICAL
+# to the baseline's 12 x 4 = 48, so the optimizer sees the same number of steps
+# over the same amount of data.
+#
+# Also carries the ranking-head change that tested better: 1024 -> 512 -> 1.
+# The classification head stays at the baseline 1024 -> 128 -> 1.
+#
+# Everything else matches reward_train_fusion512_ranking_scaffold_median.yaml,
+# so the comparison against it isolates these changes. Reuses that run's
+# tokenized cache; no re-tokenization needed.
+
+model:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_hidden_dropout_prob: 0.0
+  protein_attention_probs_dropout_prob: 0.0
+  molecule_input_representation: selfies
+  molecule_hidden_dropout_prob: 0.1
+  molecule_attention_probs_dropout_prob: 0.1
+  protein_max_length: 1024
+  molecule_max_length: 256
+  fusion_hidden_dim: 512
+  projection_type: nonlinear
+  fusion_num_heads: 8
+  fusion_num_layers: 1
+  fusion_output_projection: true
+  fusion_ffn_multiplier: 4
+  fusion_attention_backend: sdpa
+  fusion_residual: true
+  dropout: 0.0
+  pooling_type: cls
+  protein_pooling_type: mean
+  molecule_pooling_type: cls
+  pair_scoring_mode: mlp
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
+  activity_threshold: 6.0
+  ranking_loss_weight: 0.5
+  contrastive_loss_weight: 0.0
+  contrastive_active_threshold: 6.0
+  contrastive_strict_active_only: true
+  classification_loss_weight: 0.5
+  ranking_head_hidden_dims: [512]
+  classification_head_hidden_dims: [128]
+  ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
+  ranking_min_pchembl_span: 0.5
+  bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
+
+data:
+  train_parquet_path: ../../dataset/processed/chembl_37/scaffold_component_split_median/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl_37/scaffold_component_split_median/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl_37/scaffold_component_split_median/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl_37_scaffold_component_split_median
+  tokenization_batch_size: 64
+  tokenization_num_proc: 8
+  enforce_binary_label_threshold: false
+  ranking_max_ligands: 16
+  ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
+  ranking_min_pchembl_span: 0.5
+  max_classification_only_per_item: 16
+
+training:
+  output_dir: ../outputs/fusion512_ranking_wo_ffn4x_scaffold_median
+  num_train_epochs: 100
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 6
+  learning_rate: 1.0e-4
+  protein_encoder_learning_rate: 1.0e-5
+  molecule_encoder_learning_rate: 1.0e-5
+  projection_learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 4
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
+  seed: 42
+  fp16: false
+  bf16: true
+  optim: adamw_torch_fused
+  save_safetensors: false
+  save_total_limit: 2
+  training_mode: single_gpu
+  metrics_profile: full
+  ranking_score_diagnostics: false
+  objective_gradient_diagnostics_steps: 0
+  fixed_train_eval_assays: 0
+  protein_shuffle_sensitivity: false
+  metric_for_best_model: eval_loss
+  greater_is_better: false
+  report_to:
+    - wandb

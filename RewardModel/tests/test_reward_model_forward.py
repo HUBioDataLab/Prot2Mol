@@ -1027,3 +1027,133 @@ def test_stacked_fusion_forward_trains_both_blocks():
     for block in (model.fusion, model.extra_fusion_layers[0]):
         assert block.query_p.weight.grad is not None
         assert block.query_p.weight.grad.abs().sum().item() > 0.0
+
+
+def test_fusion_output_projection_and_ffn_default_to_off():
+    model = _build_model()
+
+    assert model.config.fusion_output_projection is False
+    assert model.config.fusion_ffn_multiplier == 0
+    block = model.fusion
+    assert block.protein_self_output is None
+    assert block.protein_cross_output is None
+    assert block.molecule_self_output is None
+    assert block.molecule_cross_output is None
+    assert block.protein_ffn is None and block.molecule_ffn is None
+    assert not any(
+        key.startswith(("fusion.protein_self_output", "fusion.protein_ffn"))
+        for key in model.state_dict()
+    )
+
+
+def test_fusion_output_projection_builds_one_w_o_per_direction():
+    model = _build_model(fusion_output_projection=True, fusion_residual=True)
+    block = model.fusion
+    heads = (
+        block.protein_self_output,
+        block.protein_cross_output,
+        block.molecule_self_output,
+        block.molecule_cross_output,
+    )
+
+    # Four independent projections, one per attention direction.
+    assert all(h is not None for h in heads)
+    assert len({id(h) for h in heads}) == 4
+    for head in heads:
+        assert head.in_features == head.out_features == model.config.fusion_hidden_dim
+    expected = 4 * (model.config.fusion_hidden_dim ** 2 + model.config.fusion_hidden_dim)
+    baseline = _build_model(fusion_residual=True)
+    assert sum(p.numel() for p in block.parameters()) - sum(
+        p.numel() for p in baseline.fusion.parameters()
+    ) == expected
+
+
+@pytest.mark.parametrize("multiplier", [1, 4])
+def test_fusion_ffn_builds_a_per_stream_sublayer(multiplier):
+    model = _build_model(fusion_ffn_multiplier=multiplier, fusion_residual=True)
+    block = model.fusion
+    hidden = model.config.fusion_hidden_dim
+
+    assert block.protein_ffn is not None and block.molecule_ffn is not None
+    assert block.protein_ffn is not block.molecule_ffn
+    assert block.protein_ffn[0].in_features == hidden
+    assert block.protein_ffn[0].out_features == hidden * multiplier
+    assert block.protein_ffn[-1].in_features == hidden * multiplier
+    assert block.protein_ffn[-1].out_features == hidden
+    assert block.protein_ffn_norm is not block.molecule_ffn_norm
+
+
+def test_fusion_ffn_is_a_residual_sublayer_after_attention():
+    torch.manual_seed(3)
+    model = _build_model(fusion_ffn_multiplier=2, fusion_residual=True)
+    model.eval()
+    block = model.fusion
+    protein_tokens = torch.randn(2, 4, 10)
+    molecule_tokens = torch.randn(2, 3, 10)
+    protein_mask = torch.ones(2, 4, dtype=torch.bool)
+    molecule_mask = torch.ones(2, 3, dtype=torch.bool)
+
+    fused_protein, _ = block(
+        protein_tokens=protein_tokens,
+        molecule_tokens=molecule_tokens,
+        protein_mask=protein_mask,
+        molecule_mask=molecule_mask,
+    )
+    # Reproduce the attention sublayer alone, then apply the FFN sublayer.
+    stripped = TokenFusion(
+        hidden_dim=10, num_heads=2, residual=True,
+        attention_backend=block.attention_backend,
+    )
+    stripped.load_state_dict(
+        {k: v for k, v in block.state_dict().items() if "ffn" not in k}
+    )
+    stripped.eval()
+    attention_only, _ = stripped(
+        protein_tokens=protein_tokens,
+        molecule_tokens=molecule_tokens,
+        protein_mask=protein_mask,
+        molecule_mask=molecule_mask,
+    )
+    expected = block.protein_ffn_norm(
+        attention_only + block.protein_ffn(attention_only)
+    )
+
+    assert torch.allclose(fused_protein, expected, atol=1e-6)
+    assert not torch.allclose(fused_protein, attention_only, atol=1e-6)
+
+
+def test_output_projection_and_ffn_receive_gradient():
+    torch.manual_seed(9)
+    model = _build_model(
+        fusion_output_projection=True,
+        fusion_ffn_multiplier=2,
+        fusion_residual=True,
+        ranking_head_hidden_dims=(8,),
+        classification_head_hidden_dims=(8,),
+    )
+    protein_input_ids = torch.tensor([[1, 2, 3], [1, 2, 3], [4, 5, 6]])
+    molecule_input_ids = torch.tensor([[1, 2], [3, 4], [5, 6]])
+    pchembl = torch.tensor([8.0, 6.5, 5.0])
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        molecule_input_ids=molecule_input_ids,
+        protein_attention_mask=torch.ones_like(protein_input_ids),
+        molecule_attention_mask=torch.ones_like(molecule_input_ids),
+        activity_labels=(pchembl >= 6.0).float(),
+        pchembl_values=pchembl,
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+    )
+    outputs.loss.backward()
+
+    block = model.fusion
+    for module in (
+        block.protein_self_output,
+        block.protein_cross_output,
+        block.molecule_self_output,
+        block.molecule_cross_output,
+        block.protein_ffn[0],
+        block.molecule_ffn[-1],
+    ):
+        assert module.weight.grad is not None
+        assert module.weight.grad.abs().sum().item() > 0.0

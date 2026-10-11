@@ -49,6 +49,18 @@ class RewardModelConfig:
     # post-residual output of layer N-1 rather than the pre-fusion
     # projections. One block reproduces the historical architecture.
     fusion_num_layers: int = 1
+    # Per-attention output projection (W_O). Standard multi-head attention mixes
+    # the concatenated heads through a learned matrix; without it each head is
+    # confined to its own fixed slice of the output. Enabling this gives the
+    # self- and cross-attention of each stream its OWN W_O, applied before the
+    # two are averaged, so heads can be weighted differently for the two
+    # directions. Four Linear(d, d) per fusion block.
+    fusion_output_projection: bool = False
+    # Position-wise feed-forward sublayer width, as a multiple of
+    # fusion_hidden_dim. 0 disables it. When > 0 each stream gets its own
+    # Linear(d, m*d) -> GELU -> Linear(m*d, d) with its own residual and
+    # LayerNorm, applied after the attention sublayer.
+    fusion_ffn_multiplier: int = 0
     fusion_attention_backend: str = "manual"
     fusion_residual: bool = False
     dropout: float = 0.1
@@ -132,6 +144,14 @@ class RewardModelConfig:
             raise ValueError("fusion_num_heads must be > 0")
         if self.fusion_num_layers <= 0:
             raise ValueError("fusion_num_layers must be > 0")
+        if not isinstance(self.fusion_output_projection, bool):
+            raise ValueError("fusion_output_projection must be a boolean")
+        if (
+            not isinstance(self.fusion_ffn_multiplier, int)
+            or isinstance(self.fusion_ffn_multiplier, bool)
+            or self.fusion_ffn_multiplier < 0
+        ):
+            raise ValueError("fusion_ffn_multiplier must be an integer >= 0")
         if self.fusion_hidden_dim % self.fusion_num_heads != 0:
             raise ValueError(
                 f"fusion_hidden_dim ({self.fusion_hidden_dim}) must be divisible by "
@@ -165,6 +185,13 @@ class RewardModelConfig:
             raise ValueError(
                 "fusion_num_layers > 1 requires a fusion-based pair_scoring_mode; "
                 "'cosine' pools and projects without any token fusion"
+            )
+        if self.pair_scoring_mode == "cosine" and (
+            self.fusion_output_projection or self.fusion_ffn_multiplier > 0
+        ):
+            raise ValueError(
+                "fusion_output_projection and fusion_ffn_multiplier require a "
+                "fusion-based pair_scoring_mode; 'cosine' has no token fusion"
             )
         if self.cosine_scale_init <= 0.0 or not math.isfinite(
             float(self.cosine_scale_init)

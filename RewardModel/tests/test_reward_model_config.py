@@ -235,3 +235,33 @@ def test_reward_model_config_rejects_stacked_fusion_without_a_fusion_path():
             ).fusion_num_layers
             == 2
         )
+
+
+def test_fusion_output_projection_and_ffn_defaults_and_round_trip(tmp_path):
+    default = RewardModelConfig()
+    assert default.fusion_output_projection is False
+    assert default.fusion_ffn_multiplier == 0
+
+    config = RewardModelConfig(fusion_output_projection=True, fusion_ffn_multiplier=4)
+    reloaded = RewardModelConfig.load_json(config.save_json(str(tmp_path / "c.json")))
+    assert reloaded.fusion_output_projection is True
+    assert reloaded.fusion_ffn_multiplier == 4
+
+    legacy = config.to_dict()
+    legacy.pop("fusion_output_projection")
+    legacy.pop("fusion_ffn_multiplier")
+    restored = RewardModelConfig.from_dict(legacy)
+    assert restored.fusion_output_projection is False
+    assert restored.fusion_ffn_multiplier == 0
+
+
+def test_fusion_output_projection_and_ffn_validation():
+    with pytest.raises(ValueError, match="fusion_output_projection must be a boolean"):
+        RewardModelConfig(fusion_output_projection="yes")
+    with pytest.raises(ValueError, match="fusion_ffn_multiplier must be an integer >= 0"):
+        RewardModelConfig(fusion_ffn_multiplier=-1)
+    with pytest.raises(ValueError, match="fusion_ffn_multiplier must be an integer >= 0"):
+        RewardModelConfig(fusion_ffn_multiplier=2.5)
+    for kwargs in ({"fusion_output_projection": True}, {"fusion_ffn_multiplier": 4}):
+        with pytest.raises(ValueError, match="require a .*fusion-based pair_scoring_mode"):
+            RewardModelConfig(pair_scoring_mode="cosine", **kwargs)

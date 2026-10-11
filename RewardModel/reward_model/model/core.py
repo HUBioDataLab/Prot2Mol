@@ -140,6 +140,8 @@ class RewardModel(nn.Module):
                     attention_backend=self._config.fusion_attention_backend,
                     residual=self._config.fusion_residual,
                     dropout=self._config.dropout,
+                    output_projection=self._config.fusion_output_projection,
+                    ffn_multiplier=self._config.fusion_ffn_multiplier,
                 )
 
             # The first block keeps the historical ``fusion`` parameter names so
