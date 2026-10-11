@@ -10,7 +10,7 @@ from reward_model.model import (
     RewardModelOutput,
     ligunity_bidirectional_contrastive_loss,
 )
-from reward_model.model.fusion import masked_pool
+from reward_model.model.fusion import TokenFusion, masked_pool
 
 
 def _build_model(**config_overrides):
@@ -920,3 +920,110 @@ def test_reward_model_can_return_tuple_output():
 
     assert isinstance(outputs, tuple)
     assert len(outputs) == 4
+
+
+def test_reward_model_defaults_to_a_single_fusion_block():
+    model = _build_model()
+
+    assert model.config.fusion_num_layers == 1
+    assert isinstance(model.fusion, TokenFusion)
+    assert len(model.extra_fusion_layers) == 0
+    assert not any(
+        name.startswith("extra_fusion_layers.")
+        for name in model.state_dict()
+    )
+
+
+def test_reward_model_stacks_independent_fusion_blocks():
+    model = _build_model(fusion_num_layers=2, fusion_residual=True)
+
+    assert len(model.extra_fusion_layers) == 1
+    second = model.extra_fusion_layers[0]
+    assert second is not model.fusion
+    # Separate instances, so no parameter tensor may be shared between blocks.
+    first_parameters = {id(parameter) for parameter in model.fusion.parameters()}
+    assert first_parameters.isdisjoint(
+        id(parameter) for parameter in second.parameters()
+    )
+    assert second.residual is True
+    assert second.protein_residual_norm is not model.fusion.protein_residual_norm
+    assert second.molecule_residual_norm is not model.fusion.molecule_residual_norm
+    assert second.attention_backend == model.fusion.attention_backend
+    assert second.num_heads == model.fusion.num_heads
+
+    state_keys = set(model.state_dict())
+    assert "fusion.query_p.weight" in state_keys
+    assert "extra_fusion_layers.0.query_p.weight" in state_keys
+
+
+def test_second_fusion_block_consumes_the_first_blocks_residual_output():
+    torch.manual_seed(11)
+    model = _build_model(fusion_num_layers=2, fusion_residual=True)
+    model.eval()
+    protein_tokens = torch.randn(2, 3, 10)
+    molecule_tokens = torch.randn(2, 4, 10)
+    protein_mask = torch.tensor([[1, 1, 0], [1, 1, 1]], dtype=torch.bool)
+    molecule_mask = torch.tensor(
+        [[1, 1, 1, 0], [1, 1, 0, 0]],
+        dtype=torch.bool,
+    )
+
+    first_protein, first_molecule = model.fusion(
+        protein_tokens=protein_tokens,
+        molecule_tokens=molecule_tokens,
+        protein_mask=protein_mask,
+        molecule_mask=molecule_mask,
+    )
+    expected_protein, expected_molecule = model.extra_fusion_layers[0](
+        protein_tokens=first_protein,
+        molecule_tokens=first_molecule,
+        protein_mask=protein_mask,
+        molecule_mask=molecule_mask,
+    )
+    stacked_protein, stacked_molecule = model._apply_fusion(
+        protein_tokens,
+        molecule_tokens,
+        protein_mask,
+        molecule_mask,
+    )
+
+    assert torch.allclose(stacked_protein, expected_protein, atol=1e-6)
+    assert torch.allclose(stacked_molecule, expected_molecule, atol=1e-6)
+    # The stack must not collapse to its first block.
+    assert not torch.allclose(stacked_protein, first_protein, atol=1e-6)
+    assert not torch.allclose(stacked_molecule, first_molecule, atol=1e-6)
+    assert stacked_protein.shape == protein_tokens.shape
+    assert stacked_molecule.shape == molecule_tokens.shape
+
+
+def test_stacked_fusion_forward_trains_both_blocks():
+    torch.manual_seed(5)
+    model = _build_model(
+        fusion_num_layers=2,
+        fusion_residual=True,
+        pair_scoring_mode="mlp",
+        ranking_head_hidden_dims=(8,),
+        classification_head_hidden_dims=(8,),
+    )
+    protein_input_ids = torch.tensor([[1, 2, 3], [1, 2, 3], [4, 5, 6]])
+    molecule_input_ids = torch.tensor([[1, 2], [3, 4], [5, 6]])
+    pchembl = torch.tensor([8.0, 6.5, 5.0])
+
+    outputs = model(
+        protein_input_ids=protein_input_ids,
+        molecule_input_ids=molecule_input_ids,
+        protein_attention_mask=torch.ones_like(protein_input_ids),
+        molecule_attention_mask=torch.ones_like(molecule_input_ids),
+        activity_labels=(pchembl >= 6.0).float(),
+        pchembl_values=pchembl,
+        ranking_group_ids=torch.tensor([0, 0, 0]),
+        return_token_embeddings=True,
+    )
+
+    assert outputs.fused_protein_tokens.shape == (3, 3, 10)
+    assert outputs.fused_molecule_tokens.shape == (3, 2, 10)
+    assert outputs.loss is not None
+    outputs.loss.backward()
+    for block in (model.fusion, model.extra_fusion_layers[0]):
+        assert block.query_p.weight.grad is not None
+        assert block.query_p.weight.grad.abs().sum().item() > 0.0

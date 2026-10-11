@@ -44,6 +44,11 @@ class RewardModelConfig:
     fusion_hidden_dim: int = 512
     projection_type: str = "linear"
     fusion_num_heads: int = 8
+    # Number of stacked TokenFusion blocks. Each block carries its own
+    # attention parameters and its own residual, so layer N re-fuses the
+    # post-residual output of layer N-1 rather than the pre-fusion
+    # projections. One block reproduces the historical architecture.
+    fusion_num_layers: int = 1
     fusion_attention_backend: str = "manual"
     fusion_residual: bool = False
     dropout: float = 0.1
@@ -125,6 +130,8 @@ class RewardModelConfig:
             )
         if self.fusion_num_heads <= 0:
             raise ValueError("fusion_num_heads must be > 0")
+        if self.fusion_num_layers <= 0:
+            raise ValueError("fusion_num_layers must be > 0")
         if self.fusion_hidden_dim % self.fusion_num_heads != 0:
             raise ValueError(
                 f"fusion_hidden_dim ({self.fusion_hidden_dim}) must be divisible by "
@@ -153,6 +160,11 @@ class RewardModelConfig:
             raise ValueError(
                 "pair_scoring_mode must be one of "
                 f"{sorted(_VALID_PAIR_SCORING_MODES)}"
+            )
+        if self.fusion_num_layers > 1 and self.pair_scoring_mode == "cosine":
+            raise ValueError(
+                "fusion_num_layers > 1 requires a fusion-based pair_scoring_mode; "
+                "'cosine' pools and projects without any token fusion"
             )
         if self.cosine_scale_init <= 0.0 or not math.isfinite(
             float(self.cosine_scale_init)

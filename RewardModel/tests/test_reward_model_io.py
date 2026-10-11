@@ -1,3 +1,5 @@
+import json
+
 import torch
 
 from conftest import DummyEncoder, DummyTokenizer
@@ -415,3 +417,75 @@ def test_weight_only_warm_start_unfreezes_encoders_with_fresh_optimizer(tmp_path
     optimizer.step()
     assert not torch.equal(protein_parameter, protein_before)
     assert not torch.equal(molecule_parameter, molecule_before)
+
+
+def test_stacked_fusion_checkpoint_round_trips(tmp_path):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    config = RewardModelConfig(
+        protein_model_name_or_path="protein/dummy",
+        molecule_model_name_or_path="molecule/dummy",
+        fusion_hidden_dim=10,
+        fusion_num_heads=2,
+        fusion_num_layers=2,
+        fusion_residual=True,
+        pair_scoring_mode="mlp",
+        ranking_head_hidden_dims=(8,),
+        classification_head_hidden_dims=(8,),
+    )
+    model = RewardModel(
+        config=config,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    save_reward_model(model, str(tmp_path))
+    reloaded = load_reward_model(
+        str(tmp_path),
+        device=torch.device("cpu"),
+        strict=True,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    assert reloaded.config.fusion_num_layers == 2
+    assert len(reloaded.extra_fusion_layers) == 1
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, reloaded.state_dict()[key]), key
+
+
+def test_single_layer_checkpoint_loads_strictly_after_stacking_was_added(tmp_path):
+    protein_bundle, molecule_bundle = _dummy_bundles()
+    config = RewardModelConfig(
+        protein_model_name_or_path="protein/dummy",
+        molecule_model_name_or_path="molecule/dummy",
+        fusion_hidden_dim=10,
+        fusion_num_heads=2,
+        fusion_residual=True,
+        pair_scoring_mode="mlp",
+        ranking_head_hidden_dims=(8,),
+        classification_head_hidden_dims=(8,),
+    )
+    model = RewardModel(
+        config=config,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+    save_reward_model(model, str(tmp_path))
+
+    # Emulate a checkpoint saved before the field existed.
+    config_path = tmp_path / "config.json"
+    payload = json.loads(config_path.read_text())
+    payload.pop("fusion_num_layers")
+    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    reloaded = load_reward_model(
+        str(tmp_path),
+        device=torch.device("cpu"),
+        strict=True,
+        protein_bundle=protein_bundle,
+        molecule_bundle=molecule_bundle,
+    )
+
+    assert reloaded.config.fusion_num_layers == 1
+    assert len(reloaded.extra_fusion_layers) == 0
+    assert "fusion.query_p.weight" in reloaded.state_dict()

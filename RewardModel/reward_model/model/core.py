@@ -127,16 +127,29 @@ class RewardModel(nn.Module):
             self.molecule_norm = None
             self.projection_dropout = nn.Dropout(self._config.dropout)
             self.fusion = None
+            self.extra_fusion_layers = nn.ModuleList()
         else:
             self.protein_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
             self.molecule_norm = nn.LayerNorm(self._config.fusion_hidden_dim)
             self.projection_dropout = nn.Dropout(self._config.dropout)
-            self.fusion = TokenFusion(
-                hidden_dim=self._config.fusion_hidden_dim,
-                num_heads=self._config.fusion_num_heads,
-                attention_backend=self._config.fusion_attention_backend,
-                residual=self._config.fusion_residual,
-                dropout=self._config.dropout,
+
+            def _new_fusion_layer() -> TokenFusion:
+                return TokenFusion(
+                    hidden_dim=self._config.fusion_hidden_dim,
+                    num_heads=self._config.fusion_num_heads,
+                    attention_backend=self._config.fusion_attention_backend,
+                    residual=self._config.fusion_residual,
+                    dropout=self._config.dropout,
+                )
+
+            # The first block keeps the historical ``fusion`` parameter names so
+            # single-layer checkpoints load unchanged; any further blocks are
+            # independent instances with their own attention and residual
+            # parameters, never the first block applied twice.
+            self.fusion = _new_fusion_layer()
+            self.extra_fusion_layers = nn.ModuleList(
+                _new_fusion_layer()
+                for _ in range(self._config.fusion_num_layers - 1)
             )
 
         head_input_dim = self._config.fusion_hidden_dim * 2
@@ -338,6 +351,31 @@ class RewardModel(nn.Module):
         molecule_tokens = self.projection_dropout(
             self.molecule_norm(self.molecule_projection(molecule_tokens))
         )
+        return protein_tokens, molecule_tokens
+
+    def _apply_fusion(
+        self,
+        protein_tokens: torch.Tensor,
+        molecule_tokens: torch.Tensor,
+        protein_mask: torch.Tensor,
+        molecule_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run every token-fusion block in order over both token sequences.
+
+        Each block already ends in its own residual addition and layer
+        normalization, so a later block fuses the post-residual output of the
+        block before it. Masks are unchanged between blocks because fusion
+        preserves both sequence lengths.
+        """
+        if self.fusion is None:
+            raise RuntimeError("Token fusion is not initialized")
+        for fusion_layer in (self.fusion, *self.extra_fusion_layers):
+            protein_tokens, molecule_tokens = fusion_layer(
+                protein_tokens=protein_tokens,
+                molecule_tokens=molecule_tokens,
+                protein_mask=protein_mask,
+                molecule_mask=molecule_mask,
+            )
         return protein_tokens, molecule_tokens
 
     def _compute_ranking_loss(
@@ -714,13 +752,11 @@ class RewardModel(nn.Module):
                 protein_tokens,
                 molecule_tokens,
             )
-            if self.fusion is None:
-                raise RuntimeError("Token fusion is not initialized")
-            fused_protein, fused_molecule = self.fusion(
-                protein_tokens=protein_tokens,
-                molecule_tokens=molecule_tokens,
-                protein_mask=protein_mask,
-                molecule_mask=molecule_mask,
+            fused_protein, fused_molecule = self._apply_fusion(
+                protein_tokens,
+                molecule_tokens,
+                protein_mask,
+                molecule_mask,
             )
             classification_protein = masked_pool(
                 fused_protein,
@@ -743,13 +779,11 @@ class RewardModel(nn.Module):
                 protein_tokens,
                 molecule_tokens,
             )
-            if self.fusion is None:
-                raise RuntimeError("Token fusion is not initialized")
-            fused_protein, fused_molecule = self.fusion(
-                protein_tokens=protein_tokens,
-                molecule_tokens=molecule_tokens,
-                protein_mask=protein_mask,
-                molecule_mask=molecule_mask,
+            fused_protein, fused_molecule = self._apply_fusion(
+                protein_tokens,
+                molecule_tokens,
+                protein_mask,
+                molecule_mask,
             )
             pooled_protein = masked_pool(
                 fused_protein,

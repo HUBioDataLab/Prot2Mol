@@ -196,3 +196,42 @@ def test_reward_model_config_validates_molecule_encoder_settings():
 def test_reward_model_config_rejects_invalid_affinity_margin(affinity_margin):
     with pytest.raises(ValueError, match="ranking_affinity_margin"):
         RewardModelConfig(ranking_affinity_margin=affinity_margin)
+
+
+def test_reward_model_config_defaults_to_one_fusion_layer_and_round_trips(tmp_path):
+    assert RewardModelConfig().fusion_num_layers == 1
+
+    config = RewardModelConfig(fusion_num_layers=2)
+    path = config.save_json(str(tmp_path / "config.json"))
+
+    assert RewardModelConfig.load_json(path).fusion_num_layers == 2
+
+
+def test_reward_model_config_reads_legacy_payload_without_fusion_num_layers():
+    payload = RewardModelConfig(fusion_num_layers=2).to_dict()
+    payload.pop("fusion_num_layers")
+
+    # Checkpoints written before stacking existed must stay single-layer.
+    assert RewardModelConfig.from_dict(payload).fusion_num_layers == 1
+
+
+@pytest.mark.parametrize("fusion_num_layers", [0, -1])
+def test_reward_model_config_rejects_non_positive_fusion_num_layers(
+    fusion_num_layers,
+):
+    with pytest.raises(ValueError, match="fusion_num_layers must be > 0"):
+        RewardModelConfig(fusion_num_layers=fusion_num_layers)
+
+
+def test_reward_model_config_rejects_stacked_fusion_without_a_fusion_path():
+    with pytest.raises(ValueError, match="fusion_num_layers > 1 requires"):
+        RewardModelConfig(fusion_num_layers=2, pair_scoring_mode="cosine")
+
+    for pair_scoring_mode in ("mlp", "scaled_cosine", "fusion_contrastive"):
+        assert (
+            RewardModelConfig(
+                fusion_num_layers=2,
+                pair_scoring_mode=pair_scoring_mode,
+            ).fusion_num_layers
+            == 2
+        )
