@@ -140,8 +140,10 @@ class RewardModel(nn.Module):
             )
 
         head_input_dim = self._config.fusion_hidden_dim * 2
-        ranking_hidden_dims = (2048, 1024, 512, 256, 128)
-        classification_hidden_dims = (2048, 1024, 512, 256, 128)
+        ranking_hidden_dims = tuple(self._config.ranking_head_hidden_dims)
+        classification_hidden_dims = tuple(
+            self._config.classification_head_hidden_dims
+        )
         if self._config.pair_scoring_mode == "mlp":
             self.ranking_head = RewardMLPHead(
                 input_dim=head_input_dim,

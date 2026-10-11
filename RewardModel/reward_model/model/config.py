@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .losses import (
     DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
@@ -61,6 +61,11 @@ class RewardModelConfig:
     contrastive_strict_active_only: bool = False
     classification_loss_weight: float = 1.0
     cosine_classification_mlp: bool = False
+    # Hidden widths of the ``mlp`` scoring-mode heads. Defaults reproduce the
+    # historical hard-coded stack; a shorter tuple such as ``(128,)`` gives a
+    # head of the same size as the fusion-contrastive classification head.
+    ranking_head_hidden_dims: Sequence[int] = (2048, 1024, 512, 256, 128)
+    classification_head_hidden_dims: Sequence[int] = (2048, 1024, 512, 256, 128)
     cosine_marginal_biases: bool = False
     ranking_temperature: float = 1.0
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
@@ -106,6 +111,13 @@ class RewardModelConfig:
                 )
         if self.fusion_hidden_dim <= 0:
             raise ValueError("fusion_hidden_dim must be > 0")
+        for name in ("ranking_head_hidden_dims", "classification_head_hidden_dims"):
+            dims = tuple(getattr(self, name))
+            if not dims:
+                raise ValueError(f"{name} must contain at least one hidden width")
+            if any(int(dim) <= 0 for dim in dims):
+                raise ValueError(f"{name} entries must all be > 0")
+            setattr(self, name, dims)
         if self.projection_type not in _VALID_PROJECTION_TYPES:
             raise ValueError(
                 "projection_type must be one of "
