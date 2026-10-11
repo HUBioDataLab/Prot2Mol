@@ -1,11 +1,11 @@
 model:
-  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  protein_model_name_or_path: facebook/esm2_t33_650M_UR50D
   molecule_model_name_or_path: HUBioDataLab/SELFormer
   protein_hidden_dropout_prob: 0.0
   protein_attention_probs_dropout_prob: 0.0
   molecule_input_representation: selfies
-  molecule_hidden_dropout_prob: 0.1
-  molecule_attention_probs_dropout_prob: 0.1
+  molecule_hidden_dropout_prob: 0.0
+  molecule_attention_probs_dropout_prob: 0.0
   protein_max_length: 1024
   molecule_max_length: 256
   fusion_hidden_dim: 128
@@ -22,10 +22,10 @@ model:
   cosine_scale_max: 100.0
   activity_threshold: 6.0
   ranking_loss_weight: 0.0
-  contrastive_loss_weight: 0.5
+  contrastive_loss_weight: 0.25
   contrastive_active_threshold: 6.0
   contrastive_strict_active_only: true
-  classification_loss_weight: 0.5
+  classification_loss_weight: 0.75
   ranking_temperature: 1.0
   ranking_affinity_margin: 0.47712125472
   ranking_min_pchembl_span: 0.5
@@ -49,11 +49,11 @@ data:
   max_classification_only_per_item: 0
 
 training:
-  output_dir: ../outputs/random_assay_seen_target_fusion_contrastive_classification_2gpu
+  output_dir: ../outputs/weighted_no_dropout_esm2_650M_selformer
   num_train_epochs: 100
   per_device_train_batch_size: 12
   per_device_eval_batch_size: 32
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 4
   learning_rate: 1.0e-4
   protein_encoder_learning_rate: 1.0e-5
   molecule_encoder_learning_rate: 1.0e-5
@@ -72,7 +72,7 @@ training:
   optim: adamw_torch_fused
   save_safetensors: false
   save_total_limit: 2
-  training_mode: multi_gpu
+  training_mode: single_gpu
   metrics_profile: full
   ranking_score_diagnostics: false
   objective_gradient_diagnostics_steps: 0
