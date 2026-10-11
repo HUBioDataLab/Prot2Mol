@@ -1,0 +1,110 @@
+# Human CROSS-DOMAIN (DrugBAN cold split) — classification-only benchmark.
+#
+# Purpose: compare our RewardModel against FusionDTI's reported cross-domain
+# numbers (paper Table 2 / Table 12). Cross-domain means the test set shares
+# NO drug and NO target with train — verified on these files: 0 of 238 test
+# drugs and 0 of 207 test targets appear in train.
+#
+# Split mapping from DrugBAN: cold/train -> train (3,453), cold/val -> val (155), cold/test -> test (311)
+#
+# These benchmarks are BINARY ONLY. pchembl_value is synthetic (7.0 for label 1,
+# 5.0 for label 0) purely so the loader's threshold check passes, so ranking and
+# contrastive losses are meaningless here and are both set to 0.0 — matching
+# FusionDTI, which trains with pure BCE. Read eval_roc_auc / eval_mcc;
+# eval_spearman is meaningless with two distinct pchembl values.
+#
+# Architecture is our current ChEMBL one unchanged: ONE fusion block and the
+# standard 1024 -> 128 -> 1 heads (not the widened ablation heads).
+
+model:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_hidden_dropout_prob: 0.0
+  protein_attention_probs_dropout_prob: 0.0
+  molecule_input_representation: selfies
+  molecule_hidden_dropout_prob: 0.1
+  molecule_attention_probs_dropout_prob: 0.1
+  protein_max_length: 1024
+  molecule_max_length: 256
+  fusion_hidden_dim: 512
+  projection_type: nonlinear
+  fusion_num_heads: 8
+  fusion_num_layers: 1
+  fusion_attention_backend: sdpa
+  fusion_residual: true
+  dropout: 0.0
+  pooling_type: cls
+  protein_pooling_type: mean
+  molecule_pooling_type: cls
+  pair_scoring_mode: mlp
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
+  activity_threshold: 6.0
+  ranking_loss_weight: 0.0
+  contrastive_loss_weight: 0.0
+  contrastive_active_threshold: 6.0
+  contrastive_strict_active_only: true
+  classification_loss_weight: 1.0
+  ranking_head_hidden_dims: [128]
+  classification_head_hidden_dims: [128]
+  ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
+  ranking_min_pchembl_span: 0.5
+  bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
+
+data:
+  train_parquet_path: ../../dataset/processed/benchmarks/human_cross/train.parquet
+  val_parquet_path: ../../dataset/processed/benchmarks/human_cross/val.parquet
+  test_parquet_path: ../../dataset/processed/benchmarks/human_cross/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/benchmark_human_cross
+  tokenization_batch_size: 64
+  tokenization_num_proc: 8
+  ranking_max_ligands: 16
+  ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
+  ranking_min_pchembl_span: 0.5
+  # MUST stay > 0. With ranking and contrastive both disabled the sampler only
+  # draws from rank-eligible assays, so a 0 here would silently drop every row
+  # whose target has <3 ligands or only one label.
+  max_classification_only_per_item: 16
+
+training:
+  output_dir: ../outputs/benchmark_human_cross
+  num_train_epochs: 100
+  # One 'batch' is 6 ASSAY-LISTS, not 6 pairs: each item packs ~20 rows,
+  # so this is ~192 pairs per forward — the footprint the ChEMBL runs fit in.
+  per_device_train_batch_size: 6
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-4
+  protein_encoder_learning_rate: 1.0e-5
+  molecule_encoder_learning_rate: 1.0e-5
+  projection_learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 4
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
+  seed: 42
+  fp16: false
+  bf16: true
+  optim: adamw_torch_fused
+  save_safetensors: false
+  save_total_limit: 2
+  training_mode: single_gpu
+  metrics_profile: full
+  ranking_score_diagnostics: false
+  objective_gradient_diagnostics_steps: 0
+  fixed_train_eval_assays: 0
+  protein_shuffle_sensitivity: false
+  metric_for_best_model: eval_roc_auc
+  greater_is_better: true
+  report_to:
+    - wandb
