@@ -108,7 +108,10 @@ class RewardModel(nn.Module):
             self._config.molecule_hidden_size,
             self._config.fusion_hidden_dim,
         )
-        if self._config.pair_scoring_mode == "fusion_contrastive":
+        if self._config.pair_scoring_mode in (
+            "fusion_contrastive",
+            "mlp_contrastive",
+        ):
             self.contrastive_protein_projection = projection_class(
                 self._config.protein_hidden_size,
                 self._config.fusion_hidden_dim,
@@ -159,7 +162,7 @@ class RewardModel(nn.Module):
         classification_hidden_dims = tuple(
             self._config.classification_head_hidden_dims
         )
-        if self._config.pair_scoring_mode == "mlp":
+        if self._config.pair_scoring_mode in ("mlp", "mlp_contrastive"):
             self.ranking_head = RewardMLPHead(
                 input_dim=head_input_dim,
                 hidden_dims=ranking_hidden_dims,
@@ -170,7 +173,17 @@ class RewardModel(nn.Module):
                 hidden_dims=classification_hidden_dims,
                 dropout=self._config.dropout,
             )
-            self.logit_scale = None
+            # ``mlp_contrastive`` runs a retrieval objective beside the two head
+            # losses, so it needs the shared learnable cosine scale. Plain
+            # ``mlp`` has no cosine pathway and leaves it unset, which keeps its
+            # state dict identical to every checkpoint trained before this mode.
+            self.logit_scale = (
+                nn.Parameter(
+                    torch.tensor(math.log(self._config.cosine_scale_init))
+                )
+                if self._config.pair_scoring_mode == "mlp_contrastive"
+                else None
+            )
             self.classification_logit_bias = None
             self.molecule_bias_head = None
             self.protein_bias_head = None
@@ -588,6 +601,30 @@ class RewardModel(nn.Module):
         )
         cosine_similarity = (normalized_protein * normalized_molecule).sum(dim=-1)
 
+        if self._config.pair_scoring_mode == "mlp_contrastive":
+            if (
+                self.logit_scale is None
+                or self.ranking_head is None
+                or self.classification_head is None
+            ):
+                raise RuntimeError(
+                    "mlp_contrastive scoring modules are not initialized"
+                )
+            score_scale = self.logit_scale.clamp(
+                max=math.log(self._config.cosine_scale_max)
+            ).exp()
+            # Ranking and classification keep their own heads over the fused
+            # joint embedding, exactly as in ``mlp``. Only the contrastive
+            # objective reads the separate normalized cosine pathway.
+            return (
+                self.ranking_head(joint_embedding),
+                self.classification_head(joint_embedding),
+                cosine_similarity,
+                score_scale,
+                normalized_protein,
+                normalized_molecule,
+            )
+
         if self._config.pair_scoring_mode == "fusion_contrastive":
             if self.logit_scale is None or self.classification_head is None:
                 raise RuntimeError(
@@ -724,7 +761,10 @@ class RewardModel(nn.Module):
                 )
             )
             joint_embedding = torch.cat([pooled_protein, pooled_molecule], dim=-1)
-        elif self._config.pair_scoring_mode == "fusion_contrastive":
+        elif self._config.pair_scoring_mode in (
+            "fusion_contrastive",
+            "mlp_contrastive",
+        ):
             if (
                 self.contrastive_protein_projection is None
                 or self.contrastive_molecule_projection is None

@@ -17,9 +17,16 @@ _VALID_PAIR_SCORING_MODES = {
     "cosine",
     "fusion_contrastive",
     "mlp",
+    "mlp_contrastive",
     "scaled_cosine",
 }
-_CONTRASTIVE_PAIR_SCORING_MODES = {"cosine", "fusion_contrastive"}
+# Modes whose forward pass produces the normalized embedding pair the
+# in-batch retrieval objective needs.
+_CONTRASTIVE_PAIR_SCORING_MODES = {
+    "cosine",
+    "fusion_contrastive",
+    "mlp_contrastive",
+}
 _VALID_PROJECTION_TYPES = {"linear", "nonlinear"}
 _VALID_MOLECULE_INPUT_REPRESENTATIONS = {"selfies", "smiles"}
 

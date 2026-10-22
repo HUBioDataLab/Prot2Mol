@@ -265,3 +265,29 @@ def test_fusion_output_projection_and_ffn_validation():
     for kwargs in ({"fusion_output_projection": True}, {"fusion_ffn_multiplier": 4}):
         with pytest.raises(ValueError, match="require a .*fusion-based pair_scoring_mode"):
             RewardModelConfig(pair_scoring_mode="cosine", **kwargs)
+
+
+def test_mlp_contrastive_is_a_valid_contrastive_scoring_mode():
+    config = RewardModelConfig(
+        pair_scoring_mode="mlp_contrastive",
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_loss_weight=0.25,
+    )
+
+    assert config.pair_scoring_mode == "mlp_contrastive"
+    assert config.contrastive_loss_weight == pytest.approx(0.25)
+
+
+def test_mlp_contrastive_requires_deduplicated_protein_inputs():
+    with pytest.raises(ValueError, match="deduplicate_protein_inputs"):
+        RewardModelConfig(
+            pair_scoring_mode="mlp_contrastive",
+            contrastive_loss_weight=0.25,
+            deduplicate_protein_inputs=False,
+        )
+
+
+def test_plain_mlp_still_rejects_the_contrastive_objective():
+    with pytest.raises(ValueError, match="contrastive_loss_weight > 0 requires"):
+        RewardModelConfig(pair_scoring_mode="mlp", contrastive_loss_weight=0.25)

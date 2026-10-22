@@ -1157,3 +1157,114 @@ def test_output_projection_and_ffn_receive_gradient():
     ):
         assert module.weight.grad is not None
         assert module.weight.grad.abs().sum().item() > 0.0
+
+
+def _mlp_contrastive_batch():
+    """Two assay groups of three ligands, with the metadata all three losses need."""
+    torch.manual_seed(0)
+    protein_input_ids = torch.randint(1, 5, (6, 6))
+    molecule_input_ids = torch.randint(1, 5, (6, 5))
+    return {
+        "protein_input_ids": protein_input_ids,
+        "molecule_input_ids": molecule_input_ids,
+        "protein_attention_mask": torch.ones_like(protein_input_ids),
+        "molecule_attention_mask": torch.ones_like(molecule_input_ids),
+        "pchembl_values": torch.tensor([8.0, 7.0, 5.5, 9.0, 6.5, 5.0]),
+        "activity_labels": torch.tensor([1.0, 1.0, 0.0, 1.0, 1.0, 0.0]),
+        "ranking_group_ids": torch.tensor([0, 0, 0, 1, 1, 1]),
+        "contrastive_group_ids": torch.tensor([0, 0, 0, 1, 1, 1]),
+        "contrastive_target_ids": torch.tensor([10, 10, 10, 11, 11, 11]),
+        "contrastive_molecule_ids": torch.tensor([0, 1, 2, 3, 4, 5]),
+    }
+
+
+def test_mlp_contrastive_builds_both_heads_and_the_contrastive_lane():
+    model = _build_model(
+        pair_scoring_mode="mlp_contrastive",
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_loss_weight=0.25,
+    )
+
+    assert model.ranking_head is not None
+    assert model.classification_head is not None
+    assert model.contrastive_protein_projection is not None
+    assert model.contrastive_molecule_projection is not None
+    assert model.logit_scale is not None
+    assert model.fusion is not None
+
+
+def test_mlp_contrastive_keeps_ranking_and_classification_on_separate_heads():
+    model = _build_model(
+        pair_scoring_mode="mlp_contrastive",
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_loss_weight=0.25,
+    ).eval()
+
+    with torch.no_grad():
+        outputs = model(**_mlp_contrastive_batch())
+
+    # fusion_contrastive aliases these two to one tensor; mlp_contrastive must not.
+    assert outputs.ranking_score is not outputs.activity_logits
+    assert not torch.equal(
+        outputs.ranking_score.reshape(-1),
+        outputs.activity_logits.reshape(-1),
+    )
+    assert outputs.cosine_similarity is not None
+    assert outputs.score_scale is not None
+
+
+def test_mlp_contrastive_optimizes_all_three_objectives():
+    model = _build_model(
+        pair_scoring_mode="mlp_contrastive",
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_loss_weight=0.25,
+    )
+
+    outputs = model(**_mlp_contrastive_batch())
+    for loss in (
+        outputs.ranking_loss,
+        outputs.classification_loss,
+        outputs.contrastive_loss,
+    ):
+        assert loss is not None
+        assert torch.isfinite(loss)
+    expected = (
+        0.5 * outputs.ranking_loss
+        + 0.5 * outputs.classification_loss
+        + 0.25 * outputs.contrastive_loss
+    )
+    assert torch.allclose(outputs.loss, expected)
+
+    outputs.loss.backward()
+
+    def has_gradient(module):
+        return any(
+            parameter.grad is not None and parameter.grad.abs().sum() > 0
+            for parameter in module.parameters()
+        )
+
+    assert has_gradient(model.ranking_head)
+    assert has_gradient(model.classification_head)
+    assert has_gradient(model.fusion)
+    assert has_gradient(model.contrastive_protein_projection)
+    assert has_gradient(model.contrastive_molecule_projection)
+    assert model.logit_scale.grad is not None
+    # the encoders are the space all three objectives share
+    assert has_gradient(model.protein_encoder)
+    assert has_gradient(model.molecule_encoder)
+
+
+def test_mlp_scoring_mode_is_unchanged_by_the_contrastive_variant():
+    """Plain ``mlp`` must keep its exact parameter set so old checkpoints load."""
+    model = _build_model(pair_scoring_mode="mlp")
+
+    assert model.logit_scale is None
+    assert model.contrastive_protein_projection is None
+    assert model.contrastive_molecule_projection is None
+    assert not any("logit_scale" in name for name in model.state_dict())
+    assert not any(
+        name.startswith("contrastive_") for name in model.state_dict()
+    )
