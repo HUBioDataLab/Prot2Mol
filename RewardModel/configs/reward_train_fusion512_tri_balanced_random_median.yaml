@@ -1,0 +1,116 @@
+# fusion512 / ESM2-35M, random split, THREE OBJECTIVES TOGETHER.
+#
+#   ranking        0.5  listwise Plackett-Luce over the fused joint embedding
+#   classification 0.5  pointwise BCE over the same joint embedding
+#   contrastive    0.5  LigUnity in-batch retrieval over a separate cosine lane
+#
+# pair_scoring_mode: mlp_contrastive
+#   Ranking and classification behave exactly as in `mlp`: fusion block ->
+#   masked pool -> 1024-d joint embedding -> their own heads. The contrastive
+#   objective runs on its own projections of the POOLED RAW encoder output and
+#   never touches the fusion block, so the three objectives share the ESM2 and
+#   SELFormer embedding space but not the fusion layers or the heads.
+#
+#   This differs from `fusion_contrastive`, where ranking_score IS the
+#   classification logit (no ranking head is built at all). Setting
+#   ranking_loss_weight to 0 here reproduces that run's behaviour, except the
+#   classification head follows classification_head_hidden_dims rather than a
+#   hardcoded (128,).
+#
+# Everything else matches reward_train_fusion512_ranking_random_median.yaml,
+# so the comparison against it isolates the contrastive objective. Reuses that
+# run's tokenized cache; no re-tokenization needed.
+#
+# protein_shuffle_sensitivity is ON: each eval logs
+# eval_protein_shuffle_weighted_spearman_drop and
+# eval_protein_shuffle_weighted_rank_stability, i.e. how much ranking quality
+# is lost when the protein is swapped for a different target's. That is the
+# metric this experiment exists to move. It costs one extra eval forward pass.
+
+model:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_hidden_dropout_prob: 0.0
+  protein_attention_probs_dropout_prob: 0.0
+  molecule_input_representation: selfies
+  molecule_hidden_dropout_prob: 0.1
+  molecule_attention_probs_dropout_prob: 0.1
+  protein_max_length: 1024
+  molecule_max_length: 256
+  fusion_hidden_dim: 512
+  projection_type: nonlinear
+  fusion_num_heads: 8
+  fusion_attention_backend: sdpa
+  fusion_residual: true
+  dropout: 0.0
+  pooling_type: cls
+  protein_pooling_type: mean
+  molecule_pooling_type: cls
+  pair_scoring_mode: mlp_contrastive
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
+  activity_threshold: 6.0
+  ranking_loss_weight: 0.5
+  contrastive_loss_weight: 0.5
+  contrastive_active_threshold: 6.0
+  contrastive_strict_active_only: true
+  classification_loss_weight: 0.5
+  ranking_head_hidden_dims: [128]
+  classification_head_hidden_dims: [128]
+  ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
+  ranking_min_pchembl_span: 0.5
+  bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
+
+data:
+  train_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl_37_target_aware_random_assay_activity_balanced_median
+  tokenization_batch_size: 64
+  tokenization_num_proc: 8
+  enforce_binary_label_threshold: false
+  ranking_max_ligands: 16
+  ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
+  ranking_min_pchembl_span: 0.5
+  max_classification_only_per_item: 16
+
+training:
+  output_dir: ../outputs/fusion512_tri_balanced_random_median
+  num_train_epochs: 100
+  per_device_train_batch_size: 12
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-4
+  protein_encoder_learning_rate: 1.0e-5
+  molecule_encoder_learning_rate: 1.0e-5
+  projection_learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 4
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
+  seed: 42
+  fp16: false
+  bf16: true
+  optim: adamw_torch_fused
+  save_safetensors: false
+  save_total_limit: 2
+  training_mode: single_gpu
+  metrics_profile: full
+  ranking_score_diagnostics: false
+  objective_gradient_diagnostics_steps: 0
+  fixed_train_eval_assays: 0
+  protein_shuffle_sensitivity: true
+  metric_for_best_model: eval_loss
+  greater_is_better: false
+  report_to:
+    - wandb
