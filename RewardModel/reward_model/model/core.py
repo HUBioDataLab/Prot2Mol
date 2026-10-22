@@ -877,7 +877,14 @@ class RewardModel(nn.Module):
             classification_loss = self._compute_classification_loss(activity_logits, activity_labels)
             total_loss = classification_loss * self._config.classification_loss_weight
 
-        if self._config.contrastive_loss_weight > 0.0:
+        # A scoring-only forward pass supplies no objective metadata at all - the
+        # evaluation loop's protein-shuffle pass is one, since it only reads
+        # ranking_score. Mirror how the ranking loss below handles this: skip
+        # the objective when NO metadata is present, and still raise when it is
+        # partially supplied, which is the genuine misuse this guard exists for.
+        if self._config.contrastive_loss_weight > 0.0 and (
+            pchembl_values is not None or contrastive_group_ids is not None
+        ):
             if pchembl_values is None or contrastive_group_ids is None:
                 raise ValueError(
                     "contrastive learning requires pchembl_values and "

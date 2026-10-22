@@ -1268,3 +1268,42 @@ def test_mlp_scoring_mode_is_unchanged_by_the_contrastive_variant():
     assert not any(
         name.startswith("contrastive_") for name in model.state_dict()
     )
+
+
+def test_contrastive_modes_allow_a_scoring_only_forward_pass():
+    """The eval loop's protein-shuffle pass supplies no objective metadata.
+
+    It re-scores the same ligands against a different protein and reads only
+    ranking_score, so a positive contrastive weight must not make it raise.
+    """
+    for mode in ("mlp_contrastive", "fusion_contrastive"):
+        model = _build_model(
+            pair_scoring_mode=mode,
+            ranking_loss_weight=0.5,
+            classification_loss_weight=0.5,
+            contrastive_loss_weight=0.25,
+        ).eval()
+        batch = _mlp_contrastive_batch()
+        with torch.no_grad():
+            outputs = model(
+                protein_input_ids=batch["protein_input_ids"],
+                protein_attention_mask=batch["protein_attention_mask"],
+                molecule_input_ids=batch["molecule_input_ids"],
+                molecule_attention_mask=batch["molecule_attention_mask"],
+            )
+        assert outputs.ranking_score is not None
+        assert outputs.contrastive_loss is None
+        assert outputs.loss is None
+
+
+def test_contrastive_still_rejects_partially_supplied_metadata():
+    model = _build_model(
+        pair_scoring_mode="mlp_contrastive",
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.5,
+        contrastive_loss_weight=0.25,
+    )
+    batch = _mlp_contrastive_batch()
+    batch.pop("contrastive_group_ids")
+    with pytest.raises(ValueError, match="contrastive_group_ids"):
+        model(**batch)

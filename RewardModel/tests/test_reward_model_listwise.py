@@ -1563,3 +1563,88 @@ def test_cpu_validation_loss_is_independent_of_batch_partitioning(tmp_path, monk
         assert metrics_by_batch_size[3][key] == pytest.approx(
             metrics_by_batch_size[8][key]
         )
+
+
+def test_cpu_trainer_runs_all_three_objectives_with_protein_shuffle(
+    tmp_path, monkeypatch
+):
+    """Regression: mlp_contrastive + protein_shuffle_sensitivity together.
+
+    The evaluation loop's protein-shuffle pass re-scores the batch with a
+    different protein and supplies no objective metadata. With a positive
+    contrastive weight that previously raised
+    "contrastive learning requires pchembl_values and contrastive_group_ids"
+    and killed every run at its first evaluation.
+    """
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    examples = _tokenized_rows(group_sizes=(8, 6))
+    train_dataset = RewardAssayListDataset(
+        examples,
+        seed=23,
+        max_classification_only_per_item=4,
+        item_count_multiple=2,
+    )
+    eval_dataset = RewardEvaluationDataset(
+        examples,
+        ranking_min_pchembl_span=0.5,
+        protein_shuffle_sensitivity=True,
+    )
+    model = RewardModel(
+        config=RewardModelConfig(
+            protein_model_name_or_path="protein/dummy",
+            molecule_model_name_or_path="molecule/dummy",
+            fusion_hidden_dim=10,
+            fusion_num_heads=2,
+            dropout=0.0,
+            ranking_temperature=1.0,
+            ranking_min_pchembl_span=0.5,
+            pair_scoring_mode="mlp_contrastive",
+            ranking_loss_weight=0.5,
+            classification_loss_weight=0.5,
+            contrastive_loss_weight=0.25,
+        ),
+        protein_bundle=LoadedEncoder(
+            name_or_path="protein/dummy",
+            tokenizer=DummyTokenizer(),
+            model=DummyEncoder(hidden_size=6),
+            hidden_size=6,
+        ),
+        molecule_bundle=LoadedEncoder(
+            name_or_path="molecule/dummy",
+            tokenizer=DummyTokenizer(),
+            model=DummyEncoder(hidden_size=8),
+            hidden_size=8,
+        ),
+    )
+    trainer = RewardModelTrainer(
+        model=model,
+        args=create_training_arguments(
+            RewardTrainerConfig(
+                output_dir=str(tmp_path / "output"),
+                num_train_epochs=1,
+                per_device_train_batch_size=2,
+                per_device_eval_batch_size=4,
+                logging_steps=1,
+                learning_rate=1.0e-3,
+                fp16=False,
+                optim="adamw_torch",
+                training_mode="single_gpu",
+                protein_shuffle_sensitivity=True,
+            )
+        ),
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=RewardAssayListCollator(),
+    )
+
+    trainer.train()
+    metrics = trainer.evaluate()
+
+    assert math.isfinite(metrics["eval_loss"])
+    assert math.isfinite(metrics["eval_ranking_loss"])
+    assert math.isfinite(metrics["eval_classification_loss"])
+    assert math.isfinite(metrics["eval_contrastive_loss"])
+    # the decoy metric this pass exists to produce
+    assert "eval_protein_shuffle_weighted_spearman_drop" in metrics
+    assert "eval_protein_shuffle_weighted_rank_stability" in metrics
