@@ -1,0 +1,7 @@
+# Intermediate pair tables, tens of MB and regenerable on CPU in a few minutes:
+#   python find_shared_molecule_groups.py
+# The committed reports (SPLIT_OVERLAP.md, CANDIDATES.md) and the small val-split
+# tables are the parts worth versioning.
+shared_pairs_scaffold_train.csv
+shared_pairs_random_train.csv
+shared_groups.json
