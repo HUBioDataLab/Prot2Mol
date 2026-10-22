@@ -1,0 +1,111 @@
+{
+  "tag": "contrastive_cosine",
+  "ckpt": "/media/16TB/archive/furkan/past_runs/random_assay_seen_contrastive_classification_512_fusion/checkpoint-195566",
+  "split": "/home/furkan/Prot2Mol_Project/Prot2Mol/dataset/processed/chembl_37/scaffold_component_split_median/test.parquet",
+  "n_assays": 3971,
+  "n_eligible_total": 3971,
+  "n_ligands_total": 126605,
+  "seed": 0,
+  "median_dissimilar_kmer_cosine": 0.015170875936746597,
+  "weighted_spearman": {
+    "true": {
+      "point": 0.2832370925943665,
+      "ci95": [
+        0.2653726508497829,
+        0.30097629890059785
+      ]
+    },
+    "decoy_random_mean": {
+      "point": 0.13299323206471797,
+      "ci95": [
+        0.12141881160141899,
+        0.1446481227213285
+      ]
+    },
+    "decoy_dissimilar": {
+      "point": 0.1355141804155671,
+      "ci95": [
+        0.12126069184926364,
+        0.15021815914228737
+      ]
+    },
+    "decoy_shuffled": {
+      "point": 0.15835788754473132,
+      "ci95": [
+        0.1443819766454587,
+        0.17219169985447744
+      ]
+    },
+    "control_molecule": {
+      "point": 0.0019917615046021204,
+      "ci95": [
+        -0.0036667901817673517,
+        0.007537663105336848
+      ]
+    },
+    "mw": {
+      "point": 0.1270813674764218,
+      "ci95": [
+        0.11239456144366224,
+        0.1418288502196805
+      ]
+    }
+  },
+  "median_tau": {
+    "decoy_random_mean": {
+      "median": 0.25770503480016055,
+      "q25": 0.10326603878827198,
+      "q75": 0.4074074074074074
+    },
+    "decoy_dissimilar": {
+      "median": 0.27208346175028264,
+      "q25": 0.02485785672104383,
+      "q75": 0.44769439191039684
+    },
+    "decoy_shuffled": {
+      "median": 0.3333333333333333,
+      "q25": 0.09572045532116924,
+      "q75": 0.5
+    },
+    "control_molecule": {
+      "median": 0.0,
+      "q25": -0.13386917934483952,
+      "q75": 0.14285714285714285
+    }
+  },
+  "tests": {
+    "decoy_random_mean": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 5531990.0,
+      "p_one_sided": 8.887367473548842e-130,
+      "mean_paired_delta_rho": 0.15323068035951448,
+      "delta_ci95": [
+        0.14014104870015148,
+        0.166030739448213
+      ],
+      "cliffs_delta": 0.35003777386048857
+    },
+    "decoy_dissimilar": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4832801.5,
+      "p_one_sided": 3.9354995580498696e-92,
+      "mean_paired_delta_rho": 0.15167754506752218,
+      "delta_ci95": [
+        0.13578094802889723,
+        0.16745059434268425
+      ],
+      "cliffs_delta": 0.2999244522790229
+    },
+    "decoy_shuffled": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4774978.0,
+      "p_one_sided": 3.0946245407038503e-84,
+      "mean_paired_delta_rho": 0.1363795783692264,
+      "delta_ci95": [
+        0.12163682095792659,
+        0.1509877224430487
+      ],
+      "cliffs_delta": 0.2800302190883908
+    }
+  }
+}

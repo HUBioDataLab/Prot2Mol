@@ -1,0 +1,111 @@
+{
+  "tag": "scaffold_ep100",
+  "ckpt": "/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_scaffold_median/checkpoint-197200",
+  "split": "/home/furkan/Prot2Mol_Project/Prot2Mol/dataset/processed/chembl_37/scaffold_component_split_median/test.parquet",
+  "n_assays": 3971,
+  "n_eligible_total": 3971,
+  "n_ligands_total": 126605,
+  "seed": 0,
+  "median_dissimilar_kmer_cosine": 0.015170875936746597,
+  "weighted_spearman": {
+    "true": {
+      "point": 0.19167604824965356,
+      "ci95": [
+        0.17827226137514848,
+        0.20523936730058553
+      ]
+    },
+    "decoy_random_mean": {
+      "point": 0.11271715941253113,
+      "ci95": [
+        0.10300327511741225,
+        0.12289663157662613
+      ]
+    },
+    "decoy_dissimilar": {
+      "point": 0.10262594608593022,
+      "ci95": [
+        0.09020741254997676,
+        0.11514708063112444
+      ]
+    },
+    "decoy_shuffled": {
+      "point": 0.11511312814160553,
+      "ci95": [
+        0.10262693633550904,
+        0.12778894978474717
+      ]
+    },
+    "control_molecule": {
+      "point": 0.000344977521389896,
+      "ci95": [
+        -0.00496805732517314,
+        0.005583865993433554
+      ]
+    },
+    "mw": {
+      "point": 0.1270813674764218,
+      "ci95": [
+        0.11239456144366224,
+        0.1418288502196805
+      ]
+    }
+  },
+  "median_tau": {
+    "decoy_random_mean": {
+      "median": 0.35187652315824364,
+      "q25": 0.20599756287445858,
+      "q75": 0.49375782695814235
+    },
+    "decoy_dissimilar": {
+      "median": 0.33333333333333337,
+      "q25": 0.12139296348801805,
+      "q75": 0.4999999999999999
+    },
+    "decoy_shuffled": {
+      "median": 0.40572907915099854,
+      "q25": 0.23076923076923075,
+      "q75": 0.5966941897186163
+    },
+    "control_molecule": {
+      "median": 0.0,
+      "q25": -0.14285714285714288,
+      "q75": 0.14285714285714288
+    }
+  },
+  "tests": {
+    "decoy_random_mean": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4684352.5,
+      "p_one_sided": 1.774939048316589e-36,
+      "mean_paired_delta_rho": 0.05993823684524718,
+      "delta_ci95": [
+        0.04875184269067474,
+        0.07114875499505183
+      ],
+      "cliffs_delta": 0.20271971795517502
+    },
+    "decoy_dissimilar": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4206241.0,
+      "p_one_sided": 7.521993324725568e-33,
+      "mean_paired_delta_rho": 0.07193294538053123,
+      "delta_ci95": [
+        0.05762278928495311,
+        0.08652974049539945
+      ],
+      "cliffs_delta": 0.17552253840342483
+    },
+    "decoy_shuffled": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4082268.0,
+      "p_one_sided": 4.400625959201073e-26,
+      "mean_paired_delta_rho": 0.061311664729053535,
+      "delta_ci95": [
+        0.04823891034658475,
+        0.07423358866156211
+      ],
+      "cliffs_delta": 0.14832535885167464
+    }
+  }
+}

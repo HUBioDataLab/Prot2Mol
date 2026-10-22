@@ -1,0 +1,10 @@
+[
+ {"tag":"scaffold_ep3",   "epoch":3,  "split":"scaffold","ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_scaffold_median/checkpoint-5916"},
+ {"tag":"scaffold_ep12",  "epoch":12, "split":"scaffold","ckpt":"/media/16TB/archive/furkan/past_runs/fusion512_ranking_fusion2x_scaffold_median/checkpoint-23664"},
+ {"tag":"scaffold_ep32",  "epoch":32, "split":"scaffold","ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_h512_scaffold_median/checkpoint-63104"},
+ {"tag":"scaffold_ep100", "epoch":100,"split":"scaffold","ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_scaffold_median/checkpoint-197200"},
+ {"tag":"random_ep1",     "epoch":1,  "split":"random",  "ckpt":"/media/16TB/archive/furkan/past_runs/fusion512_ranking_fusion2x_random_median/checkpoint-1790"},
+ {"tag":"random_ep10",    "epoch":10, "split":"random",  "ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_random_median/checkpoint-17900"},
+ {"tag":"random_ep34",    "epoch":34, "split":"random",  "ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_h512_random_median/checkpoint-60860"},
+ {"tag":"random_ep100",   "epoch":100,"split":"random",  "ckpt":"/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_random_median/checkpoint-179000"}
+]

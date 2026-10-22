@@ -1,0 +1,111 @@
+{
+  "tag": "h512_ep32",
+  "ckpt": "/home/furkan/Prot2Mol_Project/Prot2Mol/RewardModel/outputs/fusion512_ranking_h512_scaffold_median/checkpoint-63104",
+  "split": "/home/furkan/Prot2Mol_Project/Prot2Mol/dataset/processed/chembl_37/scaffold_component_split_median/test.parquet",
+  "n_assays": 3971,
+  "n_eligible_total": 3971,
+  "n_ligands_total": 126605,
+  "seed": 0,
+  "median_dissimilar_kmer_cosine": 0.015170875936746597,
+  "weighted_spearman": {
+    "true": {
+      "point": 0.20214710778263478,
+      "ci95": [
+        0.1895412358953443,
+        0.2146546163526263
+      ]
+    },
+    "decoy_random_mean": {
+      "point": 0.13164838377638297,
+      "ci95": [
+        0.12112715789099304,
+        0.14237235425515612
+      ]
+    },
+    "decoy_dissimilar": {
+      "point": 0.11113761873288285,
+      "ci95": [
+        0.09806998791743583,
+        0.12460717021288387
+      ]
+    },
+    "decoy_shuffled": {
+      "point": 0.14462198121368094,
+      "ci95": [
+        0.13255834286742835,
+        0.15670017368323932
+      ]
+    },
+    "control_molecule": {
+      "point": 0.0038186049582541732,
+      "ci95": [
+        -0.0018247132825803991,
+        0.009437435112973775
+      ]
+    },
+    "mw": {
+      "point": 0.1270813674764218,
+      "ci95": [
+        0.11239456144366224,
+        0.1418288502196805
+      ]
+    }
+  },
+  "median_tau": {
+    "decoy_random_mean": {
+      "median": 0.41287338674825463,
+      "q25": 0.26199513844195693,
+      "q75": 0.5555555555555555
+    },
+    "decoy_dissimilar": {
+      "median": 0.3440308087291399,
+      "q25": 0.15416935349463878,
+      "q75": 0.5550240190421698
+    },
+    "decoy_shuffled": {
+      "median": 0.4666666666666667,
+      "q25": 0.3052182400577041,
+      "q75": 0.6432841333801558
+    },
+    "control_molecule": {
+      "median": 0.0,
+      "q25": -0.12546210878484682,
+      "q75": 0.14266892495046807
+    }
+  },
+  "tests": {
+    "decoy_random_mean": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4698520.5,
+      "p_one_sided": 2.5563555689545698e-42,
+      "mean_paired_delta_rho": 0.05948229622253092,
+      "delta_ci95": [
+        0.04920352036316748,
+        0.07010039810251473
+      ],
+      "cliffs_delta": 0.1994459833795014
+    },
+    "decoy_dissimilar": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 4327723.5,
+      "p_one_sided": 6.88311031055228e-41,
+      "mean_paired_delta_rho": 0.08449409539306915,
+      "delta_ci95": [
+        0.0708828537605311,
+        0.09815218012339738
+      ],
+      "cliffs_delta": 0.1906320825988416
+    },
+    "decoy_shuffled": {
+      "n_paired": 3971,
+      "wilcoxon_stat": 3885526.0,
+      "p_one_sided": 1.402970225320234e-23,
+      "mean_paired_delta_rho": 0.051387698678618,
+      "delta_ci95": [
+        0.039661366306202164,
+        0.0633297842556104
+      ],
+      "cliffs_delta": 0.13195668597330648
+    }
+  }
+}
