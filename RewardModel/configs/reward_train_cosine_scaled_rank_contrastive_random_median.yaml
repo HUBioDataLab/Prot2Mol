@@ -1,0 +1,132 @@
+# LigUnity-style SINGLE-HEAD run on the random split, WITH the cosine scale.
+#
+#   pair_scoring_mode: cosine  +  cosine_fixed_score_scale: true
+#     pooled encoder output -> projection -> L2 normalize -> 13 * cosine.
+#     No fusion block, no ranking head, no classification head. The listwise
+#     ranking loss and the bidirectional contrastive loss read the SAME scaled
+#     score, which is how LigUnity trains.
+#
+#   ranking 0.5 / contrastive 0.5 / classification 0.0
+#     LigUnity's own defaults (--rank-weight 0.5, --contras-weight 0.5 in
+#     unimol/tasks/train_task.py). LigUnity has no classification objective.
+#
+# WHY THE SCALE: the unscaled run of this exact config reached only
+# 0.1969 best weighted spearman on random, against 0.4870 for the mlp
+# baseline. LigUnity multiplies the cosine by exp(logit_scale) = 13, so the
+# Plackett-Luce softmax sees a [-13, 13] range; without it the range is
+# [-1, 1] and the softmax is close to uniform, leaving the ranking term with
+# very little gradient. This run isolates that single change.
+#
+# The scale is DETACHED, exactly as LigUnity does it
+# (model.logit_scale.exp().detach()): it is stored in the state dict for
+# reproducibility but receives no gradient and stays at 13 for the whole run.
+#
+# REMAINING DIFFERENCES FROM LIGUNITY, to vary deliberately later:
+#   1. loss normalization. LigUnity sums the per-assay terms; this code takes a
+#      mean over groups, so the same 0.5 weights give a much smaller step.
+#   2. protein pooling. LigUnity takes the ESM2 CLS token at length 800; this
+#      uses mean pooling over 1024 residues.
+#   3. encoder learning rate. LigUnity trains ESM2 at the single global 1e-4;
+#      this keeps the usual 1e-5 encoder group.
+#   4. projection width 512 here vs 128 in LigUnity.
+#   5. ligand encoder SELFormer/SELFIES vs Uni-Mol over 3D conformers.
+#   6. checkpoint selection: single best by eval_loss vs their average of the
+#      last 10 epochs. eval_loss here is ranking+contrastive, so it is NOT
+#      comparable to the eval_loss of any mlp run.
+#
+# Batch 24 x 2: contrastive in-batch negatives come from the forward pass, so
+# gradient accumulation does not widen them. 24 per forward matches LigUnity
+# while keeping 48 assay-lists per optimizer step.
+#
+# protein_shuffle_sensitivity is ON. KNOWN ISSUE: the tri_* runs set this and
+# logged no eval_protein_shuffle_* keys despite training_args.bin recording the
+# flag as True. Cause not identified - check the first eval of this run.
+
+model:
+  protein_model_name_or_path: facebook/esm2_t12_35M_UR50D
+  molecule_model_name_or_path: HUBioDataLab/SELFormer
+  protein_hidden_dropout_prob: 0.0
+  protein_attention_probs_dropout_prob: 0.0
+  molecule_input_representation: selfies
+  molecule_hidden_dropout_prob: 0.1
+  molecule_attention_probs_dropout_prob: 0.1
+  protein_max_length: 1024
+  molecule_max_length: 256
+  fusion_hidden_dim: 512
+  projection_type: nonlinear
+  fusion_num_heads: 8
+  fusion_attention_backend: sdpa
+  fusion_residual: true
+  dropout: 0.0
+  pooling_type: cls
+  protein_pooling_type: mean
+  molecule_pooling_type: cls
+  pair_scoring_mode: cosine
+  cosine_fixed_score_scale: true
+  cosine_scale_init: 13.0
+  cosine_scale_max: 100.0
+  activity_threshold: 6.0
+  ranking_loss_weight: 0.5
+  contrastive_loss_weight: 0.5
+  contrastive_active_threshold: 6.0
+  contrastive_strict_active_only: true
+  classification_loss_weight: 0.0
+  ranking_head_hidden_dims: [128]
+  classification_head_hidden_dims: [128]
+  ranking_temperature: 1.0
+  ranking_affinity_margin: 0.47712125472
+  ranking_min_pchembl_span: 0.5
+  bce_pos_weight: 1.0
+  deduplicate_protein_inputs: true
+  deduplicate_molecule_inputs: true
+  freeze_protein_encoder: false
+  freeze_molecule_encoder: false
+
+data:
+  train_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/train.parquet
+  val_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/val.parquet
+  test_parquet_path: ../../dataset/processed/chembl_37/target_aware_random_assay_activity_balanced_median/test.parquet
+  tokenized_dataset_dir: ../reward_model/data/tokenized/chembl_37_target_aware_random_assay_activity_balanced_median
+  tokenization_batch_size: 64
+  tokenization_num_proc: 8
+  enforce_binary_label_threshold: false
+  ranking_max_ligands: 16
+  ranking_opportunity_divisor: 32
+  evaluation_ranking_partitions: 3
+  ranking_min_pchembl_span: 0.5
+  max_classification_only_per_item: 0
+
+training:
+  output_dir: ../outputs/cosine_scaled_rank_contrastive_random_median
+  num_train_epochs: 100
+  per_device_train_batch_size: 24
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 2
+  learning_rate: 1.0e-4
+  protein_encoder_learning_rate: 1.0e-5
+  molecule_encoder_learning_rate: 1.0e-5
+  projection_learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.06
+  max_grad_norm: 1.0
+  logging_steps: 10
+  dataloader_num_workers: 4
+  dynamic_padding: true
+  length_bucketing: true
+  length_bucket_size_multiplier: 50
+  seed: 42
+  fp16: false
+  bf16: true
+  optim: adamw_torch_fused
+  save_safetensors: false
+  save_total_limit: 2
+  training_mode: single_gpu
+  metrics_profile: full
+  ranking_score_diagnostics: false
+  objective_gradient_diagnostics_steps: 0
+  fixed_train_eval_assays: 0
+  protein_shuffle_sensitivity: true
+  metric_for_best_model: eval_loss
+  greater_is_better: false
+  report_to:
+    - wandb
