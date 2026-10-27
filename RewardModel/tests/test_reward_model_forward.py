@@ -1307,3 +1307,56 @@ def test_contrastive_still_rejects_partially_supplied_metadata():
     batch.pop("contrastive_group_ids")
     with pytest.raises(ValueError, match="contrastive_group_ids"):
         model(**batch)
+
+
+def _cosine_batch():
+    torch.manual_seed(0)
+    protein_input_ids = torch.randint(1, 5, (6, 6))
+    molecule_input_ids = torch.randint(1, 5, (6, 5))
+    return {
+        "protein_input_ids": protein_input_ids,
+        "molecule_input_ids": molecule_input_ids,
+        "protein_attention_mask": torch.ones_like(protein_input_ids),
+        "molecule_attention_mask": torch.ones_like(molecule_input_ids),
+    }
+
+
+def test_cosine_without_the_fixed_scale_scores_the_raw_cosine():
+    model = _build_model(pair_scoring_mode="cosine").eval()
+
+    assert model.logit_scale is None
+    with torch.no_grad():
+        outputs = model(**_cosine_batch())
+    assert outputs.score_scale is None
+    assert torch.equal(
+        outputs.ranking_score.reshape(-1),
+        outputs.cosine_similarity.reshape(-1),
+    )
+
+
+def test_cosine_fixed_score_scale_scales_the_score_and_stays_frozen():
+    model = _build_model(
+        pair_scoring_mode="cosine",
+        cosine_fixed_score_scale=True,
+        ranking_loss_weight=0.5,
+        classification_loss_weight=0.0,
+    )
+
+    assert model.logit_scale is not None
+    assert "logit_scale" in model.state_dict()
+
+    batch = _cosine_batch()
+    outputs = model(
+        **batch,
+        pchembl_values=torch.tensor([8.0, 7.0, 5.5, 9.0, 6.5, 5.0]),
+        ranking_group_ids=torch.tensor([0, 0, 0, 1, 1, 1]),
+    )
+    assert float(outputs.score_scale) == pytest.approx(13.0)
+    assert torch.allclose(
+        outputs.ranking_score.reshape(-1),
+        outputs.score_scale * outputs.cosine_similarity.reshape(-1),
+    )
+
+    outputs.loss.backward()
+    # LigUnity detaches the scale, so it never moves off exp(log 13).
+    assert model.logit_scale.grad is None

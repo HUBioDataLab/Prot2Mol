@@ -291,3 +291,28 @@ def test_mlp_contrastive_requires_deduplicated_protein_inputs():
 def test_plain_mlp_still_rejects_the_contrastive_objective():
     with pytest.raises(ValueError, match="contrastive_loss_weight > 0 requires"):
         RewardModelConfig(pair_scoring_mode="mlp", contrastive_loss_weight=0.25)
+
+
+def test_cosine_fixed_score_scale_defaults_off_and_round_trips(tmp_path):
+    assert RewardModelConfig().cosine_fixed_score_scale is False
+
+    config = RewardModelConfig(
+        pair_scoring_mode="cosine", cosine_fixed_score_scale=True
+    )
+    reloaded = RewardModelConfig.load_json(
+        config.save_json(str(tmp_path / "c.json"))
+    )
+    assert reloaded.cosine_fixed_score_scale is True
+
+    legacy = config.to_dict()
+    legacy.pop("cosine_fixed_score_scale")
+    assert RewardModelConfig.from_dict(legacy).cosine_fixed_score_scale is False
+
+
+def test_cosine_fixed_score_scale_rejects_other_scoring_modes():
+    with pytest.raises(ValueError, match="cosine_fixed_score_scale only applies"):
+        RewardModelConfig(
+            pair_scoring_mode="scaled_cosine", cosine_fixed_score_scale=True
+        )
+    with pytest.raises(ValueError, match="cosine_fixed_score_scale must be a boolean"):
+        RewardModelConfig(pair_scoring_mode="cosine", cosine_fixed_score_scale="yes")

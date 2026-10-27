@@ -91,6 +91,12 @@ class RewardModelConfig:
     ranking_head_hidden_dims: Sequence[int] = (2048, 1024, 512, 256, 128)
     classification_head_hidden_dims: Sequence[int] = (2048, 1024, 512, 256, 128)
     cosine_marginal_biases: bool = False
+    # Apply LigUnity's fixed cosine score scale in ``cosine`` mode. LigUnity
+    # declares logit_scale as a parameter but uses it as ``.exp().detach()``, so
+    # it never receives gradient and stays at exp(log 13) = 13 for the whole
+    # run. Off by default, which keeps plain ``cosine`` scoring the raw cosine
+    # and every checkpoint trained that way loadable unchanged.
+    cosine_fixed_score_scale: bool = False
     ranking_temperature: float = 1.0
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
@@ -250,6 +256,13 @@ class RewardModelConfig:
             raise ValueError("classification_loss_weight must be >= 0")
         if not isinstance(self.cosine_classification_mlp, bool):
             raise ValueError("cosine_classification_mlp must be a boolean")
+        if not isinstance(self.cosine_fixed_score_scale, bool):
+            raise ValueError("cosine_fixed_score_scale must be a boolean")
+        if self.cosine_fixed_score_scale and self.pair_scoring_mode != "cosine":
+            raise ValueError(
+                "cosine_fixed_score_scale only applies to pair_scoring_mode="
+                "'cosine'; the other cosine-based modes already scale their score"
+            )
         if self.cosine_classification_mlp and self.pair_scoring_mode != "cosine":
             raise ValueError(
                 "cosine_classification_mlp=true requires pair_scoring_mode='cosine'"

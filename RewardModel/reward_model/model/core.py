@@ -227,7 +227,10 @@ class RewardModel(nn.Module):
             )
             self.logit_scale = (
                 nn.Parameter(torch.tensor(math.log(self._config.cosine_scale_init)))
-                if self._config.cosine_marginal_biases
+                if (
+                    self._config.cosine_marginal_biases
+                    or self._config.cosine_fixed_score_scale
+                )
                 else None
             )
             self.classification_logit_bias = None
@@ -672,6 +675,36 @@ class RewardModel(nn.Module):
                 [normalized_protein, normalized_molecule],
                 dim=-1,
             )
+            # LigUnity scores every objective off ``scale * cosine`` with the
+            # scale detached, so it is a constant 13 rather than a trained
+            # parameter. Without it the Plackett-Luce softmax sees a [-1, 1]
+            # range instead of [-13, 13] and is nearly uniform.
+            if self._config.cosine_fixed_score_scale:
+                if self.logit_scale is None:
+                    raise RuntimeError(
+                        "cosine_fixed_score_scale needs logit_scale initialized"
+                    )
+                score_scale = (
+                    self.logit_scale.clamp(
+                        max=math.log(self._config.cosine_scale_max)
+                    )
+                    .exp()
+                    .detach()
+                )
+                scaled_score = score_scale * cosine_similarity
+                activity_logits = (
+                    self.classification_head(normalized_joint_embedding)
+                    if self.classification_head is not None
+                    else scaled_score
+                )
+                return (
+                    scaled_score,
+                    activity_logits,
+                    cosine_similarity,
+                    score_scale,
+                    normalized_protein,
+                    normalized_molecule,
+                )
             activity_logits = (
                 self.classification_head(normalized_joint_embedding)
                 if self.classification_head is not None
