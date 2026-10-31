@@ -1,0 +1,254 @@
+{
+  "spec_sha256": "d23d3ea6f26d05aa3917fce52542a0045542b3a07e40bbe345f4876bf0678cb6",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "Is the reported Spearman computed per group and averaged, weighted by group size or pair count, or pooled across all observations?",
+      "rationale": "Pooling mixes within-group order with cross-group score offsets, which a translation-invariant ranking loss never pins down ([Yan et al. 2022](https://research.google/pubs/scale-calibration-of-deep-ranking-models/)). A per-group average gives a two-item group, which carries one bit, the same weight as a 25-item group with 300 pairs (inference).",
+      "interpretation": "**Pooled:** part of both numbers measures the cross-group calibration of a head that was never trained for it. Evaluate the BCE logit or an anchored score instead. **Per-group average:** the value is driven by groups of two or three, so compare it with a pair-weighted concordance before reading anything into the plateau.",
+      "status": "pending"
+    },
+    {
+      "id": "Q02",
+      "question": "Which groups enter the metric? How are size-one groups, constant groups and ties created by median aggregation handled? Does the eligible fraction differ between splits?",
+      "rationale": "Spearman is undefined for constant groups. The median of an even number of replicates can create exact ties. An eligibility rule that differs from the training rule scores pairs the loss ignored.",
+      "interpretation": "If the eligible fraction or tie rate differs between the two test partitions, part of the gap is compositional rather than a failure to generalize.",
+      "status": "pending"
+    },
+    {
+      "id": "Q03",
+      "question": "Do the two test partitions differ in group-size distribution, within-group score variance, near-tie rate or replicate count?",
+      "rationale": "Each of these bounds the attainable per-group correlation, independently of the model (inference).",
+      "interpretation": "If Split B's groups are smaller, flatter or noisier, reweighting Split A's per-group results to Split B's mix should reproduce part of the drop without any retraining.",
+      "status": "pending"
+    },
+    {
+      "id": "Q04",
+      "question": "How large is the spread over seeds, over a bootstrap of indivisible split units, and over alternative Split B realizations?",
+      "rationale": "Split realizations built to identical criteria differed in difficulty while preserving method rankings ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)). A sparse learning-rate grid produced a standard deviation 6\u20137 times the seed-to-seed value ([Xin et al. 2022](https://arxiv.org/abs/2209.11379)).",
+      "interpretation": "A realization spread near the 0.21 gap means the gap itself is poorly estimated. Comparisons within one realization, such as model against baseline, stay trustworthy either way.",
+      "status": "pending"
+    },
+    {
+      "id": "Q05",
+      "question": "Does the metric tolerate small score differences the way the loss does? How do top-weighted metrics move?",
+      "rationale": "The loss deliberately declines to order near-ties and emphasizes the top of each group. Spearman weights every pair equally.",
+      "interpretation": "A large difference between Spearman and a tie-aware or epsilon-band concordance means the metric and the loss disagree about what counts as an error. If top-k metrics keep improving after Spearman plateaus, the loss is optimizing something the metric does not reward.",
+      "status": "pending"
+    },
+    {
+      "id": "Q06",
+      "question": "Which term of the composite validation loss rises first on each split: BCE, the ranking loss, or each direction of the contrastive loss? Does BCE AUC move with BCE log-loss?",
+      "rationale": "The aggregate is dominated by whichever term has the largest magnitude times weight. Each term can rise for reasons unrelated to ranking.",
+      "interpretation": "If BCE log-loss rises while AUC and Spearman stay flat, that is the calibration pattern and it does not harm ranking. If the ranking term's own loss rises, the model is overfitting the target. If logits grow uniformly, log-loss rises sooner on the split where discrimination is weaker, which alone could produce a turning point at 10% on one split and 30% on the other (inference).",
+      "status": "pending"
+    },
+    {
+      "id": "Q07",
+      "question": "Are checkpoints selected on aggregate loss or on validation Spearman? Where do the best-loss and best-Spearman checkpoints fall on each split?",
+      "rationale": "Selection is part of the method.",
+      "interpretation": "If the best-Spearman checkpoint comes much later than the best-loss checkpoint on Split B, the early turning point is a selection artifact, not the model's limit.",
+      "status": "pending"
+    },
+    {
+      "id": "Q08",
+      "question": "How do training and validation ranking metrics diverge over time on each split?",
+      "rationale": "This separates fitting non-transferable features from a limit on signal or capacity.",
+      "interpretation": "Training Spearman rising while Split B stays flat from early on suggests fitting specific to training units. Both flat suggests little learnable signal.",
+      "status": "pending"
+    },
+    {
+      "id": "Q09",
+      "question": "Does the early rise survive with frozen encoders?",
+      "rationale": "Full fine-tuning with randomly initialized heads distorts pretrained features ([Kumar et al. 2022](https://arxiv.org/abs/2202.10054)).",
+      "interpretation": "If the rise disappears or comes later with frozen encoders, encoder drift drives it. If it persists, the interaction module or the heads drive it.",
+      "status": "pending"
+    },
+    {
+      "id": "Q10",
+      "question": "Does the learned contrastive temperature keep sharpening? Does the contrastive validation loss still rise against a fixed candidate pool?",
+      "rationale": "InfoNCE values depend on the number and similarity of in-batch candidates ([van den Oord et al. 2018](https://arxiv.org/abs/1807.03748)) and on temperature ([Wang & Liu 2021](https://arxiv.org/abs/2012.09740)).",
+      "interpretation": "A rise that vanishes under a fixed pool or a fixed temperature is an artifact of batch composition or overconfidence. A rise that persists alongside a widening gap in positive-pair alignment between training and validation indicates memorization.",
+      "status": "pending"
+    },
+    {
+      "id": "Q11",
+      "question": "Is the rise concentrated in particular group sizes or similarity strata?",
+      "rationale": "This localizes where fitting fails to transfer.",
+      "interpretation": "Concentration in low-similarity groups supports fitting that is specific to the training distribution. A uniform spread supports calibration drift.",
+      "status": "pending"
+    },
+    {
+      "id": "Q12",
+      "question": "Which split matches deployment? Will future y mostly be near neighbours of known y, or come from new regions?",
+      "rationale": "Park and Marcotte accept random splits only when the warm regime is the sole regime of interest. DataSAIL's authors say leakage-reduced splitting is the wrong choice when application data resemble training data ([DataSAIL](https://github.com/kalininalab/DataSAIL)).",
+      "interpretation": "**Warm deployment:** 0.41 is the relevant number and Split B is a stress test. **Cold deployment:** Split B is the target, and Split A should not drive tuning.",
+      "status": "pending"
+    },
+    {
+      "id": "Q13",
+      "question": "How is each test y's maximum similarity to training y distributed in both splits, and how does Split A perform in each similarity stratum?",
+      "rationale": "One recent similarity-aware evaluation found only **16 of 873** random-split test samples below one-third similarity, with performance falling sharply among them ([Zhang et al. 2025](https://arxiv.org/abs/2504.09481v1)).",
+      "interpretation": "If Split A's lowest stratum scores near 0.20, Split B measures a stratum that Split A barely contains, and there is no anomaly to explain. If that stratum stays near 0.41, something other than similarity drives the drop.",
+      "status": "pending"
+    },
+    {
+      "id": "Q14",
+      "question": "What is the size distribution of indivisible units in each partition? Were units assigned at random, or did large units default to training?",
+      "rationale": "Single-linkage grouping lets a few \"bridge\" members merge otherwise dissimilar groups, and larger families fail to split more often ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)).",
+      "interpretation": "A giant training unit alongside small, peripheral test units means Split B's test set was selected for remoteness. Non-random assignment also breaks the exchangeability between validation and test units that checkpoint selection relies on.",
+      "status": "pending"
+    },
+    {
+      "id": "Q15",
+      "question": "Do the positive rate, score distribution or group descriptors differ across partitions, and does a formal test flag the difference?",
+      "rationale": "Label shift alone can move Spearman without any change in inputs. BBSE tests for label shift using any black-box classifier whose confusion matrix is invertible ([Lipton et al. 2018](https://proceedings.mlr.press/v80/lipton18a.html)). Classifier two-sample tests show where two samples differ ([Lopez-Paz & Oquab 2017](https://arxiv.org/abs/1610.06545)).",
+      "interpretation": "A significant shift in labels or group descriptors assigns part of the gap to composition. It also argues for re-splitting with class-ratio constraints, as DataSAIL does.",
+      "status": "pending"
+    },
+    {
+      "id": "Q16",
+      "question": "Which x appear in Split B's test groups, and how many training groups does each have?",
+      "rationale": "x is assumed to be warm, but thin coverage of x turns part of Split B into the harder neither-seen setting.",
+      "interpretation": "If test x have few training groups, part of the gap comes from coldness on the x side. Report Split B separately by each x's training count.",
+      "status": "pending"
+    },
+    {
+      "id": "Q17",
+      "question": "Across model variants, do Split A and Split B scores move together?",
+      "rationale": "Out-of-distribution accuracy often tracks in-distribution accuracy linearly ([Miller et al. 2021](https://arxiv.org/abs/2107.04649)). The relation is \"largely dataset-dependent\" ([Wenzel et al. 2022](https://arxiv.org/abs/2207.09239)) and sometimes inverse ([Teney et al. 2022](https://arxiv.org/abs/2209.00613)).",
+      "interpretation": "A tight line means tuning on Split A is a valid proxy. A flat or inverse relation means tuning on Split A actively misleads. All of this evidence is classification accuracy on images, so applying it to grouped rank metrics is an extrapolation.",
+      "status": "pending"
+    },
+    {
+      "id": "Q18",
+      "question": "What is the replicate-based noise ceiling of the chosen metric on each split?",
+      "rationale": "A noise ceiling marks the point where \"any remaining mismatch is then attributable to the noise in the measurements\" ([Nili et al. 2014](https://pmc.ncbi.nlm.nih.gov/articles/PMC3990488)). The replicates that are currently aggregated by median make it computable: split each pair's replicates into halves, score one half against the other with the headline metric, and apply a Spearman\u2013Brown correction.",
+      "interpretation": "If Split B's ceiling is lower, part of the gap is a difference in measurement quality, and the right report is the fraction of the ceiling reached. Two caveats apply. Spearman\u2013Brown assumes parallel measurements ([SAGE](https://sk.sagepub.com/ency/edvol/embed/the-sage-encyclopedia-of-research-design-2e/chpt/spearman-brown-prophecy-formula)), and this research found no ML precedent for a noise ceiling on a grouped rank metric.",
+      "status": "pending"
+    },
+    {
+      "id": "Q19",
+      "question": "How does within-group variance of s divide among the y-cluster main effect, the x\u00d7y interaction, and replicate noise?",
+      "rationale": "Generalizability theory estimates exactly this interaction component, and it needs replication to separate the interaction from residual noise ([G-theory notes](https://marklhc.quarto.pub/psyc520-2025spring/slides/07-g-theory.html)). Cross-attention can only add value on the interaction share (inference).",
+      "interpretation": "A small interaction share means Split A's 0.41 rested largely on y main effects that do not transfer across similarity regions. In that case 0.20 sits near the cold-y limit for any architecture (hypothesis). Because most y are seen about twice, fit the model at the y-cluster level.",
+      "status": "pending"
+    },
+    {
+      "id": "Q20",
+      "question": "What fraction of within-group pairs differ by less than the replicate noise?",
+      "rationale": "Near-ties add noise to both training and evaluation.",
+      "interpretation": "A large fraction lowers the ceiling and argues for tie-tolerant losses and metrics.",
+      "status": "pending"
+    },
+    {
+      "id": "Q21",
+      "question": "Why do only half the groups support ranking supervision, and does that half differ in size, variance or x?",
+      "rationale": "The ranking head learns from a subset that may not represent the evaluation groups.",
+      "interpretation": "A systematic difference means the ranking head is trained on a different distribution from the one it is evaluated on, even on Split A.",
+      "status": "pending"
+    },
+    {
+      "id": "Q22",
+      "question": "How were pairs chosen for observation, given the 70% positive rate?",
+      "rationale": "If pairs were observed because they looked promising, unobserved pairs are unlabeled, not negative.",
+      "interpretation": "If observation was selected by promise, in-batch \"negatives\" are partly positive. That changes how contrastive negatives and baselines should be built.",
+      "status": "pending"
+    },
+    {
+      "id": "Q23",
+      "question": "How many groups have all members on one side of the threshold, and how far is the threshold from the replicate noise?",
+      "rationale": "BCE carries no within-group ordering information for items on the same side of the threshold.",
+      "interpretation": "If many groups are all-positive, BCE contributes little to the ranked target and mostly shapes calibration and x priors.",
+      "status": "pending"
+    },
+    {
+      "id": "Q24",
+      "question": "Are batches built from whole groups or from observations, and is the fraction of ranking-eligible groups per batch fixed?",
+      "rationale": "The ranking loss is defined on only about half the groups, so its effective weight fluctuates with batch composition.",
+      "interpretation": "Large fluctuation means adaptive loss-weighting methods read noise. Use stratified batches before comparing objectives.",
+      "status": "pending"
+    },
+    {
+      "id": "Q25",
+      "question": "Does the contrastive loss treat other positives of the same x in the batch as negatives?",
+      "rationale": "With group batching and diagonal-only targets, a positive anchor in a 25-item group at 70% positives sees about 16\u201317 labeled positives as negatives (inference). Standard two-tower practice masks only identical candidate IDs ([TFRS](https://www.tensorflow.org/recommenders/api_docs/python/tfrs/tasks/Retrieval)).",
+      "interpretation": "If co-positives are treated as negatives, the contrastive loss directly opposes the BCE and ranking losses. Masking them, or using multi-positive targets, is the first fix to test.",
+      "status": "pending"
+    },
+    {
+      "id": "Q26",
+      "question": "Are the contrastive projections taken before or after cross-attention?",
+      "rationale": "Pair-independent embeddings allow cheap in-batch negatives and a full softmax over all 8,000 x. Pair-dependent embeddings require recomputing cross-attention for every off-diagonal pair.",
+      "interpretation": "This architectural detail determines which contrastive remedies are feasible.",
+      "status": "pending"
+    },
+    {
+      "id": "Q27",
+      "question": "How is the listwise loss normalized across groups of different sizes?",
+      "rationale": "Summing over pairs lets the roughly 10% of large groups dominate the gradient. Per-group averaging matches a per-group-averaged metric (inference).",
+      "interpretation": "If loss weighting and metric weighting differ, the model is optimizing groups the metric barely counts.",
+      "status": "pending"
+    },
+    {
+      "id": "Q28",
+      "question": "Are x frequencies in batches skewed, and is any sampling-probability correction applied?",
+      "rationale": "Uncorrected in-batch softmax is biased under power-law frequencies ([Yi et al. 2019](https://research.google/pubs/sampling-bias-corrected-neural-modeling-for-large-corpus-item-recommendations/)). The y-to-x direction can learn an offset for x popularity (inference).",
+      "interpretation": "A strong x-popularity component in the contrastive branch is a shortcut that needs no information about y.",
+      "status": "pending"
+    },
+    {
+      "id": "Q29",
+      "question": "Are subsets for ablations and learning curves drawn by indivisible unit?",
+      "rationale": "Subsampling by observation leaks similar items back into training.",
+      "interpretation": "Only subsampling by unit gives interpretable learning curves on Split B.",
+      "status": "pending"
+    },
+    {
+      "id": "Q30",
+      "question": "What ranking quality does each loss deliver alone, and in each pair, on each split?",
+      "rationale": "A loss-subset grid measures each loss's contribution and their interactions directly. Arms without the ranking head are scored by the BCE logit or the contrastive similarity.",
+      "interpretation": "An interaction term that is positive on Split A and negative on Split B means the auxiliary losses help in-distribution but hurt transfer (hypothesis).",
+      "status": "pending"
+    },
+    {
+      "id": "Q31",
+      "question": "How well do the ranking head, the BCE logit and the contrastive similarity agree within groups, and does their agreement fall during training?",
+      "rationale": "This quantifies the stated mismatch between ranking order and contrastive geometry.",
+      "interpretation": "Near-zero within-group correlation between contrastive similarity and s means the contrastive branch encodes cross-group compatibility, not within-group order.",
+      "status": "pending"
+    },
+    {
+      "id": "Q32",
+      "question": "How much of the BCE head's validation AUC does an x-only model reproduce?",
+      "rationale": "Within-group Spearman ignores anything constant within a group, but BCE rewards per-x base rates (inference).",
+      "interpretation": "If an x-only model recovers most of the AUC, BCE mostly teaches x priors that do not affect within-group order.",
+      "status": "pending"
+    },
+    {
+      "id": "Q33",
+      "question": "Do the auxiliary gradients align with the ranking gradient in the encoders and in cross-attention?",
+      "rationale": "Gradient conflict flags interference in optimization, but low conflict does not predict good generalization ([Royer et al. 2023](https://arxiv.org/abs/2310.08910); [Mueller et al. 2025](https://arxiv.org/abs/2408.14677)).",
+      "interpretation": "Frequent conflict points to a problem. Its absence rules nothing out.",
+      "status": "pending"
+    },
+    {
+      "id": "Q34",
+      "question": "Were the loss weights tuned, and on which split's validation data?",
+      "rationale": "Weights tuned on random-group validation optimize for the warm regime.",
+      "interpretation": "If the weights change when tuned on Split-B-style validation data, the value of the auxiliary losses depends on the shift.",
+      "status": "pending"
+    }
+  ],
+  "baseline_status": "preparing",
+  "deployment": "unseen molecules from a molecule generator",
+  "approved_physical_gpus": [
+    0,
+    2,
+    5,
+    6
+  ],
+  "reference_run": "m5guoqkx",
+  "effective_batch": 192,
+  "completion_rule": "Every question and suggested experiment requires evidence or an explicit, justified limitation; literature hypotheses are not results."
+}
