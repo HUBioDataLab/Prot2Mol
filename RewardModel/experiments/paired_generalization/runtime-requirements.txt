@@ -1,0 +1,3 @@
+# Match m5guoqkx's recorded logging SDK. Existing torch/transformers/datasets/
+# accelerate versions on Atum already match that run and are left unchanged.
+wandb==0.22.3

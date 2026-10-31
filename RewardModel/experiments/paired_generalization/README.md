@@ -45,3 +45,8 @@ realizations are subject to the specification's affordability condition.
 Runtime artifacts and logs live in `RewardModel/outputs/paired_generalization`.
 Scientific experiments are not complete merely because preparation or the
 distributed smoke check passes.
+
+The reference run recorded W&B 0.22.3, Torch 2.13.0+cu129, Transformers 5.5.0,
+Datasets 2.21.0, and Accelerate 1.10.1. Atum matched the training libraries but
+had W&B 0.17.6, which failed during server-settings introspection before any
+optimizer update. `runtime-requirements.txt` pins the reference logging version.
