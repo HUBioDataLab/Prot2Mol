@@ -96,6 +96,17 @@ def archive_tree(source):
 def main():
     if Path.cwd().resolve() != ROOT:
         raise RuntimeError("Run only from the authorized Atum project")
+    work = ROOT / "RewardModel/outputs/paired_generalization"
+    for name in ("prepare", "chembl_download", "baseline_driver"):
+        marker = work / f"{name}_launch.json"
+        if marker.exists():
+            pid = json.loads(marker.read_text())["pid"]
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise RuntimeError(f"Task process {pid} is still alive; stop it before moving runtime directories")
     # These are inactive historical GRPO states, not current training outputs.
     for source in sorted((ROOT / "outputs/prot2mol-grpo").rglob("trainer_state.pt")):
         if not source.is_symlink() and source.stat().st_size > 1024**3:

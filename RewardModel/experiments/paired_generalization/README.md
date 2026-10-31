@@ -7,7 +7,10 @@ inapplicable methods, and missing evidence.
 
 User-approved execution constraints:
 
-- Remote work only inside `/home/atabey/Prot2Mol` on Atum.
+- Code and execution stay inside `/home/atabey/Prot2Mol` on Atum. After the
+  150 GB home quota blocked preparation, the user explicitly authorized moving
+  storage to `/media/16TB/archive/atabey/` and back as needed. Verified archive
+  copies retain access through symlinks at their original project paths.
 - Physical GPUs 0, 2, 5, 6 only, selected by their queried UUIDs.
 - Code is developed locally, committed and pushed on
   `codex/paired-ranking-generalization`, then pulled on Atum.
