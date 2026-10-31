@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,9 @@ def archive_tree(source):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--active-storage-only", action="store_true")
+    options = parser.parse_args()
     if Path.cwd().resolve() != ROOT:
         raise RuntimeError("Run only from the authorized Atum project")
     work = ROOT / "RewardModel/outputs/paired_generalization"
@@ -107,13 +111,27 @@ def main():
                 pass
             else:
                 raise RuntimeError(f"Task process {pid} is still alive; stop it before moving runtime directories")
-    # These are inactive historical GRPO states, not current training outputs.
-    for source in sorted((ROOT / "outputs/prot2mol-grpo").rglob("trainer_state.pt")):
-        if not source.is_symlink() and source.stat().st_size > 1024**3:
-            archive_file(source)
+    if not options.active_storage_only:
+        # These are inactive historical GRPO states, not current training outputs.
+        for source in sorted((ROOT / "outputs/prot2mol-grpo").rglob("trainer_state.pt")):
+            if not source.is_symlink() and source.stat().st_size > 1024**3:
+                archive_file(source)
     # Both jobs have exited. Their original project paths remain usable.
     archive_tree(ROOT / "dataset/raw/chembl_37")
-    archive_tree(ROOT / "RewardModel/outputs/paired_generalization")
+    if options.active_storage_only:
+        source = work / "baseline_scaffold_seed42_15ep"
+        destination = ARCHIVE / source.relative_to(ROOT)
+        if source.is_symlink():
+            if source.resolve() != destination:
+                raise RuntimeError("Unexpected baseline storage symlink")
+        elif source.exists():
+            raise RuntimeError("Baseline output already exists; refusing to relocate active data")
+        else:
+            destination.mkdir(parents=True, exist_ok=True)
+            source.symlink_to(destination, target_is_directory=True)
+            record({"source": str(source), "archive": str(destination), "new_empty_output_directory": True})
+    else:
+        archive_tree(work)
 
 
 if __name__ == "__main__":
