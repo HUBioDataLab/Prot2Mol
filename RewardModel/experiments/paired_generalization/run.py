@@ -118,9 +118,21 @@ def train(config_path):
 
     path = Path(config_path).resolve()
     raw_config = yaml.safe_load(path.read_text())
+    launch_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    config_hash = sha256(path)
     # Seed before constructing the randomly initialized fusion and output heads.
     set_seed(int(raw_config["training"]["seed"]))
     rank = int(os.environ.get("RANK", "0"))
+    if rank == 0:
+        from reward_model.training.config import load_reward_training_config
+        output_dir = Path(load_reward_training_config(str(path)).training.output_dir)
+        write_json(output_dir / "launch_provenance.json", {
+            "git_commit": launch_commit, "config_sha256": config_hash,
+            "spec_sha256": sha256(ROOT / "Paired input ranking generalization.md"),
+            "config": raw_config, "visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+            "world_size": int(os.environ.get("WORLD_SIZE", "1")),
+            "initialization_seed_set_before_model_construction": True,
+        })
     summary = train_reward_model_from_config(str(path))
     output = Path(summary["output_dir"])
     write_json(output / f"rank_{rank}_complete.json", {
@@ -131,8 +143,8 @@ def train(config_path):
     })
     if rank == 0:
         write_json(output / "experiment_summary.json", {
-            **summary, "config_sha256": sha256(path),
-            "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            **summary, "config_sha256": config_hash,
+            "git_commit": launch_commit,
             "spec_sha256": sha256(ROOT / "Paired input ranking generalization.md"),
             "initialization_seed_set_before_model_construction": True,
             "torch_version": torch.__version__,
