@@ -250,5 +250,568 @@
   ],
   "reference_run": "m5guoqkx",
   "effective_batch": 192,
-  "completion_rule": "Every question and suggested experiment requires evidence or an explicit, justified limitation; literature hypotheses are not results."
+  "completion_rule": "Every question and suggested experiment requires evidence or an explicit, justified limitation; literature hypotheses are not results.",
+  "experiments": [
+    {
+      "id": "E01",
+      "tier": "Tier 1",
+      "key": "macro_spearman",
+      "experiment": "Re-score saved predictions with per-group averaged Spearman",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E02",
+      "tier": "Tier 1",
+      "key": "pooled_within_group_concordance",
+      "experiment": "Compute concordant-minus-discordant concordance over within-group pairs",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E03",
+      "tier": "Tier 1",
+      "key": "kendall_tau_b",
+      "experiment": "Compute tie-adjusted Kendall tau-b",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E04",
+      "tier": "Tier 1",
+      "key": "epsilon_band_concordance",
+      "experiment": "Treat differences within replicate noise as ties",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E05",
+      "tier": "Tier 1",
+      "key": "ordering_accuracy_by_size",
+      "experiment": "Report pairwise ordering accuracy in the specified group-size bins",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E06",
+      "tier": "Tier 1",
+      "key": "six_partition_composition",
+      "experiment": "Audit size, eligibility, positive rate, scores, variance, replicates, and protein coverage across all six partitions",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E07",
+      "tier": "Tier 1",
+      "key": "component_sizes",
+      "experiment": "Tabulate indivisible component sizes and assignment rules",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E08",
+      "tier": "Tier 1",
+      "key": "similarity_strata",
+      "experiment": "Stratify Split A by maximum training-molecule similarity under the predefined relation",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E09",
+      "tier": "Tier 1",
+      "key": "composition_reweighting",
+      "experiment": "Reweight Split A to Split B group-size and label composition",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E10",
+      "tier": "Tier 1",
+      "key": "replicate_noise_ceiling",
+      "experiment": "Estimate replicate split-half ceiling with assumptions and coverage stated",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E11",
+      "tier": "Tier 1",
+      "key": "variance_components",
+      "experiment": "Fit molecule-cluster main effect, protein-by-cluster interaction, and noise components where identifiable",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E12",
+      "tier": "Tier 1",
+      "key": "checkpoint_loss_decomposition",
+      "experiment": "Decompose saved checkpoint losses, including both contrastive directions",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E13",
+      "tier": "Tier 1",
+      "key": "bce_auc_vs_logloss",
+      "experiment": "Compare BCE discrimination with log-loss over checkpoints",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E14",
+      "tier": "Tier 1",
+      "key": "bce_temperature_calibration",
+      "experiment": "Fit temperature using validation only and evaluate calibration",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E15",
+      "tier": "Tier 1",
+      "key": "contrastive_logit_scale",
+      "experiment": "Track learned contrastive scale over checkpoints",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E16",
+      "tier": "Tier 1",
+      "key": "fixed_candidate_pool",
+      "experiment": "Re-evaluate contrastive loss against a fixed candidate pool",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E17",
+      "tier": "Tier 1",
+      "key": "best_checkpoint_comparison",
+      "experiment": "Locate best validation macro-Spearman and best-loss checkpoints",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E18",
+      "tier": "Tier 1",
+      "key": "c2st",
+      "experiment": "Classifier two-sample test on group descriptors",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E19",
+      "tier": "Tier 1",
+      "key": "bbse",
+      "experiment": "Label-marginal shift estimation/test with invertibility checked",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E20",
+      "tier": "Tier 1",
+      "key": "unit_bootstrap",
+      "experiment": "Compute uncertainty by resampling indivisible split units",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E21",
+      "tier": "Tier 1",
+      "key": "top_weighted_metrics",
+      "experiment": "Compare top-weighted metrics with the headline metric as requested by the metric questions",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E22",
+      "tier": "Tier 2",
+      "key": "molecule_only",
+      "experiment": "Train/evaluate the molecule-only baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E23",
+      "tier": "Tier 2",
+      "key": "protein_shuffled",
+      "experiment": "Evaluate protein-shuffled predictions",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E24",
+      "tier": "Tier 2",
+      "key": "protein_only",
+      "experiment": "Evaluate a protein-only BCE baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E25",
+      "tier": "Tier 2",
+      "key": "nearest_neighbor",
+      "experiment": "Predict from the nearest training molecule under the predefined relation",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E26",
+      "tier": "Tier 2",
+      "key": "independent_task_ridge",
+      "experiment": "Frozen-feature independent-task ridge baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E27",
+      "tier": "Tier 2",
+      "key": "two_step_kernel_ridge",
+      "experiment": "Frozen-feature two-step kernel ridge baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E28",
+      "tier": "Tier 2",
+      "key": "linear_matrix_filter",
+      "experiment": "Frozen-feature linear matrix-filter baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E29",
+      "tier": "Tier 2",
+      "key": "kronecker_kernel_ridge",
+      "experiment": "Frozen-feature Kronecker kernel ridge baseline with scalable approximation",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E30",
+      "tier": "Tier 2",
+      "key": "bilinear_inductive_completion",
+      "experiment": "Bilinear inductive matrix-completion baseline",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E31",
+      "tier": "Tier 2",
+      "key": "lambdamart",
+      "experiment": "Frozen-feature LambdaMART with linear gains, noise-calibrated levels and group normalization",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E32",
+      "tier": "Tier 2",
+      "key": "factorized_scoring",
+      "experiment": "Score using current contrastive similarity alone",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E33",
+      "tier": "Tier 3",
+      "key": "selection_rule",
+      "experiment": "Compare validation-Spearman and aggregate-loss early-stopping/selection rules",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E34",
+      "tier": "Tier 3",
+      "key": "frozen_encoders",
+      "experiment": "Train interaction and heads with both encoders frozen",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E35",
+      "tier": "Tier 3",
+      "key": "partial_unfreezing",
+      "experiment": "Partially unfreeze encoders",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E36",
+      "tier": "Tier 3",
+      "key": "low_rank_updates",
+      "experiment": "Evaluate several low-rank update ranks",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E37",
+      "tier": "Tier 3",
+      "key": "full_finetuning",
+      "experiment": "Full fine-tuning reference",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E38",
+      "tier": "Tier 3",
+      "key": "loss_subsets",
+      "experiment": "Evaluate R, B, C, RB, RC, BC and RBC",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E39",
+      "tier": "Tier 3",
+      "key": "static_loss_weight_sweep",
+      "experiment": "Evaluate a static loss-weight sweep with equal tuning budgets",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E40",
+      "tier": "Tier 3",
+      "key": "leak_in_out_2x2",
+      "experiment": "Fixed-test 2x2 leak-in/leak-out design with composition and training-size matching",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E41",
+      "tier": "Tier 3",
+      "key": "unit_learning_curves",
+      "experiment": "Subsample complete indivisible units and report realized sizes",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E42",
+      "tier": "Tier 3",
+      "key": "mask_copositives",
+      "experiment": "Mask same-protein co-positives",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E43",
+      "tier": "Tier 3",
+      "key": "temperature_variant",
+      "experiment": "Compare fixed and learned contrastive temperature",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E44",
+      "tier": "Tier 3",
+      "key": "stop_gradient",
+      "experiment": "Detach contrastive gradients from encoders",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E45",
+      "tier": "Tier 3",
+      "key": "per_group_normalization",
+      "experiment": "Normalize ranking objectives per group",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E46",
+      "tier": "Tier 3",
+      "key": "uniform_pair_weights",
+      "experiment": "Compare uniform pair weights with top-weighting",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E47",
+      "tier": "Tier 3",
+      "key": "noise_soft_pair_targets",
+      "experiment": "Calibrate soft pair targets using replicate noise",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E48",
+      "tier": "Tier 3",
+      "key": "checkpoint_averaging",
+      "experiment": "Evaluate checkpoint averaging, as specified in the gated execution sequence",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E49",
+      "tier": "Tier 4",
+      "key": "head_adaptation_across_units",
+      "experiment": "Adapt heads on adaptation units and evaluate disjoint validation/test units",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E50",
+      "tier": "Tier 4",
+      "key": "interaction_adaptation_across_units",
+      "experiment": "Repeat adaptation including cross-attention",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E51",
+      "tier": "Tier 4",
+      "key": "within_unit_adaptation",
+      "experiment": "Adapt and evaluate on disjoint groups of the same unit",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E52",
+      "tier": "Tier 4",
+      "key": "adaptation_learning_curves",
+      "experiment": "Vary k across all three adaptation settings",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E53",
+      "tier": "Tier 4",
+      "key": "pathway_scoring",
+      "experiment": "Score each pathway separately on both splits",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E54",
+      "tier": "Tier 4",
+      "key": "alignment_uniformity",
+      "experiment": "Measure alignment/uniformity per side and split before/after projections",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E55",
+      "tier": "Tier 4",
+      "key": "effective_rank",
+      "experiment": "Measure representation effective rank at the specified representation stages",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E56",
+      "tier": "Tier 4",
+      "key": "gradient_cosines",
+      "experiment": "Measure per-block objective gradient cosines",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E57",
+      "tier": "Tier 4",
+      "key": "lookahead_transference",
+      "experiment": "Measure TAG-style lookahead transfer on cold validation batches",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E58",
+      "tier": "Tier 4",
+      "key": "accuracy_on_line",
+      "experiment": "Plot Split A versus Split B across trained variants",
+      "status": "pending",
+      "conditional": false
+    },
+    {
+      "id": "E59",
+      "tier": "Conditional interventions",
+      "key": "lp_ft",
+      "experiment": "Staged frozen-head training followed by low-rate fine-tuning",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E60",
+      "tier": "Conditional interventions",
+      "key": "weight_interpolation",
+      "experiment": "Interpolate encoder weights toward pretrained weights",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E61",
+      "tier": "Conditional interventions",
+      "key": "multi_positive",
+      "experiment": "Use multi-positive contrastive targets",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E62",
+      "tier": "Conditional interventions",
+      "key": "sigmoid_label_matrix",
+      "experiment": "Use a positive/negative/masked sigmoid label matrix",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E63",
+      "tier": "Conditional interventions",
+      "key": "conditional_rank_contrast",
+      "experiment": "Use protein-conditional rank-aware contrastive training",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E64",
+      "tier": "Conditional interventions",
+      "key": "compatible_loss_pair",
+      "experiment": "Use a compatible pointwise/ranking loss pair",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E65",
+      "tier": "Conditional interventions",
+      "key": "shared_anchored_score",
+      "experiment": "Share an anchored scalar score between BCE and ranking",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E66",
+      "tier": "Conditional interventions",
+      "key": "soft_spearman",
+      "experiment": "Evaluate a normalized soft-Spearman objective",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E67",
+      "tier": "Conditional interventions",
+      "key": "head_regularization",
+      "experiment": "Evaluate head-level regularization when probes justify it",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E68",
+      "tier": "Conditional interventions",
+      "key": "gated_interaction_residual",
+      "experiment": "Evaluate factorized scoring plus a gated interaction residual",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E69",
+      "tier": "Conditional interventions",
+      "key": "domain_penalties",
+      "experiment": "Assess the document-listed domain methods last, after their applicability checks",
+      "status": "pending",
+      "conditional": true
+    },
+    {
+      "id": "E70",
+      "tier": "Conditional interventions",
+      "key": "specialized_multitask_optimizers",
+      "experiment": "Assess the document-listed specialized optimizers last",
+      "status": "pending",
+      "conditional": true
+    }
+  ],
+  "method_catalog_coverage": "The methods tables remain part of the spec. Their applicability and any suggested experiments beyond the tier checklist must be resolved explicitly; this checklist is not a scope reduction."
 }
