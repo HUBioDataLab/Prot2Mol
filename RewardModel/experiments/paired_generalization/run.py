@@ -83,8 +83,13 @@ def make_smoke():
     config = yaml.safe_load(CONFIG.read_text())
     smoke_dir = DATA / "smoke"
     smoke_dir.mkdir(parents=True, exist_ok=True)
+    source_dir = DATA / "scaffold_seed42_median"
+    if not all((source_dir / f"{name}.parquet").is_file() for name in ("train", "val", "test")):
+        # This is only a runtime qualification fixture, not a scientific result.
+        # It can run while the much larger scaffold preparation is in progress.
+        source_dir = ROOT / "dataset/processed/chembl_37/target_aware_random_assay_activity_balanced"
     for name, limit in (("train", 256), ("val", 32), ("test", 32)):
-        frame = pd.read_parquet(DATA / "scaffold_seed42_median" / f"{name}.parquet")
+        frame = pd.read_parquet(source_dir / f"{name}.parquet")
         grouped = frame.groupby(["target_chembl_id", "assay_id"], sort=True).pchembl_value.agg(["size", "min", "max"])
         groups = grouped[(grouped["size"] >= 2) & (grouped["size"] <= 16) & ((grouped["max"] - grouped["min"]) >= .5)].head(limit).index
         mask = pd.MultiIndex.from_frame(frame[["target_chembl_id", "assay_id"]]).isin(groups)
@@ -99,7 +104,10 @@ def make_smoke():
     path = WORK / "smoke_config.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(config, sort_keys=False))
-    write_json(WORK / "smoke_preparation.json", prepare_training_examples_from_config(str(path)))
+    write_json(WORK / "smoke_preparation.json", {
+        **prepare_training_examples_from_config(str(path)),
+        "source_dir": str(source_dir), "purpose": "runtime qualification only",
+    })
 
 
 def train(config_path):
