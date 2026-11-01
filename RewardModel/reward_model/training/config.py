@@ -40,6 +40,8 @@ class RewardTrainingDataConfig:
     # Datasets whose labels were harmonised across assays intentionally
     # break the row-wise binary_label == (pchembl >= threshold) identity.
     enforce_binary_label_threshold: bool = True
+    train_view_manifest: Optional[str] = None
+    train_view_sha256: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.validate()
@@ -71,6 +73,10 @@ class RewardTrainingDataConfig:
             raise ValueError("max_classification_only_per_item must be >= 0")
         if self.sample_all_assays is not None and not isinstance(self.sample_all_assays, bool):
             raise ValueError("sample_all_assays must be boolean or None")
+        if (self.train_view_manifest is None) != (self.train_view_sha256 is None):
+            raise ValueError('Training view path and SHA256 must be specified together')
+        if self.train_view_sha256 is not None and (not isinstance(self.train_view_sha256, str) or len(self.train_view_sha256) != 64 or any(c not in '0123456789abcdef' for c in self.train_view_sha256)):
+            raise ValueError('Training view SHA256 must contain 64 lowercase hexadecimal characters')
 
 
 @dataclass(eq=True)
@@ -251,6 +257,8 @@ def load_reward_training_config(config_path: str) -> RewardTrainingConfigBundle:
     data_section["val_parquet_path"] = _resolve_path(data_section["val_parquet_path"], base_dir)
     data_section["test_parquet_path"] = _resolve_path(data_section["test_parquet_path"], base_dir)
     data_section["tokenized_dataset_dir"] = _resolve_path(data_section["tokenized_dataset_dir"], base_dir)
+    if data_section.get('train_view_manifest') is not None:
+        data_section['train_view_manifest'] = _resolve_path(data_section['train_view_manifest'], base_dir)
     if data_section.get("val2_parquet_path") is not None:
         data_section["val2_parquet_path"] = _resolve_path(
             data_section["val2_parquet_path"],

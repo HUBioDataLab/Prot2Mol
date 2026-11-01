@@ -162,6 +162,9 @@ def prepare_pair_datasets_from_config(config_path: str) -> Dict[str, Any]:
             config.model,
             {split_name: example_dataset},
         )
+        if split_name == 'train' and config.data.train_view_manifest is not None:
+            from .train_views import load_training_view
+            example_dataset, _ = load_training_view(example_dataset, config.data)
         assay_dataset = RewardAssayListDataset(
             example_dataset,
             seed=config.training.seed,
@@ -235,6 +238,10 @@ def train_reward_model_from_config(
             **({"test": test_examples} if test_examples is not None else {}),
         },
     )
+    training_view = None
+    if config.data.train_view_manifest is not None:
+        from .train_views import load_training_view
+        train_examples, training_view = load_training_view(train_examples, config.data)
     if config.training.metrics_profile == "full":
         for split_name, split_examples in (
             ("val", val_examples),
@@ -422,6 +429,7 @@ def train_reward_model_from_config(
         "output_dir": os.path.abspath(config.training.output_dir),
         "init_from_checkpoint": warm_start_path,
         "optimizer_state_restored": False,
+        "training_view": training_view,
         "known_positive_index": known_positive_index.provenance if known_positive_index is not None else None,
         "eval_metrics": eval_metrics,
         "test_metrics": test_metrics,

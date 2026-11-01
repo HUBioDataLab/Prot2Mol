@@ -264,3 +264,34 @@ sharing validation selection. Allocation-specific aggregate-loss and averaging
 comparisons still require full loss evaluation, which scalar exports alone do
 not provide. Measured inference runtime/storage and any remaining affordability
 limits must be reported; none of these pending comparisons is declared complete.
+
+## Whole-unit learning curves
+
+`learning_curve_plan.py` fixes nested 10%, 25%, 50% and 100% unit prefixes from
+one label-blind permutation with subset seed 42. A unit is an entire assay for
+A and an entire scaffold–assay component for B. Use floor(fraction × unit count),
+with a minimum of one unit. The permutation neither forces nor excludes the
+giant component. Keep the same subsets across optimizer seeds 42/43/44 so seed
+spread is not mixed with variation in the sampled subsets. Report actual row
+counts/fractions, assay sizes, target coverage and component sizes alongside
+the requested fractions; a unit fraction is not a row fraction.
+
+Binary pair medians are recomputed from the selected training measurements
+only, at the original source precision and threshold 6. Continuous labels stay
+unchanged. Omitted training assays must not influence the subset's binary labels.
+The manifest pins the full source/cache bytes, selected indices, labels and
+unit map. The training loader independently checks whole-unit inclusion,
+identity alignment and the subset medians. It replaces the small label column
+before applying an Arrow row view, avoiding token payload duplication or index
+flattening. Tests cover multi-shard caches, shared token buffers, worker
+serialization, sampling, fixed training probes and the training-positive index.
+
+Each smaller fraction gets the same three LR candidates on both A/B at seed42,
+then seeds43/44 at the B-validation-selected common LR: 18 tuning and 12
+confirmation fits in total. The exact full-data endpoint reuses the primary
+full-arm grid after checking row/label identity; it is not retrained. These are
+15-epoch curves at batch 12 × 4 GPUs × 4 accumulation. Updates and processed
+observations vary with subset size, so this is equal-epoch, not equal-compute,
+comparison. A flat B curve near the full-row regime cannot establish general
+data saturation. Runtime qualification, training, validation-only selection,
+test evaluation and any additional B-allocation comparisons remain required.

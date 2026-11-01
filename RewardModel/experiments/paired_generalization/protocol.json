@@ -738,7 +738,8 @@
       "key": "unit_learning_curves",
       "experiment": "Subsample complete indivisible units and report realized sizes",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "registered_design": "Nested whole-unit fractions 0.10/0.25/0.50/1.00, subset seed42 held fixed across optimizer seeds42/43/44; subset-local pair-median binary labels; actual row fractions, target coverage and sampler steps reported. Three LR candidates per A/B fraction; B-selected LR for confirmations. Full-data endpoint reused only after row/label equivalence. Data preparation and all performance comparisons remain pending."
     },
     {
       "id": "E42",
