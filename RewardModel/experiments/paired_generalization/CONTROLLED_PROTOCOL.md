@@ -137,7 +137,36 @@ checks must first demonstrate that required artifacts survive.
 Training with both selection metrics will distinguish
 best-within-15 selection from an actual patience-based early-stopping rule.
 
+Controlled runs enable compact per-epoch prediction exports for validation and
+a fixed probe of 2,048 rank-eligible training assays, selected by training seed.
+These come from the existing evaluation pass and retain all scalar scorers,
+labels and row identities; they do not retain full embedding matrices. Probe
+results describe those selected eligible assays, not the full training set.
+The selected checkpoint's final evaluation has a separate namespace from the
+last epoch, even though Trainer's global step is the same after best-weight reload.
+Hyperparameter candidates set `evaluate_test: false`, which also avoids loading
+test examples. Test scoring follows validation-only hyperparameter selection.
+
+`retain_controlled.py` reconstructs best macro Spearman and minimum aggregate
+loss from all 15 epochs, plus both patience-3 prefix selections (strict
+improvement, earliest tie). Prefix selections use the original 15-epoch learning
+rate schedule; they are counterfactual early stopping, not measured compute savings
+or retraining with a shorter schedule. It preserves all four selected checkpoints.
+The averaging window runs from the minimum validation-loss epoch through epoch
+15, inclusive, with uniform native-parameter weights. If the minimum is at epoch
+15, this is a singleton and must not be reported as an averaging improvement.
+This is the specification's post-minimum averaging comparison, not a claim to
+reproduce all SWA/SWAD or ensemble algorithms in its method catalog.
+
+Before any optional cleanup, retention verifies all ranks completed, configuration
+provenance, every validation/training snapshot checksum, checkpoint epoch/step,
+and tensor equality of the root model to the selected macro checkpoint. It saves
+and verifies the averaged model, preserves selection weights and all checkpoint
+metadata, then removes only redundant weights/optimizer payloads of a marked
+controlled run. Original data and the first reference are not eligible. Cleanup
+removes optimizer-resume capability from these already completed runs.
+
 The static weight grid, leak-in/out design, unit learning-curve fractions,
-co-positive masking audit, averaging rule, and Tier 4
+and Tier 4
 adaptation schedule still require their explicit manifests and qualification.
 Nothing here labels those experiments complete.

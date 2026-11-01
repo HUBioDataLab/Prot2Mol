@@ -136,6 +136,7 @@ def train(config_path):
     summary = train_reward_model_from_config(str(path))
     output = Path(summary["output_dir"])
     write_json(output / f"rank_{rank}_complete.json", {
+        "config_sha256": config_hash,
         "rank": rank, "world_size": int(os.environ.get("WORLD_SIZE", "1")),
         "visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "local_rank": int(os.environ.get("LOCAL_RANK", "0")),

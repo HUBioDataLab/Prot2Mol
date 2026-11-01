@@ -213,11 +213,9 @@ def train_reward_model_from_config(
     )
     example_paths = get_tokenized_split_dataset_paths(config.data.tokenized_dataset_dir)
 
-    missing_example_paths = [
-        path
-        for path in (example_paths["train"], example_paths["val"], example_paths["test"])
-        if not os.path.exists(path)
-    ]
+    required_splits = ("train", "val", "test") if config.training.evaluate_test else ("train", "val")
+    missing_example_paths = [example_paths[name] for name in required_splits
+                             if not os.path.exists(example_paths[name])]
     if missing_example_paths:
         raise FileNotFoundError(
             "Tokenized split datasets not found. "
@@ -226,14 +224,15 @@ def train_reward_model_from_config(
 
     train_examples = load_tokenized_example_dataset(example_paths["train"])
     val_examples = load_tokenized_example_dataset(example_paths["val"])
-    test_examples = load_tokenized_example_dataset(example_paths["test"])
+    test_examples = (load_tokenized_example_dataset(example_paths["test"])
+                     if config.training.evaluate_test else None)
     validate_tokenized_split_cardinality(
         config.data,
         config.model,
         {
             "train": train_examples,
             "val": val_examples,
-            "test": test_examples,
+            **({"test": test_examples} if test_examples is not None else {}),
         },
     )
     if config.training.metrics_profile == "full":
@@ -241,6 +240,8 @@ def train_reward_model_from_config(
             ("val", val_examples),
             ("test", test_examples),
         ):
+            if split_examples is None:
+                continue
             if "activity_type" not in split_examples.column_names:
                 raise ValueError(
                     f"Tokenized {split_name} examples do not contain activity_type. "
@@ -290,7 +291,7 @@ def train_reward_model_from_config(
         ranking_num_partitions=config.data.evaluation_ranking_partitions,
         ranking_partition_seed=config.training.seed,
         protein_shuffle_sensitivity=config.training.protein_shuffle_sensitivity,
-    )
+    ) if test_examples is not None else None
     val2_eval_dataset = None
     val2_examples = None
     val2_tokenized_dataset_dir = (
@@ -394,19 +395,23 @@ def train_reward_model_from_config(
     )
     trainer.train()
     trainer.save_model(config.training.output_dir)
+    trainer.save_state()
+    # train() restores the selected checkpoint. Keep its re-evaluation separate
+    # from the last epoch, which has the same Trainer step but different weights.
+    trainer.prediction_export_phase = "selected"
     eval_metrics = trainer.evaluate()
     test_metrics = trainer.evaluate(
         eval_dataset=test_eval_dataset,
         metric_key_prefix="test",
-    )
+    ) if test_eval_dataset is not None else {}
 
     return {
         "train_examples": len(train_examples),
         "val_examples": len(val_examples),
-        "test_examples": len(test_examples),
+        "test_examples": len(test_examples) if test_examples is not None else None,
         "train_groups": len(set(train_examples["group_id"])),
         "val_groups": len(set(val_examples["group_id"])),
-        "test_groups": len(set(test_examples["group_id"])),
+        "test_groups": len(set(test_examples["group_id"])) if test_examples is not None else None,
         "train_ranking_lists": train_dataset.stats.num_ranking_lists,
         "train_ranked_examples": train_dataset.stats.num_ranked_examples,
         "train_contrastive_lists": train_dataset.stats.num_contrastive_lists,
@@ -420,6 +425,7 @@ def train_reward_model_from_config(
         "known_positive_index": known_positive_index.provenance if known_positive_index is not None else None,
         "eval_metrics": eval_metrics,
         "test_metrics": test_metrics,
+        "test_evaluated": test_eval_dataset is not None,
         **(
             {}
             if fixed_train_eval_examples is None

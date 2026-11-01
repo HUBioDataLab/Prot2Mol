@@ -2054,7 +2054,8 @@ def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pair
 
 
 @pytest.mark.parametrize('sample_all_assays', [None, True, False])
-def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_and_test(tmp_path, monkeypatch, sample_all_assays):
+@pytest.mark.parametrize('evaluate_test', [True, False])
+def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_and_test(tmp_path, monkeypatch, sample_all_assays, evaluate_test):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
 
     train_examples = Dataset.from_list(
@@ -2169,7 +2170,8 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
 
     train_examples.save_to_disk(split_paths["train"])
     val_examples.save_to_disk(split_paths["val"])
-    test_examples.save_to_disk(split_paths["test"])
+    if evaluate_test:
+        test_examples.save_to_disk(split_paths["test"])
 
     config_path = tmp_path / "reward_train.yaml"
     config_path.write_text(
@@ -2190,6 +2192,7 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
                 "training:",
                 f"  output_dir: {tmp_path / 'trainer_output'}",
                 "  num_train_epochs: 1",
+                f"  evaluate_test: {str(evaluate_test).lower()}",
                 "  per_device_train_batch_size: 2",
                 "  per_device_eval_batch_size: 2",
                 "  logging_steps: 1",
@@ -2230,6 +2233,9 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
         def save_model(self, output_dir):
             captured["save_model_output_dir"] = output_dir
 
+        def save_state(self):
+            captured["state_saved"] = True
+
         def evaluate(self, eval_dataset=None, metric_key_prefix="eval"):
             captured.setdefault("evaluate_calls", []).append(
                 (eval_dataset, metric_key_prefix)
@@ -2261,11 +2267,12 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
 
     assert captured["train_called"] is True
     assert captured['train_dataset'].include_all_assays_for_contrastive is bool(sample_all_assays)
-    assert len(captured["evaluate_calls"]) == 2
+    assert len(captured["evaluate_calls"]) == (2 if evaluate_test else 1)
     assert captured["evaluate_calls"][0] == (None, "eval")
-    test_eval_dataset, test_prefix = captured["evaluate_calls"][1]
-    assert len(test_eval_dataset) == 1
-    assert test_prefix == "test"
+    if evaluate_test:
+        test_eval_dataset, test_prefix = captured["evaluate_calls"][1]
+        assert len(test_eval_dataset) == 1
+        assert test_prefix == "test"
     assert captured["train_dataset_len"] == 1
     assert captured["eval_dataset_len"] == 3
     assert captured["eval_dataset"].ranking_max_ligands == 16
@@ -2277,7 +2284,9 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
     assert isinstance(captured["data_collator"], RewardAssayListCollator)
     assert summary["train_examples"] == 3
     assert summary["val_examples"] == 3
-    assert summary["test_examples"] == 1
+    assert summary["test_examples"] == (1 if evaluate_test else None)
+    assert summary["test_evaluated"] is evaluate_test
+    assert captured["state_saved"] is True
     assert summary["train_ranking_lists"] == 1
     assert summary["train_ranked_examples"] == 3
     assert summary["train_classification_examples"] == 3
@@ -2285,7 +2294,7 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
     assert summary["fixed_train_eval_examples"] == 3
     assert summary["init_from_checkpoint"] == str(warm_start.resolve())
     assert summary["optimizer_state_restored"] is False
-    assert summary["test_metrics"]["test_loss"] == pytest.approx(0.5)
+    assert summary["test_metrics"] == ({"test_loss": 0.5} if evaluate_test else {})
 
 
 def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, monkeypatch):
@@ -2385,6 +2394,9 @@ def test_train_reward_model_from_config_loads_optional_val2_dataset(tmp_path, mo
 
         def save_model(self, output_dir):
             captured["save_model_output_dir"] = output_dir
+
+        def save_state(self):
+            captured["state_saved"] = True
 
         def evaluate(self, eval_dataset=None, metric_key_prefix="eval"):
             if metric_key_prefix == "test":

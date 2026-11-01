@@ -1220,6 +1220,33 @@ class RewardModelTrainer(Trainer):
             }
         )
         metrics = _with_metric_prefix(metrics, metric_key_prefix)
+        if getattr(self.args, "reward_export_evaluation_predictions", False) and self.is_world_process_zero():
+            from .prediction_exports import export_evaluation_predictions
+            export_evaluation_predictions(
+                output_dir=self.args.output_dir,
+                phase=getattr(self, "prediction_export_phase", "trajectory"),
+                metric_prefix=metric_key_prefix,
+                step=self.state.global_step,
+                epoch=self.state.epoch,
+                dataset=active_eval_dataset.example_dataset,
+                group_names=active_eval_dataset.group_ids,
+                tensors={
+                    "row_index": evaluation_example_indices.index_select(0, stable_order),
+                    "evaluation_group_index": ranking_group_ids,
+                    "ranking_score": ranking_scores,
+                    "activity_logits": activity_logits,
+                    "binary_label": activity_labels,
+                    "pchembl_value": pchembl_values,
+                    "cosine_similarity": cosine_similarities,
+                    "protein_shuffled_score": protein_shuffled_scores,
+                },
+                metadata={
+                    "metrics": metrics,
+                    "ranking_readout": model_config.ranking_readout,
+                    "contrastive_score_scale": contrastive_score_scale,
+                    "best_model_checkpoint": self.state.best_model_checkpoint,
+                },
+            )
         _append_assay_spearman_log(
             self,
             metrics,
@@ -1460,6 +1487,7 @@ def create_training_arguments(config: RewardTrainerConfig) -> TrainingArguments:
             config.objective_gradient_diagnostics_steps
         )
         training_args.reward_metrics_profile = config.metrics_profile
+        training_args.reward_export_evaluation_predictions = config.export_evaluation_predictions
         training_args.reward_protein_shuffle_sensitivity = (
             config.protein_shuffle_sensitivity
         )

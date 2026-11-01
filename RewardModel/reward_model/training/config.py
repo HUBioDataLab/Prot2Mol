@@ -107,6 +107,8 @@ class RewardTrainerConfig:
     ranking_score_diagnostics: bool = False
     objective_gradient_diagnostics_steps: int = 0
     fixed_train_eval_assays: int = 0
+    export_evaluation_predictions: bool = False
+    evaluate_test: bool = True
     protein_shuffle_sensitivity: bool = True
     metric_for_best_model: str = "eval_spearman"
     greater_is_better: bool = True
@@ -207,6 +209,9 @@ class RewardTrainerConfig:
             )
         if self.fixed_train_eval_assays < 0:
             raise ValueError("fixed_train_eval_assays must be >= 0")
+        for name in ("export_evaluation_predictions", "evaluate_test"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
         if not isinstance(self.protein_shuffle_sensitivity, bool):
             raise ValueError("protein_shuffle_sensitivity must be a boolean")
         if (
