@@ -5,12 +5,13 @@ evidence is under `RewardModel/outputs/paired_generalization` on Atum. The
 remaining controlled multi-seed runs and mechanistic probes remain in scope.
 Test results do not select models or hyperparameters.
 
-The ledger has 21 complete, 14 partial and 35 pending experiment entries,
+The ledger has 23 complete, 12 partial and 35 pending experiment entries,
 including 12 conditional entries. Tier 2 is complete (11/11 entries); the other
-three tiers remain incomplete. Of the 34 questions, 11 are answered, twelve have
-answers with limitations, six are partial and five are pending. The latest
+three tiers remain incomplete. Of the 34 questions, 11 are answered, fifteen have
+answers with limitations, three are partial and five are pending. The latest
 closures concern the two completed reference trajectories: BCE/AUROC, validation
-temperature fitting, logit scale, checkpoint locations and top-weighted metrics.
+temperature fitting, logit scale, checkpoint locations, top-weighted metrics,
+contrastive directions and fixed-pool rescoring.
 They do not close the controlled multi-seed or selected A test comparisons.
 
 The fresh scaffold baseline finished 15 epochs. Validation macro Spearman
@@ -464,9 +465,13 @@ an Atum preflight checking all 15 saved configurations plus one actual loaded
 checkpoint, with unchanged weights and launch configuration. The failed audit
 and handoff records are preserved. The corrected audit was launched as
 PID1216919 with four workers, each restricted to one permitted GPU. GPU
-inference was verified live at Unix1793575607.59; all 30 validation/training-probe
-exports must complete before the next controlled fit. These exports do not use
-test data or alter checkpoint selection. Evidence:
+inference was verified on the four permitted GPUs. All 30 validation/training-probe
+exports completed, with all worker handles absent by Unix1793576737.68. Maximum
+native/export contrastive-loss difference is 3.24e-6 and macro-rho difference
+1.11e-16. These exports use no test data and alter no checkpoint selection.
+The next full B15 run (`full__B__seed42__lr1p0`, W&B `ormrd95z`) then started
+on the same four GPUs, with batch12×4×4 and validation-macro checkpoint selection.
+All 43 qualified training source files remain unchanged. Evidence:
 `tier1/reference_contrastive/recovery_{preflight,launch}_2cc800d.json` and
 `tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/`.
 
@@ -521,8 +526,8 @@ point increase is 0.01004 with interval [0.00179, 0.01978]; these endpoints
 were chosen after observing the overall BCE minimum, and the interval omits
 endpoint-selection, seed and multiple-stratum uncertainty.
 
-Q11 remains partial pending A contrastive localization and controlled repeated
-comparisons. Source:
+Q11 now has a descriptive answer from both complete reference trajectories;
+controlled repeated and causal comparisons remain pending. Source:
 `tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json}`.
 All 30 snapshots reproduce native aggregate BCE within 1e-5 and headline rho
 within 1e-14. Independent rank calculations checked 385,665 group correlations,
@@ -604,8 +609,62 @@ must not be treated as measurements of the same cohort.
 These are descriptive single-fit comparisons with fixed candidate contexts.
 No confidence intervals or redrawn-pool uncertainty are claimed: resampling
 query units alone would leave the cross-unit candidate context conditional.
-Full A directional and stratum comparisons remain pending. Source:
+Source for the B attribution:
 `tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json}`.
+
+The completed protected A audit now supplies both directions for every validation
+and original training-probe checkpoint. Every epoch uses the same candidate-pool
+hash within its partition. Both directions decrease at every adjacent epoch on
+validation and on the fixed training probe, at both the learned scale and scale13.
+
+| A validation contrastive quantity | Epoch 1 | Epoch 14 | Epoch 15 |
+|---|---:|---:|---:|
+| Learned protein→molecule | 3.37895 | 1.11556 | 1.11034 |
+| Learned molecule→protein | 1.48876 | 0.54360 | 0.54235 |
+| Learned total | 4.86771 | 1.65916 | 1.65269 |
+| Fixed-scale13 total | 4.89917 | 2.01028 | 2.00395 |
+
+At A epoch15, learned-scale loss is 0.35127 below fixed-scale13 rescoring;
+at original B epoch15 it is 0.28118 above it. Thus the numerical scale effect
+has opposite signs on these fixed representations. This is not evidence that
+changing the training temperature improves generalization. A mean positive-row
+cosine rises 0.41887→0.48340 on validation and 0.41171→0.51366 on its training
+probe. These are descriptive means on different fixed cohorts, not a calibrated
+memorization test. Source:
+`tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json`,
+SHA256 `94c681a6638c900d327c3973d93ed7b55c6a3ae5306866e56121210422c3a039`.
+
+A's completed stratum attribution shows that the scale effect differs within
+that split as well. At epoch15, learned versus fixed-scale13 total losses are:
+
+| A scaffold class | Learned scale | Fixed scale13 |
+|---|---:|---:|
+| All shared | 1.18614 | 1.50644 |
+| Mixed | 2.52134 | 3.02026 |
+| All unseen | 3.97861 | 3.77506 |
+
+Within the cold group, learned molecule→protein loss has its minimum at epoch9
+(1.45856) and ends at 1.49886; fixed-scale13 molecule→protein loss reaches its
+minimum at epoch15 (1.24496). Cold total loss has its minimum at epoch13 at both
+scales, with small terminal increases. From the overall macro peak14→15,
+both directions decrease in every size and scaffold stratum at both scales.
+The three-item learned total changes by −0.01131, contrasting with original
+B's +0.01709 over its own macro-peak6→15 interval; these intervals differ.
+This describes the observed references and does not establish a repeatable
+localized failure, a causal calibration mechanism or a training benefit.
+
+The attribution keeps all candidates and masks fixed and covers 16,431 assays,
+24,089 bounded lists per partition and three partitions at each checkpoint.
+All30 table hashes and eleven analysis-source hashes passed. Its 1,980 sampled
+production-operator checks agree within1.43e-6, and global directional values
+reproduce the completed reference audit. These checks do not independently
+reconstruct every list contribution; no cross-unit-context confidence interval
+is claimed. The first attempt's filename failure is preserved; the successful
+retry canonicalizes validated integral epochs without changing model code.
+Sources: `tier1/contrastive_localization/A/0a4f60eb277f6f39/`
+`{complete.json,completion_check.json}` and
+`tier1/contrastive_localization_launch_a2e19a0_A.{json,log}`.
+
 All 1,260 sampled production-batch checks agree within 3.82e-6. Independent
 explicit candidate-set calculations check 210 batches / 2,520 query lists;
 all 1,386,630 list-instance descriptors and source/output hashes were verified.

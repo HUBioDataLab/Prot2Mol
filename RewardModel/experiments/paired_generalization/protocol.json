@@ -47,7 +47,7 @@
       "status": "answered_with_limits",
       "answer": "Spearman has no explicit noise band beyond exact ties, unlike the ranking margin. On the fixed original B selected test predictions, ordering accuracy is0.5892 with no band,0.6305 outside log10(3), and0.6581 outside the training replicate-RMS band; denominators differ, not predictions. On matched eligible B validation assays, NDCG@1/@3 peak11, whereas NDCG@5 and macro Spearman peak6; all three NDCGs finish below epoch6. On matched eligible A assays, NDCG@1/@3/@5 peak15 (0.70900/0.74819/0.78223), whereas macro Spearman peaks14. The A14->15 macro change is only-0.00036 with conditional interval[-0.00234,0.00164]. Different metrics can therefore favor different observed checkpoints, but these one-fit trajectories do not establish reproducible objective conflict. Cohort definitions matter: A all-nonconstant top1 instead peaks12. Repeated controlled comparisons and the remaining selected A test rescoring are unfinished.",
       "evidence": "tier1/metrics_float32/; tier1/noise_bands_float32/; tier1/baseline_trajectory_summary_v2.json; tier1/label_precision_complete.json",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -55,14 +55,14 @@
       "question": "Which term of the composite validation loss rises first on each split: BCE, the ranking loss, or each direction of the contrastive loss? Does BCE AUC move with BCE log-loss?",
       "rationale": "The aggregate is dominated by whichever term has the largest magnitude times weight. Each term can rise for reasons unrelated to ranking.",
       "interpretation": "If BCE log-loss rises while AUC and Spearman stay flat, that is the calibration pattern and it does not harm ranking. If the ranking term's own loss rises, the model is overfitting the target. If logits grow uniformly, log-loss rises sooner on the split where discrimination is weaker, which alone could produce a turning point at 10% on one split and 30% on the other (inference).",
-      "status": "partial",
-      "answer": "In the fresh B run, BCE validation loss reaches its minimum at epoch2 (0.44531), ranking loss at epoch5 (2.79392), and contrastive/aggregate loss at epoch15 (5.83497/6.68790). By epoch15 BCE is 0.48300 and ranking loss 2.92871, while AUROC improves from 0.73865 at epoch2 to 0.77202. Thus auxiliary classification discrimination can improve while its log-loss worsens, and decreasing dominant contrastive loss hides worsening ranking loss. Learned-scale molecule-to-protein contrastive loss reaches its minimum at5 (2.03734) and ends at2.04105; protein-to-molecule reaches its minimum at15 (3.79393). Both fixed13 directions have their minima at15. A scalar comparison is available below; A directional contrastive results remain pending. First adjacent increases occur at BCE2->3, ranking3->4, learned molecule-to-protein5->6 and protein-to-molecule/contrastive total6->7; these local fluctuations are not statistical change points.",
-      "evidence": "baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/contrastive/trajectory.json; tier1/baseline_trajectory_summary_v2.json",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
-      "cold_A_localization_update": "Complete A1->15 all-unseen BCE rises0.54630->0.62373 with interval[-0.03240,0.19907], while macro rises0.13584->0.22976 with interval[0.03030,0.15353]. BCE and rank eligibility cohorts differ; no causal calibration attribution. A directional contrastive and repeated comparisons remain pending.",
+      "status": "answered_with_limits",
+      "answer": "B BCE first rises2->3 and reaches its overall minimum at2; ranking first rises3->4 and has minimum5. Learned molecule->protein first rises5->6 and has minimum5; protein->molecule/total first rise6->7 but reach minimum15. Both B fixed13 directions have minimum15. A BCE first rises5->6 and reaches minimum13; ranking and both contrastive directions decrease throughout all15 epochs overall, at learned and fixed13 scales. A terminal BCE/AUROC are0.42772/0.84629; B BCE rises0.44531->0.48300 from2->15 while AUROC improves0.73865->0.77202. Composite loss can mask worsening terms, and discrimination can improve while log-loss worsens. These are descriptive single-reference extrema and adjacent changes, not statistical change points or a causal diagnosis.",
+      "evidence": "baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/contrastive/trajectory.json; tier1/baseline_trajectory_summary_v2.json; tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "cold_A_localization_update": "Complete A1->15 all-unseen BCE rises0.54630->0.62373 with interval[-0.03240,0.19907], while macro rises0.13584->0.22976 with interval[0.03030,0.15353]. BCE and rank eligibility cohorts differ; no causal calibration attribution. A directional contrastive attribution is complete; repeated comparisons remain pending.",
       "cold_A_localization_evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A first BCE increase is5->6; its global BCE minimum is13 and terminal value0.42772. Ranking/contrastive/total loss minima are15, and terminal AUROC0.84629. Positive temperature fitted on validation gives T1.29538 and log-loss0.42772->0.41749. Full scalar trajectories are available; A contrastive directions remain pending.",
+      "native_A_trajectory_update": "A first BCE increase is5->6; its global BCE minimum is13 and terminal value0.42772. Ranking/contrastive/total loss minima are15, and terminal AUROC0.84629. Positive temperature fitted on validation gives T1.29538 and log-loss0.42772->0.41749. All scalar trajectories and both A contrastive directions are complete.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -73,7 +73,7 @@
       "status": "answered_with_limits",
       "answer": "Both completed reference runs select checkpoints on validation macro Spearman. A selects epoch14 (0.34367521); original B selects epoch6 (0.18460015). Aggregate validation loss is minimized at epoch15 on both splits (A2.36395550; B6.68790), when macro Spearman is0.34331738/0.17561471. Thus macro selection occurs earlier than minimum-loss selection in these runs. This answers the observed selection-rule/checkpoint-location question; test effects, seed spread and matched controlled B comparisons remain pending.",
       "evidence": "controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json; baseline_status.json; tier1/baseline_trajectory_summary_v2.json; tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -84,7 +84,7 @@
       "status": "answered_with_limits",
       "answer": "Across epochs1->15, A fixed eligible-assay training-probe macro Spearman rises0.16214->0.49208 and validation rises0.16488->0.34332 (peak0.34368 at14). Original B probe rises0.18336->0.53189 while validation rises0.11006->0.17561, peaking0.18460 at6. Later B training improvements transfer poorly in this fit; A validation keeps improving much longer. These are descriptive fixed probes, not full-training metrics. A samples eligible assays whereas the original B probe samples assays uniformly, so absolute A/B training gaps are not matched estimates. Controlled repeated comparisons remain pending.",
       "evidence": "tier1/scorer_agreement_float32/complete.json; baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/baseline_trajectory_summary_v2.json; tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -99,12 +99,12 @@
       "question": "Does the learned contrastive temperature keep sharpening? Does the contrastive validation loss still rise against a fixed candidate pool?",
       "rationale": "InfoNCE values depend on the number and similarity of in-batch candidates ([van den Oord et al. 2018](https://arxiv.org/abs/1807.03748)) and on temperature ([Wang & Liu 2021](https://arxiv.org/abs/2012.09740)).",
       "interpretation": "A rise that vanishes under a fixed pool or a fixed temperature is an artifact of batch composition or overconfidence. A rise that persists alongside a widening gap in positive-pair alignment between training and validation indicates memorization.",
-      "status": "partial",
-      "answer": "The learned logit scale rises 13.5999 -> 18.4685 -> 22.5461 at epochs1/6/15. Each split uses one unchanged candidate-pool hash across epochs, and baseline validation already fixes its candidate pool. B validation contrastive loss declines 8.54974 -> 6.00606 -> 5.83497; rescoring identical representations at scale13 gives 8.52970 -> 5.82207 -> 5.55379. Sharpening increases validation loss relative to fixed-scale rescoring, but the fresh run has no sustained aggregate contrastive-loss rise. Fixed-temperature retraining and matched A remain pending; rescoring alone does not establish a training benefit.",
-      "evidence": "tier1/contrastive/trajectory.json; tier1/contrastive/epoch{01,06,15}_val.json; tier1/baseline_trajectory_summary_v2.json",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A native scale rises13.5412->21.8558 across all15 epochs while aggregate contrastive loss falls4.86771->1.65268. Fixed-pool directional/fixed13 GPU exports are running; no scientific result is inferred from an unfinished export.",
+      "status": "answered_with_limits",
+      "answer": "The learned scale sharpens over both trajectories: A13.5412->21.8558, original B13.5999->22.5461. Candidate pools remain fixed within each partition across all15 epochs. A total validation contrastive loss declines4.86771->1.65269; rescoring at scale13 declines4.89917->2.00395, and both directions decrease at every adjacent epoch. B total declines8.54974->5.83497; fixed13 ends5.55379. Thus learned scaling lowers the numerical A total but raises the B total on the same representations. Within A unseen-scaffold groups it also raises terminal loss (3.97861 versus3.77506 fixed13). There is no sustained overall contrastive-loss rise in either fresh reference. A positive-row cosine rises0.41887->0.48340 on validation and0.41171->0.51366 on its probe; different cohorts and one fitted seed limit interpretation. Fixed-scale rescoring does not establish a benefit of fixed-temperature training.",
+      "evidence": "tier1/contrastive/trajectory.json; tier1/contrastive/epoch{01,06,15}_val.json; tier1/baseline_trajectory_summary_v2.json; tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "native_A_trajectory_update": "A native scale rises13.5412->21.8558 across all15 epochs while aggregate contrastive loss falls4.86771->1.65268. All30 fixed-pool directional/fixed13 exports completed; both directions decline at every adjacent epoch overall at both scales.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -112,12 +112,12 @@
       "question": "Is the rise concentrated in particular group sizes or similarity strata?",
       "rationale": "This localizes where fitting fails to transfer.",
       "interpretation": "Concentration in low-similarity groups supports fitting that is specific to the training distribution. A uniform spread supports calibration drift.",
-      "status": "partial",
-      "answer": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive localization and controlled repeated comparisons remain unfinished.",
+      "status": "answered_with_limits",
+      "answer": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive attribution is also complete: shared/mixed terminal learned total is lower than fixed13, while unseen-scaffold total is higher (3.97861 versus3.77506). Cold learned molecule->protein loss has minimum9; fixed13 has minimum15. From overall macro peak14->15, both directions decrease in all A size/scaffold strata at both scales. This is descriptive query-origin attribution with full candidate pools, no confidence intervals over redrawn candidate contexts, and no repeated/causal result. Controlled repeated comparisons remain unfinished.",
       "evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
       "native_ranking_localization_evidence": "tier1/ranking_localization/d05274e4f8707d62/{complete.json,verification.json} on Atum",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum"
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}"
     },
     {
       "id": "Q12",
@@ -380,7 +380,7 @@
       "factorized_scoring_B"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "A15 training completed at Unix1793574255.346448, all4 rank receipts and protected checkpoints verified. Best macro epoch14 (0.34367521), minimum total loss15 (2.36395550). The old handoff failed before inference; recovered contrastive coordinator1216919 and four permitted-GPU workers are running. At Unix1793575915.16 eight of30 exports were complete. Next controlled B training has not started.",
+    "current_controlled_launch": "Full-data B seed42 base-LR15-epoch fit full__B__seed42__lr1p0 is training, W&B ormrd95z. Driver1236736, torchrun1237088, ranks1237179-1237182; actual CUDA UUIDs match physical0,2,5,6. Batch12x4x4, macro-Spearman selection, evaluate_test=False. W&B API verified running at Unix1793577065.48, step140/epoch0.15977, finite loss11.26263. No evaluation epoch has finished yet. Original A15 finished and all30 contrastive exports completed before this launch.",
     "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending.",
     "similarity_composition": "Frozen binary-scaffold strata and composition weights complete for A/B validation/test. Saved depth-3 predictions scored with no fitting. All source/artifact hashes and independent weighted sums verified. Design SHA256 8a01219268444ad8efc0df58f404687a33cf0703c189429b8c03729db46e93c8; analysis SHA256 a3672186999223211bf9ba3151367cf634e09ad76e2fff7acbc918b6a2952b5d. E08/E09 and Q13 remain partial pending matched neural and required repeated comparisons.",
     "matched_A_trajectory_protection": "All15 weights protected and verified; original marker restored and retention hold released. Protection complete SHA256 afabbcc8c89ec1e8583c9eb60749db2b43a6429544eacd4ce0cbd77ec1aabf6f. Protected weights are hardlinks, not independent backups.",
@@ -443,7 +443,7 @@
       "training_probe_assays": 2048,
       "test_predictions_read": false,
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
-      "scope": "Complete15-epoch native scalar, noise-band, agreement, calibration, scaffold-stratum and composition analysis. Selected A test, controlled repeated comparisons and directional/geometry inference remain pending.",
+      "scope": "Complete15-epoch native scalar, noise-band, agreement, calibration, scaffold-stratum and composition analysis. Directional/fixed-scale contrastive audits and stratum attribution are also complete. Selected A test, controlled repeated comparisons and representation-geometry inference remain pending.",
       "verification": {
         "trajectory_sha256": "7cc18fafad3e454d1a44fd1c63a7f33f8aff2faba8f8a38921c3eb6a4c8924ff",
         "verification_sha256": "90faa2eab5acd5642247e356fcbec01bea872bac84797825487cf835f8bfbb80",
@@ -455,7 +455,7 @@
       },
       "analysis_process_status": "Epoch15 analysis and verification completed; all30 snapshots verified. No live native-analysis process remains."
     },
-    "reference_A_contrastive_execution": "Old c0f83129a444d268 audit failed on resolved encoder dimensions before inference. Repairs7de7d3b/2cc800d validate actual encoder widths and every other config field at both load/export boundaries;22 CPU tests and real Atum CPU preflight passed. New c81891c91f5ed91f audit launched PID1216919, workers1217319-1217322, only physical GPUs0,2,5,6;8/30 exports complete at Unix1793575915.16. No test use or retraining. Old receipts preserved; scientific directional results still pending.",
+    "reference_A_contrastive_execution": "Complete: all30 validation/original-probe exports,15 epochs, one fixed candidate-pool hash per partition, weights unchanged, no test use. Maximum native total-loss drift3.2351e-6 and macro drift1.11e-16. All workers/coordinator absent by Unix1793576737.68. Completion SHA256 94c681a6638c900d327c3973d93ed7b55c6a3ae5306866e56121210422c3a039. Original failed audit preserved; recovery fixed only resolved-width validation.",
     "reference_A_contrastive_preflight_evidence": "tier1/reference_contrastive/recovery_{preflight,launch}_2cc800d.json on Atum",
     "observation_process_audit": {
       "status": "complete_with_limits",
@@ -467,7 +467,7 @@
     },
     "stratified_scalar_trajectory": {
       "status": "complete_for_both_reference_trajectories",
-      "question": "Q11 remains partial",
+      "question": "Q11 answered with single-reference limitations",
       "A_epochs": [
         1,
         2,
@@ -513,7 +513,7 @@
     },
     "native_ranking_localization": {
       "status": "complete_for_both_reference_trajectories",
-      "question": "Q11 remains partial",
+      "question": "Q11 answered with single-reference limitations",
       "A_epochs": [
         1,
         2,
@@ -559,11 +559,11 @@
     },
     "storage_snapshot": "At Unix1793560746.61 account quota reports home120/150GB and archive264/1024GB. Scientific outputs and protected trajectory remain archive-backed.",
     "contrastive_localization": {
-      "status": "complete_for_initial_B_trajectory",
+      "status": "complete_for_both_reference_trajectories",
       "questions": [
         "Q06",
         "Q10",
-        "Q11 remain partial"
+        "Q11 answered with single-reference limitations"
       ],
       "B_epochs": [
         1,
@@ -582,7 +582,23 @@
         14,
         15
       ],
-      "A_epochs": [],
+      "A_epochs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
       "evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
       "complete_sha256": "b30c44f38903d9655b797a6da7cb6bb63f2bd736031086bb222ef755d8d2021a",
       "verification_sha256": "b455a76cc97840a0c9776a0cd9db2c0992cab30cff78dc0452b2650e54127262",
@@ -609,7 +625,26 @@
       "process": "PID987079 terminal/absent with completed result; launch tier1/contrastive_localization_launch_916288c_B.json",
       "scope": "Loss attribution by original query assay, holding every negative candidate fixed. Native 1/sqrt(list size) query weights and denominator mass from zero-active lists are preserved. No stratum-only candidate evaluation. Endpoint changes are descriptive; no seed uncertainty or confidence intervals are claimed. Candidate contexts couple units, so a simple query-unit bootstrap would not measure redrawn-pool uncertainty. Fixed-scale rescoring does not establish a benefit of fixed-temperature training.",
       "precision_verification": "Initial absolute tolerance1e-5 on raw float32 sums was exceeded by one sampled sum. Explicit float64 candidate-set reconstruction matches float64 production loss within3.56e-15; saved float32 sums satisfy atol2e-6/rtol5e-7 and native batch-unit errors stay below1e-5. Initial discrepancy and diagnosis retained in verification.json.",
-      "validation": "Seven focused local tests passed; all source/output hashes verified. No training, model inference, GPUs or test predictions."
+      "validation": "Seven focused local tests passed; all source/output hashes verified. No training, model inference, GPUs or test predictions.",
+      "A_evidence": "tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "A_complete_sha256": "1c40ce71368006f6a757d5269815748a259d05adf81ee1500cd4461a4148708f",
+      "A_native_macro_peak_epoch": 14,
+      "A_directional_minimum_epochs": {
+        "fixed_initial_scale13": {
+          "molecule_to_protein": 15,
+          "protein_to_molecule": 15,
+          "total": 15
+        },
+        "learned_scale": {
+          "molecule_to_protein": 15,
+          "protein_to_molecule": 15,
+          "total": 15
+        }
+      },
+      "A_production_batch_checks": 1980,
+      "A_maximum_production_batch_difference": 1.430511474609375e-06,
+      "A_verification_scope": "All30 table hashes and11 analysis-source hashes checked, plus1980 in-analysis production-operator checks. No independent reconstruction of every list contribution, candidate-context interval or seed uncertainty. No model inference/fitting or test predictions.",
+      "A_process": "CPU retry1240328 completed all15 epochs and was absent at Unix1793577065.48. Original1236738 filename-format failure retained; a2e19a0 canonicalizes integral epochs after exact1..15 validation, with all43 active training-source files unchanged."
     },
     "adaptation_membership_design": {
       "status": "group_memberships_verified_fitting_pending",
@@ -1090,7 +1125,9 @@
       "last_observed_phase": "failed_requires_inspection",
       "last_watcher_check_unix": 1793574325.587299,
       "terminal_error": "Reference audit exited1; no next training was launched. Saved encoder widths480/768 versus unspecified launch widths.",
-      "recovery": "Original watcher not restarted. Deployed audit-only config repair; manually launched corrected reference audit with its own immutable receipt."
+      "recovery": "Original watcher not restarted. Deployed audit-only config repair; manually launched corrected reference audit with its own immutable receipt.",
+      "recovery_next_training_started": true,
+      "recovery_next_training_evidence": "controlled/driver_launch_after_Aaudit_a4c8026.json; controlled/runs/full__B__seed42__lr1p0/launch_provenance.json"
     },
     "factorized_B_scope_verification": {
       "status": "complete_for_explicit_Tier2_SplitB_scope",
@@ -1261,20 +1298,38 @@
     },
     "reference_checkpoint_audit_completion": {
       "experiments": [
+        "E12",
         "E13",
         "E14",
         "E15",
+        "E16",
         "E17",
         "E21"
       ],
       "qualified_questions": [
         "Q05",
+        "Q06",
         "Q07",
         "Q08",
+        "Q10",
+        "Q11",
         "Q31",
         "Q32"
       ],
-      "scope": "Explicit Tier1 saved-checkpoint and metric-definition questions answered for both observed15-epoch references. This does not close Tier1 saved A test rescoring, controlled seed/method comparisons or Tier4. Status changes follow the MD requirement scope, not the size of the remaining training grid."
+      "scope": "Explicit saved-checkpoint, metric and scorer questions answered descriptively for both complete15-epoch reference trajectories. This does not close selected A test rescoring, controlled seeds/method comparisons or Tier4. Qualification records observational and uncertainty limits rather than omitting required experiments."
+    },
+    "reference_A_contrastive_result": {
+      "evidence": "tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json",
+      "complete_sha256": "94c681a6638c900d327c3973d93ed7b55c6a3ae5306866e56121210422c3a039",
+      "exports": 30,
+      "candidate_pools": {
+        "eval": "bd95fc6334da592b4b956398dcc3f9af5c780c78e694e5b1c1ba09937dee2ecc",
+        "train_eval": "1338cdbf3be39c1239950d612538016fda0e39c939b96d4f8f4624d8c5c0d29b"
+      },
+      "maximum_native_contrastive_loss_difference": 3.2350772096734204e-06,
+      "maximum_native_macro_difference": 1.1102230246251565e-16,
+      "test_predictions_read": false,
+      "parameters_unchanged": true
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -1299,7 +1354,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1313,7 +1368,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1327,7 +1382,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1341,7 +1396,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/noise_bands on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1355,7 +1410,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1386,11 +1441,11 @@
       "conditional": false,
       "completed_scope": "Binary maximum training-scaffold support prepared for A/B validation/test without scores; fixed depth-3 baseline analyzed by intact-assay support class and by within-assay row strata, with eligibility reapplied and whole-unit uncertainty. Matched neural predictions and seed/realization comparisons remain pending.",
       "evidence": "tier1/similarity_composition/design/complete.json; tier1/similarity_composition/lambdamart_depth3/complete.json; tier1/similarity_composition/verification.json",
-      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive localization and controlled repeated comparisons remain unfinished.",
+      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive attribution is also complete: shared/mixed terminal learned total is lower than fixed13, while unseen-scaffold total is higher (3.97861 versus3.77506). Cold learned molecule->protein loss has minimum9; fixed13 has minimum15. From overall macro peak14->15, both directions decrease in all A size/scaffold strata at both scales. This is descriptive query-origin attribution with full candidate pools, no confidence intervals over redrawn candidate contexts, and no repeated/causal result. Controlled repeated comparisons remain unfinished.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1402,7 +1457,7 @@
       "conditional": false,
       "completed_scope": "Score-independent size/positive-fraction/mean-pChEMBL cells cover 99.80% of B eligible test groups. Fixed depth-3 A common-support macro falls from 0.1281 to 0.1154 after weighting; B common-support macro is 0.0613. Fixed-weight paired A-unit change interval is [-0.01551,-0.00969]. Residual within-bin size/span imbalance and one-fit uncertainty are explicit. Neural and multi-seed comparisons remain pending.",
       "evidence": "tier1/similarity_composition/design/complete.json; tier1/similarity_composition/lambdamart_depth3/complete.json; tier1/similarity_composition/verification.json",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1430,18 +1485,19 @@
       "tier": "Tier 1",
       "key": "checkpoint_loss_decomposition",
       "experiment": "Decompose saved checkpoint losses, including both contrastive directions",
-      "status": "partial",
+      "status": "complete",
       "conditional": false,
-      "completed_scope": "All 15 Split B checkpoints decomposed by objective and contrastive direction; matched Split A checkpoints pending.",
-      "evidence": "RewardModel/outputs/paired_generalization/tier1/contrastive on Atum",
-      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive localization and controlled repeated comparisons remain unfinished.",
+      "completed_scope": "All15 reference checkpoints on both A and original B have BCE, ranking, total and both contrastive directions decomposed. A learned and fixed13 directions decline at every adjacent epoch overall; B minima and first adjacent rises are recorded. Both complete stratum-attribution analyses are available. Controlled repeated comparisons remain separate.",
+      "evidence": "tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}; tier1/contrastive/trajectory.json",
+      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive attribution is also complete: shared/mixed terminal learned total is lower than fixed13, while unseen-scaffold total is higher (3.97861 versus3.77506). Cold learned molecule->protein loss has minimum9; fixed13 has minimum15. From overall macro peak14->15, both directions decrease in all A size/scaffold strata at both scales. This is descriptive query-origin attribution with full candidate pools, no confidence intervals over redrawn candidate contexts, and no repeated/causal result. Controlled repeated comparisons remain unfinished.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
       "native_ranking_localization_update": "Native listwise localization covers initial B1-15 and A1-11, preserving original lists and zero-loss denominator mass. All26 native losses reproduce within3.85e-7;338 real sampled list calls agree within4.77e-7, with960165 descriptors verified. Full A contrastive and repeated-model comparisons remain pending.",
       "native_ranking_localization_evidence": "tier1/ranking_localization/d395b27c3650ca14/{complete.json,verification.json} on Atum",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
-      "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
+      "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
+      "scope_limits": "Complete for the two observed reference trajectories; no seed-level or causal generalization claim. Fixed-temperature training and selected controlled model comparisons remain pending."
     },
     {
       "id": "E13",
@@ -1452,9 +1508,9 @@
       "conditional": false,
       "completed_scope": "Native and independently reconstructed BCE loss/AUROC are available at every epoch on both reference splits. B BCE minimum is2 and A is13; terminal A/B AUROC is0.84629/0.77202. This is discrimination versus log-loss evidence, not a causal calibration attribution.",
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum; tier1/baseline_trajectory_summary_v2.json; controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json",
-      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive localization and controlled repeated comparisons remain unfinished.",
+      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive attribution is also complete: shared/mixed terminal learned total is lower than fixed13, while unseen-scaffold total is higher (3.97861 versus3.77506). Cold learned molecule->protein loss has minimum9; fixed13 has minimum15. From overall macro peak14->15, both directions decrease in all A size/scaffold strata at both scales. This is descriptive query-origin attribution with full candidate pools, no confidence intervals over redrawn candidate contexts, and no repeated/causal result. Controlled repeated comparisons remain unfinished.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "scope_limits": "Both 15-epoch reference trajectories are available. This is a saved-checkpoint audit of one fit per split; controlled seed, learning-rate, test and method comparisons remain separate and incomplete."
     },
@@ -1467,7 +1523,7 @@
       "conditional": false,
       "completed_scope": "Validation-only positive-temperature fits are available across all15 epochs of both references. A epoch15 gives T1.29538 and validation log-loss0.42772->0.41749. This closes the explicit Tier1 request to refit temperature on validation; A test transfer and fixed-temperature training remain separate unfinished comparisons.",
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum; tier1/baseline_trajectory_summary_v2.json; controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "scope_limits": "Both 15-epoch reference trajectories are available. This is a saved-checkpoint audit of one fit per split; controlled seed, learning-rate, test and method comparisons remain separate and incomplete."
     },
@@ -1480,9 +1536,9 @@
       "conditional": false,
       "completed_scope": "Native learned contrastive scales are recorded for all15 checkpoints on both splits: A13.5412->21.8558 and B13.5999->22.5461. Directional/fixed-pool effects remain under E12/E16.",
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum; tier1/baseline_trajectory_summary_v2.json; controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "scope_limits": "Both 15-epoch reference trajectories are available. This is a saved-checkpoint audit of one fit per split; controlled seed, learning-rate, test and method comparisons remain separate and incomplete."
     },
@@ -1491,12 +1547,13 @@
       "tier": "Tier 1",
       "key": "fixed_candidate_pool",
       "experiment": "Re-evaluate contrastive loss against a fixed candidate pool",
-      "status": "partial",
+      "status": "complete",
       "conditional": false,
-      "completed_scope": "All 31 Split B exports evaluated with fixed candidate partitions and both learned and initial fixed logit scales.",
-      "evidence": "RewardModel/outputs/paired_generalization/tier1/contrastive on Atum",
-      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
-      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum"
+      "completed_scope": "Both reference trajectories use identical candidate-pool hashes within each validation/training-probe partition across all15 epochs. A30 exports completed with unchanged model parameters, no test access and bounded native prediction drift. Learned and fixed13 rescoring are available on identical embeddings. This is fixed-pool evaluation, not fixed-temperature retraining.",
+      "evidence": "tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/complete.json; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}; tier1/contrastive/trajectory.json",
+      "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. A attribution is complete: learned total at15 is1.18614/2.52134/3.97861 for shared/mixed/unseen assays versus fixed13 totals1.50644/3.02026/3.77506. Every A size/scaffold stratum improves in both directions14->15 at both scales. Repeated/causal comparisons remain pending.",
+      "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum; tier1/contrastive_localization/A/0a4f60eb277f6f39/{complete.json,completion_check.json}",
+      "scope_limits": "Complete for the two observed reference trajectories; no seed-level or causal generalization claim. Fixed-temperature training and selected controlled model comparisons remain pending."
     },
     {
       "id": "E17",
@@ -1507,7 +1564,7 @@
       "conditional": false,
       "completed_scope": "Both runs select on validation macro Spearman: A epoch14 (0.34367521) and original B epoch6 (0.18460015). Aggregate validation loss selects epoch15 on both (A2.36395550, B6.68790). Selection-rule test/seed comparisons remain Tier3 work.",
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum; tier1/baseline_trajectory_summary_v2.json; controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "scope_limits": "Both 15-epoch reference trajectories are available. This is a saved-checkpoint audit of one fit per split; controlled seed, learning-rate, test and method comparisons remain separate and incomplete."
     },
@@ -1542,7 +1599,7 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
@@ -1554,9 +1611,9 @@
       "conditional": false,
       "completed_scope": "Full reference validation trajectories compare matched-headline-eligible NDCG with macro Spearman. A NDCG@1/@3/@5 all peak15 while Spearman peaks14; original B top1/top3 peak11 while top5/Spearman peak6. The A14->15 macro interval includes zero. These are descriptive fixed-cohort trajectories, not a replicated objective-conflict result.",
       "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum; tier1/baseline_trajectory_summary_v2.json; controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json",
-      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive localization and controlled repeated comparisons remain unfinished.",
+      "stratified_trajectory_update": "Scalar and native listwise localization now cover all15 A and original B validation epochs. Original B results reproduce unchanged: BCE rises across all size bins from2->15 and ranking loss across every eligible size bin from5->15; on common6->15 endpoints >25-item assays account for80.2% of net ranking-loss increase, while three-item assays account for76.1% of net macro-rho decline. A all-unseen BCE rises0.54630->0.62373 from1->15 (change interval[-0.03240,0.19907], includes zero) while macro rises0.13584->0.22976 (interval[0.03030,0.15353]); cold ranking loss changes2.57456->2.54119 (interval[-0.12493,0.06786]). A cold BCE minimum is2 and macro maximum11. Shared/mixed A BCE and ranking improve1->15, as do all size-bin BCE and eligible macro point estimates. Overall A14->15 macro change is-0.00036 with interval[-0.00234,0.00164]. These conditional single-fit intervals omit endpoint-selection/seed uncertainty and multiplicity correction; no causal calibration or normalization claim follows. A contrastive attribution is also complete: shared/mixed terminal learned total is lower than fixed13, while unseen-scaffold total is higher (3.97861 versus3.77506). Cold learned molecule->protein loss has minimum9; fixed13 has minimum15. From overall macro peak14->15, both directions decrease in all A size/scaffold strata at both scales. This is descriptive query-origin attribution with full candidate pools, no confidence intervals over redrawn candidate contexts, and no repeated/causal result. Controlled repeated comparisons remain unfinished.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/bb7096aaf6bda626/{complete.json,verification.json} on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "scope_limits": "Both 15-epoch reference trajectories are available. This is a saved-checkpoint audit of one fit per split; controlled seed, learning-rate, test and method comparisons remain separate and incomplete."
     },
@@ -1882,7 +1939,7 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Selected A test and required controlled repeated comparisons remain pending; full A validation/probe trajectories are available. Within-assay scorer-pair correlations and matched endpoint component bootstraps are now available for the B trajectory (Q31).",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports and repeated controlled comparisons remain pending.",
+      "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum"
     },
     {
