@@ -188,21 +188,27 @@
       "question": "Does the contrastive loss treat other positives of the same x in the batch as negatives?",
       "rationale": "With group batching and diagonal-only targets, a positive anchor in a 25-item group at 70% positives sees about 16\u201317 labeled positives as negatives (inference). Standard two-tower practice masks only identical candidate IDs ([TFRS](https://www.tensorflow.org/recommenders/api_docs/python/tfrs/tasks/Retrieval)).",
       "interpretation": "If co-positives are treated as negatives, the contrastive loss directly opposes the BCE and ranking losses. Masking them, or using multi-positive targets, is the first fix to test.",
-      "status": "pending"
+      "status": "partial",
+      "answer": "The reference already hides other ligands of an anchor's own assay and masks cross-assay same-protein and duplicate-query-molecule entries. It does not consult a global table of training positives: a candidate sampled under a different protein can still be a known positive for the query protein in another training assay. A numerical gradient fixture verifies this remaining negative push; actual epoch/batch counts are being audited.",
+      "evidence": "reward_model/model/losses.py; tests/test_paired_generalization_sampling_audit.py; pending tier1/sampling/{A,B}/complete.json"
     },
     {
       "id": "Q26",
       "question": "Are the contrastive projections taken before or after cross-attention?",
       "rationale": "Pair-independent embeddings allow cheap in-batch negatives and a full softmax over all 8,000 x. Pair-dependent embeddings require recomputing cross-attention for every off-diagonal pair.",
       "interpretation": "This architectural detail determines which contrastive remedies are feasible.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "Before cross-attention. In the reference mlp_contrastive mode, separate protein and molecule projections consume pooled encoder outputs and produce normalized, pair-independent embeddings. Ranking and BCE consume fused representations. Cross-pair contrastive scores therefore require embedding products, not new cross-attention passes.",
+      "evidence": "configs/reward_train_paired_generalization_baseline.yaml; reward_model/model/core.py; controls_gpu_qualification_17b30ae.json on Atum"
     },
     {
       "id": "Q27",
       "question": "How is the listwise loss normalized across groups of different sizes?",
       "rationale": "Summing over pairs lets the roughly 10% of large groups dominate the gradient. Per-group averaging matches a per-group-averaged metric (inference).",
       "interpretation": "If loss weighting and metric weighting differ, the model is optimizing groups the metric barely counts.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "The reference sums top-weighted Plackett-Luce selections within each sampled list, with tie-averaged weights 1/(sqrt(list size)*log(position+1)), then averages sampled lists. It does not divide by the retained selection-weight sum. Larger original assays receive ceil(n/32) bounded ranking-list opportunities, so this is not equal weighting of original assays. The controlled comparison separately implements within-list normalization and inverse-opportunity assay balancing without changing sampled rows or update counts.",
+      "evidence": "reward_model/model/losses.py; reward_model/training/data.py; tests/test_paired_generalization_ranking_variants.py; CONTROLLED_PROTOCOL.md"
     },
     {
       "id": "Q28",
@@ -278,6 +284,7 @@
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
     "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported, LambdaMART still running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
+    "controlled_runtime_qualification": "17 cases passed on two actual GPUs (physical 5 and 6): all loss subsets, frozen/partial/LoRA, fixed scale, stop-gradient, list normalization, assay balancing and pairwise variants. Each used three optimizer steps with two accumulated microbatches and synchronized fitted parameters. This is execution evidence on synthetic short inputs, not scientific performance or a full-size four-GPU trainer run. Evidence: controls_gpu_qualification_17b30ae.json on Atum.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
