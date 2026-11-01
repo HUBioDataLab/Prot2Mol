@@ -18,7 +18,7 @@ else:
 from reward_model.training.scaffold_component_split import _deal_val_test
 
 
-def assignment_from_units(frame, units, *, seed, restarts=64):
+def assignment_from_units(frame, units, *, seed, restarts=64, randomize_equal_size_order=False):
     if units.assay_id.duplicated().any():
         raise ValueError('Each assay must have exactly one component')
     work = frame[['assay_id', 'target_chembl_id', 'binary_label']].copy()
@@ -32,7 +32,13 @@ def assignment_from_units(frame, units, *, seed, restarts=64):
     rescued = sorted(int(component) for component, group in work[work.component != giant].groupby('component')
                      if not set(group.target_chembl_id).issubset(targets))
     mapping = {component:'train' for component in [giant, *rescued]}
-    mapping.update(_deal_val_test(stats.drop(index=[giant, *rescued], errors='ignore'), seed=seed, restarts=restarts))
+    pool = stats.drop(index=[giant, *rescued], errors='ignore')
+    if randomize_equal_size_order:
+        # The subsequent descending-size sort retains the same size priority;
+        # a label-blind seeded input permutation changes the order within ties.
+        # The greedy objective and its 64-restart budget remain unchanged.
+        pool = pool.iloc[np.random.default_rng(seed).permutation(len(pool))]
+    mapping.update(_deal_val_test(pool, seed=seed, restarts=restarts))
     assignments = stats.reset_index()
     assignments['split'] = assignments.component.map(mapping)
     return assignments, work.component.map(mapping).to_numpy()
@@ -69,17 +75,18 @@ def main():
         raise ValueError('Original split does not cover source assays')
     destination = WORK/'tier1/split_realizations'
     destination.mkdir(parents=True, exist_ok=True)
-    reference, results = None, []
-    for seed in (42,43,44):
-        assignments, roles = assignment_from_units(frame, units, seed=seed)
-        if seed == 42:
+    reference, results, original_results = None, [], []
+    cases = [('original', seed, False) for seed in (42,43,44)] + [('randomized_equal_size_order', seed, True) for seed in (43,44)]
+    for policy, seed, randomize in cases:
+        assignments, roles = assignment_from_units(frame, units, seed=seed, randomize_equal_size_order=randomize)
+        if policy == 'original' and seed == 42:
             if not np.array_equal(roles, original_rows):
                 raise ValueError('Cached-unit reconstruction does not reproduce the actual seed-42 split')
             reference = assignments
         else:
             if not np.array_equal(roles == 'train', original_rows == 'train'):
                 raise ValueError('Alternative split unexpectedly changed training observations')
-        path = destination/f'components_seed{seed}.parquet'
+        path = destination/f'{policy}_components_seed{seed}.parquet'
         assignments.to_parquet(path,index=False)
         counts = {split: dict(units=int((assignments.split == split).sum()),
                              rows=int(assignments.loc[assignments.split == split, 'rows'].sum()),
@@ -88,19 +95,28 @@ def main():
         # These source-row indices preserve whole units and original source order.
         hashes = {}
         for split in ('val','test'):
-            indices = destination/f'source_indices_seed{seed}_{split}.npy'
+            indices = destination/f'{policy}_source_indices_seed{seed}_{split}.npy'
             np.save(indices, np.flatnonzero(roles == split), allow_pickle=False)
             hashes[split] = sha256(indices)
-        result = dict(seed=seed, assignment_sha256=sha256(path), source_indices_sha256=hashes,
+        result = dict(seed=seed, policy=policy, assignment_sha256=sha256(path), source_indices_sha256=hashes,
                       partitions=counts, versus_seed42=compare_assignments(reference, assignments))
-        results.append(result)
+        if policy == 'original':
+            original_results.append(result)
+            if seed == 44:
+                write_json(destination/'original_seed_audit.json', dict(source_sha256=cache['source_sha256'], results=original_results,
+                    identical_assignments=len({item['assignment_sha256'] for item in original_results}) == 1,
+                    interpretation='Changing only the seed can leave the deterministic sorted candidate as the winner; identical assignments are not distinct realizations.'))
+        if seed == 42 or randomize:
+            results.append(result)
         print(json.dumps(result),flush=True)
-    if any(result['versus_seed42']['changed_units'] == 0 for result in results[1:]):
-        raise ValueError('Requested seeds did not yield distinct additional realizations')
+    if len({result['assignment_sha256'] for result in results}) != 3:
+        raise ValueError('The planned tie-breaking variants did not yield three distinct realizations')
     write_json(destination/'complete.json', dict(source_sha256=cache['source_sha256'],
-        unit_map_sha256=sha256(units_path), realizations=results,
+        unit_map_sha256=sha256(units_path), realizations=results, original_seed_audit=original_results,
+        splitter_sha256=sha256(ROOT/'RewardModel/reward_model/training/scaffold_component_split.py'),
+        audit_code_sha256=sha256(ROOT/'RewardModel/experiments/paired_generalization/split_realization_audit.py'),
         training_identical=True,
-        interpretation='The splitter fixes training membership before randomizing validation/test allocation. Training fits may be shared if all training settings are identical; each realization must perform its own validation-only checkpoint and LR selection. These are dependent held-out reallocations, not variation in training support or split geometry.',
+        interpretation='The splitter fixes training membership before validation/test allocation. Additional realizations use seeded input ordering before the same descending-size sort and 64-restart balance objective; only the priority among equal-size components changes. Training fits may be shared if all training settings are identical; each realization must perform its own validation-only checkpoint and LR selection. These are dependent held-out reallocations, not variation in training support or split geometry.',
         remaining='All-checkpoint predictions on the held-out union and selection/evaluation per realization; multi-seed controlled models'))
 
 

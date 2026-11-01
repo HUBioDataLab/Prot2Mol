@@ -20,5 +20,10 @@ def test_assignment_keeps_giant_and_target_rescue_units_in_train_across_seeds():
         assert compare_assignments(first,current)['training_units_identical']
         assert len(roles)==len(frame)
         assert set(roles)=={'train','val','test'}
+        varied, varied_roles = assignment_from_units(frame, units, seed=seed, restarts=8, randomize_equal_size_order=True)
+        np.testing.assert_array_equal(varied_roles=='train', original=='train')
+        assert compare_assignments(first,varied)['training_units_identical']
+        repeat, _ = assignment_from_units(frame, units.sample(frac=1,random_state=10), seed=seed, restarts=8, randomize_equal_size_order=True)
+        pd.testing.assert_frame_equal(varied,repeat)
     with pytest.raises(ValueError,match='exactly one'):
         assignment_from_units(frame,pd.concat([units,units.iloc[:1]]),seed=42)
