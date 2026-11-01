@@ -102,7 +102,7 @@ def fit_trial(xgb, train, validation, selector, params, output):
     return result
 
 
-def main(regime):
+def main(regime, precompute_trial=None):
     import fcntl
     import xgboost as xgb
     if ROOT != Path("/home/atabey/Prot2Mol") or xgb.__version__ != VERSION:
@@ -110,7 +110,13 @@ def main(regime):
     allowed = subprocess.check_output(["nvidia-smi", "-i", "0,2,5,6", "--query-gpu=uuid", "--format=csv,noheader"], text=True).splitlines()
     if os.environ.get("CUDA_VISIBLE_DEVICES") not in allowed:
         raise RuntimeError("Select exactly one authorized GPU UUID")
-    output = WORK / "tier2/lambdamart" / regime
+    if precompute_trial is not None and not 0 <= precompute_trial < len(SETTINGS):
+        raise ValueError('Precomputed trial must be a member of the declared grid')
+    # Independent workers use a separate staging directory. Never compete with
+    # a live sequential driver's files/lock or perform test selection here.
+    output = (WORK / "tier2/lambdamart" / regime if precompute_trial is None else
+              WORK / 'tier2/lambdamart_precomputed' / regime / f'worker{precompute_trial:02d}')
+    launch_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     output.mkdir(parents=True, exist_ok=True)
     lock = (output / "fit.lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -121,6 +127,8 @@ def main(regime):
     provenance = {"regime": regime, "data_sha256": hashes, "feature_provenance": manifest,
                   "settings": SETTINGS, "noise_width": noise, "xgboost_version": VERSION,
                   "max_rounds": MAX_ROUNDS, "evaluate_every": EVALUATE_EVERY, "patience_rounds": PATIENCE_ROUNDS}
+    if precompute_trial is not None:
+        provenance['precomputed_trial'] = precompute_trial
     if (output / "complete.json").exists():
         old = json.loads((output / "complete.json").read_text())
         if any(old[key] != value for key, value in provenance.items()):
@@ -150,6 +158,8 @@ def main(regime):
     gc.collect()
     selector, trials = RankingSelection(validation_frame), []
     for number, settings in enumerate(SETTINGS):
+        if precompute_trial is not None and number != precompute_trial:
+            continue
         trial_dir = output / f"trial{number:02d}"
         params = {**parameters, **settings}
         if (trial_dir / "complete.json").exists():
@@ -160,6 +170,12 @@ def main(regime):
             trial = fit_trial(xgb, train, validation, selector, params, trial_dir)
         trials.append({"trial": number, **trial})
         write_json(output / "trials.json", trials)
+    if precompute_trial is not None:
+        write_json(output / 'complete.json', {**provenance, 'trials': trials,
+            'training_query_layout': layout, 'git_commit': launch_commit,
+            'scope': 'One setting from the existing five-setting grid; no test scoring or grid selection',
+            'publication': 'Separate staging directory; verify the main driver has not reached this setting before adopting it'})
+        return
     best = max(trials, key=lambda trial: trial["selected"]["macro_spearman"])
     shutil.copyfile(output / f"trial{best['trial']:02d}/model.ubj", output / "model.ubj")
     model = xgb.Booster(model_file=output / "model.ubj")
@@ -185,4 +201,6 @@ def main(regime):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--regime", choices=["A", "B"], required=True)
-    main(parser.parse_args().regime)
+    parser.add_argument('--precompute-trial', type=int, choices=range(len(SETTINGS)))
+    args = parser.parse_args()
+    main(args.regime, args.precompute_trial)
