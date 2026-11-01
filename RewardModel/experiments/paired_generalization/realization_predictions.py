@@ -39,14 +39,47 @@ def destination(run):
     return WORK/'realization_predictions'/Path(run).name
 
 
+def validate_run_registration(run, launch):
+    """Allow registered B full-data or whole-component-curve fits only."""
+    run = Path(run).resolve()
+    if run==(WORK/'baseline_scaffold_seed42_15ep').resolve():
+        if launch['config']['data'].get('train_view_manifest'):
+            raise ValueError('The protected reference cannot acquire a training subset')
+        return dict(family='protected_reference')
+    for family in ('controlled','learning_curves'):
+        directory = WORK/family
+        if run.parent!=(directory/'runs').resolve():
+            continue
+        path = directory/'jobs'/f'{run.name}.json'
+        metadata = json.loads(path.read_text())
+        plan_path = directory/'plan.json'
+        if (metadata['id']!=run.name or metadata['regime']!='B' or
+            Path(metadata['output_dir']).resolve()!=run or
+            metadata['plan_sha256']!=sha256(plan_path) or
+            metadata['config_sha256']!=launch['config_sha256'] or
+            sha256(Path(metadata['config_path']))!=metadata['config_sha256']):
+            raise ValueError('Allocation export has mismatched managed-run registration')
+        data = launch['config']['data']
+        if family=='learning_curves':
+            plan = json.loads(plan_path.read_text())
+            if plan['primary_plan_sha256']!=sha256(WORK/'controlled/plan.json'):
+                raise ValueError('Curve parent differs from the allocation parent')
+            view = plan['views']['B'][f"fraction{int(metadata['fraction']*100):03d}"]
+            if (Path(data['train_view_manifest']).resolve()!=Path(view['path']).resolve() or
+                data['train_view_sha256']!=view['sha256'] or sha256(Path(view['path']))!=view['sha256']):
+                raise ValueError('Curve training subset differs from its frozen view')
+        elif data.get('train_view_manifest'):
+            raise ValueError('The primary full-data grid cannot acquire a training subset')
+        return dict(family=family,job_metadata_sha256=sha256(path),plan_sha256=sha256(plan_path))
+    raise ValueError('Run must be the protected reference or a registered B controlled/curve run')
+
+
 def prepare_jobs(run):
     run = Path(run).resolve()
-    allowed = [WORK/'baseline_scaffold_seed42_15ep', *list((WORK/'controlled/runs').glob('*'))]
-    if run not in [path.resolve() for path in allowed]:
-        raise ValueError('Run must be the protected reference or a managed controlled run')
+    launch = json.loads((run/'launch_provenance.json').read_text())
+    registration = validate_run_registration(run,launch)
     contract, _, _ = load_contract()
     plan = json.loads(Path(contract['control_plan_path']).read_text())
-    launch = json.loads((run/'launch_provenance.json').read_text())
     if launch['world_size'] != 4:
         raise ValueError('Scientific run must have four completed ranks')
     for rank in range(4):
@@ -58,7 +91,7 @@ def prepare_jobs(run):
         return path.resolve() if path.is_absolute() else (ROOT/'RewardModel/configs'/path).resolve()
     for key in ('train_parquet_path', 'val_parquet_path', 'test_parquet_path', 'tokenized_dataset_dir'):
         if resolve_data(launch['config']['data'][key]) != resolve_data(plan['bases']['B']['data'][key]):
-            raise ValueError('Run does not use the frozen full B data')
+            raise ValueError('Run does not use the frozen B source/cache partitions')
     for split in ('val','test'):
         cache = Path(contract['tokenized_dataset_dir'])/f'{split}_examples'
         if token_cache_hashes(cache) != plan['tokenized_data_sha256']['B'][split]:
@@ -86,6 +119,9 @@ def prepare_jobs(run):
         contract_path=str(WORK/'controlled/realizations/plan.json'),
         contract_sha256=sha256(WORK/'controlled/realizations/plan.json'), jobs=jobs, source_weights=sources,
         inference=contract['inference'], purpose='Scalar export and validation-only allocation selection; no test scores')
+    # Preserve already prepared reference/primary job manifests byte-for-byte.
+    if registration['family']=='learning_curves':
+        record['run_registration'] = registration
     immutable_json(destination(run)/'jobs.json', record)
     return record
 

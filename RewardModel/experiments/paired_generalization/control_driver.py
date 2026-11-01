@@ -115,7 +115,7 @@ def launch_environment(job_id):
         WANDB_DIR=str(WORK), WANDB_CACHE_DIR=str(ROOT/'.wandb_cache'),
         WANDB_CONFIG_DIR=str(ROOT/'.cache/wandb_config'), WANDB_DATA_DIR=str(ROOT/'.cache/wandb_data'),
         WANDB_PROJECT='Prot2Mol_RewardModel', WANDB_ENTITY='hubiodatascilab',
-        WANDB_RUN_GROUP='paired_generalization_controlled', WANDB_NAME=job_id,
+        WANDB_RUN_GROUP=('paired_generalization_learning_curves' if job_id.startswith('unit_curve_') else 'paired_generalization_controlled'), WANDB_NAME=job_id,
         TOKENIZERS_PARALLELISM='false', OMP_NUM_THREADS='4', MKL_NUM_THREADS='4',
         OPENBLAS_NUM_THREADS='4', PYTHONUNBUFFERED='1',
     )
@@ -145,7 +145,8 @@ def qualify_runtime(plan):
     source_paths += [source, source.with_name('control_plan.py'),
                      source.with_name('qualify_controls.py'), source.with_name('run.py'),
                      source.with_name('retain_controlled.py'), source.with_name('realization_protocol.py'),
-                     source.with_name('realization_predictions.py'), source.with_name('export_predictions.py')]
+                     source.with_name('realization_predictions.py'), source.with_name('export_predictions.py'),
+                     source.with_name('learning_curve_driver.py'), source.with_name('learning_curve_plan.py')]
     sources = {str(path.relative_to(ROOT)): sha256(path) for path in source_paths}
     signature = digest_json(dict(sources=sources, plan_sha256=sha256(WORK/'controlled/plan.json')))
     directory = WORK/'controlled/qualifications'/signature[:16]
@@ -226,6 +227,11 @@ def run_next():
     if job is None:
         return dict(phase='control_grid_training_complete_other_experiments_pending',
                     remaining='Postselection test scoring, whole-unit/leak designs, additional realization assessment, Tier 4 and method catalog')
+    return execute_job(job,plan,gate)
+
+
+def execute_job(job, plan, gate):
+    """Shared execution after the caller owns the global lock and checks gates."""
     if sha256(Path(job['config_path'])) != job['config_sha256']:
         raise ValueError('Prepared configuration changed')
     output = Path(job['output_dir'])

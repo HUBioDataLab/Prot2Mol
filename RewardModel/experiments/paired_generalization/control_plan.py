@@ -246,6 +246,36 @@ def select_learning_rate(candidates):
                 candidates=[{key: c[key] for key in ('learning_rate_multiplier', 'validation_macro_spearman', 'validation_defined_fraction')} for c in candidates])
 
 
+def validation_candidate(metadata):
+    """Read a completed four-rank fit's validation evidence, never test metrics."""
+    if sha256(Path(metadata['config_path'])) != metadata['config_sha256']:
+        raise ValueError('Prepared job provenance changed')
+    output = Path(metadata['output_dir'])
+    summary = json.loads((output/'experiment_summary.json').read_text())
+    if summary['config_sha256'] != metadata['config_sha256'] or summary['test_evaluated'] or summary['test_metrics']:
+        raise ValueError('Tuning completion has changed provenance or already scored test data')
+    for rank in range(len(GPU_UUIDS)):
+        rank_done = json.loads((output/f'rank_{rank}_complete.json').read_text())
+        if rank_done['rank'] != rank or rank_done['world_size'] != len(GPU_UUIDS) or rank_done['config_sha256'] != metadata['config_sha256']:
+            raise ValueError('All four ranks must finish the same tuning configuration')
+    retained = json.loads((output/'retained/retention.json').read_text())
+    if retained['config_sha256'] != metadata['config_sha256']:
+        raise ValueError('Retention belongs to another configuration')
+    selection = retained['selections']['best_macro']
+    snapshot_path = output/'prediction_exports/trajectory'/f"eval_step{selection['step']:08d}.json"
+    snapshot = json.loads(snapshot_path.read_text())
+    if sha256(snapshot_path.with_suffix('.npz')) != snapshot['predictions_sha256']:
+        raise ValueError('Selected validation predictions changed')
+    if snapshot['metrics']['eval_macro_spearman'] != selection['metric']:
+        raise ValueError('Retention and selected snapshot disagree')
+    evidence = dict(job_id=metadata['id'], summary_sha256=sha256(output/'experiment_summary.json'),
+                    validation_snapshot_sha256=sha256(snapshot_path))
+    candidate = dict(learning_rate_multiplier=metadata['learning_rate_multiplier'],
+        validation_macro_spearman=selection['metric'],
+        validation_defined_fraction=snapshot['metrics']['eval_spearman_defined_fraction'])
+    return candidate,evidence
+
+
 def confirm(arm_name):
     directory = WORK/'controlled'
     plan_path = directory/'plan.json'
@@ -256,32 +286,12 @@ def confirm(arm_name):
     for job in (j for j in plan['tuning_jobs'] if j['arm'] == arm_name):
         metadata_path = directory/'jobs'/f"{job['id']}.json"
         metadata = json.loads(metadata_path.read_text())
-        if metadata['plan_sha256'] != digest or sha256(Path(metadata['config_path'])) != metadata['config_sha256']:
+        if metadata['plan_sha256'] != digest:
             raise ValueError('Prepared job provenance changed')
-        output = Path(metadata['output_dir'])
-        summary = json.loads((output/'experiment_summary.json').read_text())
-        if summary['config_sha256'] != metadata['config_sha256'] or summary['test_evaluated'] or summary['test_metrics']:
-            raise ValueError('Tuning completion has changed provenance or already scored test data')
-        for rank in range(len(GPU_UUIDS)):
-            rank_done = json.loads((output/f'rank_{rank}_complete.json').read_text())
-            if rank_done['rank'] != rank or rank_done['world_size'] != len(GPU_UUIDS) or rank_done['config_sha256'] != metadata['config_sha256']:
-                raise ValueError('All four ranks must finish the same tuning configuration')
-        retained = json.loads((output/'retained/retention.json').read_text())
-        if retained['config_sha256'] != metadata['config_sha256']:
-            raise ValueError('Retention belongs to another configuration')
-        selection = retained['selections']['best_macro']
-        snapshot_path = output/'prediction_exports/trajectory'/f"eval_step{selection['step']:08d}.json"
-        snapshot = json.loads(snapshot_path.read_text())
-        if sha256(snapshot_path.with_suffix('.npz')) != snapshot['predictions_sha256']:
-            raise ValueError('Selected validation predictions changed')
-        if snapshot['metrics']['eval_macro_spearman'] != selection['metric']:
-            raise ValueError('Retention and selected snapshot disagree')
-        evidence.append(dict(job_id=job['id'], summary_sha256=sha256(output/'experiment_summary.json'),
-                             validation_snapshot_sha256=sha256(snapshot_path)))
+        candidate,source = validation_candidate(metadata)
+        evidence.append(source)
         if job['regime'] == 'B':
-            candidates.append(dict(learning_rate_multiplier=job['learning_rate_multiplier'],
-                validation_macro_spearman=selection['metric'],
-                validation_defined_fraction=snapshot['metrics']['eval_spearman_defined_fraction']))
+            candidates.append(candidate)
     selected = dict(arm=arm_name, plan_sha256=digest, **select_learning_rate(candidates), evidence=evidence)
     selection_path = directory/'selections'/f'{arm_name}.json'
     _write_immutable(selection_path, json.dumps(selected, indent=2, sort_keys=True)+'\n')

@@ -214,12 +214,29 @@ removes optimizer-resume capability from these already completed runs.
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
 groups remain fixed, and leak-in training must match leak-out training size,
-group-size mix, positive rate and replicate counts. Dataset construction and
-matching diagnostics are still required before these four cells can run.
+group-size mix, positive rate and replicate counts. `leak_design.py` version 2
+also exactly matches protein counts, per-assay ranking eligibility and the
+number of strict contrastive actives (float32 pChEMBL >6). BCE positives use
+partition-local pair medians >=6, so matching BCE counts alone was insufficient.
+The original construction is preserved; version 2 keeps its fixed test sets.
 
-The leak-in/out data design, unit learning-curve fractions, and Tier 4 adaptation
-schedule still require their explicit manifests and qualification.
-Nothing here labels those experiments complete.
+A keeps the original test assays and exchanges only whole training assays.
+Its matched views passed production cache/label/sampler qualification, with
+equal optimizer steps in both arms. B's fixed donor pool cannot exchange any
+whole training component while preserving protein support: every training
+component contains a protein absent from that pool. The separate B whole-assay
+proposal partially removes nine training components and requires the user's
+choice before any B experiment configuration or training. This is an explicit
+exception to the MD's indivisible-unit rule, not a selected design.
+
+The molecule-only cell replaces every protein sequence/mask with the same
+tokenized `G` sequence before deduplication. It preserves initialization,
+parameter count, loss weights and training group metadata; inference scores
+cannot depend on the supplied protein. Content/mask/length invariance, including
+training gradients with matched RNG, and two-rank tiny CPU-DDP updates passed.
+This does not qualify the real four-GPU model or establish a performance result.
+E40 fitting/selection/evaluation and Tier 4 adaptation remain pending. E41 has
+its own prepared manifests and execution path described below.
 
 ## Additional B allocations and checkpoint protection
 
@@ -295,3 +312,15 @@ observations vary with subset size, so this is equal-epoch, not equal-compute,
 comparison. A flat B curve near the full-row regime cannot establish general
 data saturation. Runtime qualification, training, validation-only selection,
 test evaluation and any additional B-allocation comparisons remain required.
+
+`learning_curve_driver.py` executes one prepared job per invocation using the
+primary driver's shared lock, GPU allowlist, runtime qualification, training
+and checkpoint-retention path. It first requires all ten primary full-arm
+fits (six tuning and four confirmations), then reuses them as the 100% endpoint.
+For each smaller fraction, all six A/B tuning jobs must complete before B
+validation selects the common LR and seeds 43/44 are materialized. Confirmation
+configs copy the winning tuning config, changing only seed and output directory.
+Registered B curve fits also export every epoch for the additional fixed
+held-out allocations before retention. Test comparisons remain a later step.
+The primary and curve drivers cannot own the GPU training lock simultaneously;
+an existing incomplete run requires inspection rather than automatic relaunch.

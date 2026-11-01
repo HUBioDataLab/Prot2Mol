@@ -31,7 +31,7 @@
     {
       "id": "Q04",
       "question": "How large is the spread over seeds, over a bootstrap of indivisible split units, and over alternative Split B realizations?",
-      "rationale": "Split realizations built to identical criteria differed in difficulty while preserving method rankings ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)). A sparse learning-rate grid produced a standard deviation 6\u20137 times the seed-to-seed value ([Xin et al. 2022](https://arxiv.org/abs/2209.11379)).",
+      "rationale": "Split realizations built to identical criteria differed in difficulty while preserving method rankings ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)). A sparse learning-rate grid produced a standard deviation 6–7 times the seed-to-seed value ([Xin et al. 2022](https://arxiv.org/abs/2209.11379)).",
       "interpretation": "A realization spread near the 0.21 gap means the gap itself is poorly estimated. Comparisons within one realization, such as model against baseline, stay trustworthy either way.",
       "status": "partial",
       "answer": "Whole-unit intervals are available for the initial B checkpoint and completed cheap baselines, conditional on one fitted seed and allocation. Original splitter seeds 42/43/44 yield identical assignments. Seeded equal-size tie ordering produces two additional dependent validation/test reallocations with unchanged training support; 86592/94118 held-out rows move. Per-allocation validation checkpoint/LR selection and multi-seed performance spread remain pending. These allocations do not measure training-support or split-geometry variation.",
@@ -149,15 +149,15 @@
     {
       "id": "Q18",
       "question": "What is the replicate-based noise ceiling of the chosen metric on each split?",
-      "rationale": "A noise ceiling marks the point where \"any remaining mismatch is then attributable to the noise in the measurements\" ([Nili et al. 2014](https://pmc.ncbi.nlm.nih.gov/articles/PMC3990488)). The replicates that are currently aggregated by median make it computable: split each pair's replicates into halves, score one half against the other with the headline metric, and apply a Spearman\u2013Brown correction.",
-      "interpretation": "If Split B's ceiling is lower, part of the gap is a difference in measurement quality, and the right report is the fraction of the ceiling reached. Two caveats apply. Spearman\u2013Brown assumes parallel measurements ([SAGE](https://sk.sagepub.com/ency/edvol/embed/the-sage-encyclopedia-of-research-design-2e/chpt/spearman-brown-prophecy-formula)), and this research found no ML precedent for a noise ceiling on a grouped rank metric.",
+      "rationale": "A noise ceiling marks the point where \"any remaining mismatch is then attributable to the noise in the measurements\" ([Nili et al. 2014](https://pmc.ncbi.nlm.nih.gov/articles/PMC3990488)). The replicates that are currently aggregated by median make it computable: split each pair's replicates into halves, score one half against the other with the headline metric, and apply a Spearman–Brown correction.",
+      "interpretation": "If Split B's ceiling is lower, part of the gap is a difference in measurement quality, and the right report is the fraction of the ceiling reached. Two caveats apply. Spearman–Brown assumes parallel measurements ([SAGE](https://sk.sagepub.com/ency/edvol/embed/the-sage-encyclopedia-of-research-design-2e/chpt/spearman-brown-prophecy-formula)), and this research found no ML precedent for a noise ceiling on a grouped rank metric.",
       "status": "answered_with_limitations",
       "answer": "Test split-half macro Spearman is A 0.5445 versus B 0.3780; the requested Spearman-Brown heuristic is A 0.7050 versus B 0.5485. Coverage is only 420/8278 (5.07%) and 348/3972 (8.76%) eligible assays, respectively. These conditional heuristics do not establish a ceiling or fraction-of-ceiling result for the entire test set.",
       "evidence": "tier1/replicates/noise_summary.json"
     },
     {
       "id": "Q19",
-      "question": "How does within-group variance of s divide among the y-cluster main effect, the x\u00d7y interaction, and replicate noise?",
+      "question": "How does within-group variance of s divide among the y-cluster main effect, the x×y interaction, and replicate noise?",
       "rationale": "Generalizability theory estimates exactly this interaction component, and it needs replication to separate the interaction from residual noise ([G-theory notes](https://marklhc.quarto.pub/psyc520-2025spring/slides/07-g-theory.html)). Cross-attention can only add value on the interaction share (inference).",
       "interpretation": "A small interaction share means Split A's 0.41 rested largely on y main effects that do not transfer across similarity regions. In that case 0.20 sits near the cold-y limit for any architecture (hypothesis). Because most y are seen about twice, fit the model at the y-cluster level.",
       "status": "answered_with_limits",
@@ -210,7 +210,7 @@
     {
       "id": "Q25",
       "question": "Does the contrastive loss treat other positives of the same x in the batch as negatives?",
-      "rationale": "With group batching and diagonal-only targets, a positive anchor in a 25-item group at 70% positives sees about 16\u201317 labeled positives as negatives (inference). Standard two-tower practice masks only identical candidate IDs ([TFRS](https://www.tensorflow.org/recommenders/api_docs/python/tfrs/tasks/Retrieval)).",
+      "rationale": "With group batching and diagonal-only targets, a positive anchor in a 25-item group at 70% positives sees about 16–17 labeled positives as negatives (inference). Standard two-tower practice masks only identical candidate IDs ([TFRS](https://www.tensorflow.org/recommenders/api_docs/python/tfrs/tasks/Retrieval)).",
       "interpretation": "If co-positives are treated as negatives, the contrastive loss directly opposes the BCE and ranking losses. Masking them, or using multi-positive targets, is the first fix to test.",
       "status": "answered_with_limits",
       "answer": "The reference already hides own-assay co-candidates and masks cross-assay same-protein and duplicate-query-molecule entries. Those observed same-protein negatives are zero in the audit. Global training-known positives can remain negatives when sampled under another protein. Across 512 deterministic epoch-zero batches per split, these are 0.530%/0.714% of protein-to-molecule negative comparisons on A/B (0.437/0.576 per active anchor), and 0.441%/0.657% in the reverse direction. A gradient fixture verifies their negative push. This is a lower bound from any curated training observation above 6, not all biological positives, and does not establish the performance impact of masking them.",
@@ -249,8 +249,8 @@
       "rationale": "Subsampling by observation leaks similar items back into training.",
       "interpretation": "Only subsampling by unit gives interpretable learning curves on Split B.",
       "status": "partial",
-      "answer": "E41 views use nested whole assays on A and whole scaffold-assay components on B, with subset-local binary labels and fixed held-out data. All eight manifests are prepared; actual 10% A/B data loading and sampler checks passed on Atum. Requested 10/25/50/100% are unit fractions: A retains 9.51/25.93/49.85/100% of rows, while B retains 98.86/99.01/99.52/100% because all prefixes include the giant component. The B curve therefore cannot establish broad data saturation. Curve training and the separate matched leak-in/out ablation remain pending.",
-      "evidence": "learning_curves/plan.json; learning_curves/qualified_data_views.json; CONTROLLED_PROTOCOL.md"
+      "answer": "E41 uses nested whole assays on A and whole scaffold-assay components on B, with subset-local binary labels. Eight views and actual 10% A/B production loading/sampler checks are complete. Unit fractions 10/25/50/100% retain A row fractions 9.51/25.93/49.85/100% and B 98.86/99.01/99.52/100%; B therefore cannot establish broad data saturation. E40 A also keeps whole assays and has production-qualified matched views. The fixed B donor pool gives no whole-component exchange with unchanged protein support; a separate proposal partially removes nine training components and remains unselected pending the user choice. All curve/leak performance comparisons remain pending.",
+      "evidence": "learning_curves/plan.json; learning_curves/qualified_data_views.json; leak_design_v2/complete.json; leak_design_v2/views/A/qualified.json; leak_design_assay_proposal_v2/complete.json; CONTROLLED_PROTOCOL.md"
     },
     {
       "id": "Q30",
@@ -340,8 +340,10 @@
       "two_step_kernel_ridge",
       "linear_matrix_filter",
       "kronecker_kernel_ridge",
-      "protein_shuffled"
-    ]
+      "protein_shuffled",
+      "bilinear_completion_3000iter"
+    ],
+    "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results."
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
@@ -759,13 +761,15 @@
       "tier": "Tier 3",
       "key": "leak_in_out_2x2",
       "experiment": "Fixed-test 2x2 leak-in/leak-out design with composition and training-size matching",
-      "status": "pending",
+      "status": "partial",
       "conditional": false,
       "user_confirmed_axes": [
         "molecule-only versus full protein-molecule model",
         "leak-in versus leak-out training"
       ],
-      "design_constraint": "Hold test groups fixed and match training size, assay-size mix, positive rate and replicate counts. Data manifests and qualification remain pending."
+      "design_constraint": "Fixed test groups and matched training size, assay-size mix, BCE-positive rate and replicate counts; version 2 also exactly matches protein support, ranking eligibility and float32 strict contrastive-active counts. B whole-assay proposal requires the user choice before training.",
+      "completed_scope": "A data construction and production cache/label/sampler qualification: 351451 rows per arm, 9261 whole-assay exchanges, 11786 of 16431 test assays exposed, 183 optimizer steps/epoch per arm. Strict B construction has zero usable exchanges; unselected whole-assay proposal has 806 exchanges and partially retains 9 training components. Molecule-only invariance and tiny two-rank CPU-DDP passed; real four-GPU qualification, multi-seed fits and all performance comparisons remain pending.",
+      "evidence": "leak_design_v2/complete.json; leak_design_v2/views/A/qualified.json; leak_design_assay_proposal_v2/complete.json; local artifacts/paired_generalization_molecule_only_cpu_ddp_20261101.json"
     },
     {
       "id": "E41",
@@ -775,7 +779,8 @@
       "status": "partial",
       "conditional": false,
       "registered_design": "Nested whole-unit fractions 0.10/0.25/0.50/1.00, subset seed42 held fixed across optimizer seeds42/43/44; subset-local pair-median binary labels; actual row fractions, target coverage and sampler steps reported. Three LR candidates per A/B fraction; B-selected LR for confirmations. Full-data endpoint reused only after row/label equivalence. All eight views and 18 initial tuning configurations are prepared. Production-data CPU qualification passed on 10% A/B views; all training and performance comparisons remain pending. B fractions retain 98.86-100% of rows, limiting the range of this curve.",
-      "evidence": "learning_curves/preparation_complete.json; learning_curves/qualified_data_views.json"
+      "evidence": "learning_curves/preparation_complete.json; learning_curves/qualified_data_views.json",
+      "execution_implementation": "One-job driver shares the primary training lock/qualification/retention path, requires the ten completed primary full-arm fits as the 100% endpoint, selects a common A/B LR from B validation after all six tuning fits per fraction, and preserves each frozen subset for seed43/44. Registered B curve fits support the additional held-out allocation exports. Local tests passed; no scientific curve fit has run."
     },
     {
       "id": "E42",

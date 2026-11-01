@@ -374,6 +374,41 @@ subset-local binary labels, shared token buffers and the actual sampler. This
 qualifies data loading; it does not establish training or performance results.
 Source: `learning_curves/qualified_data_views.json`.
 
+E40's fixed-test leak comparison has data-construction evidence, not model
+results. Version 2 matches whole-assay protein identity, size, BCE-positive
+count, strict contrastive-active count, replicate histogram and ranking
+eligibility. The first version matched BCE positives but changed contrastive
+actives by -106 on A and +15 in the B proposal; those artifacts remain recorded
+and are superseded for future fitting. Both versions have byte-identical test
+tables, so the additional constraint did not change test selection.
+
+| E40 construction | Training rows per arm | Matched assay exchanges | Test assays exposed to training scaffold relatives |
+|---|---:|---:|---:|
+| A, whole assays | 351,451 | 9,261 | 11,786 of 16,431 |
+| B, whole training components | 1,683,487 | 0 | 0 of 7,724 |
+| B, whole-assay exception proposal, not selected | 1,683,487 | 806 | 2,279 of 7,724 |
+
+A exchanges 14,157 rows and exposes 50,512 test rows to scaffold relatives;
+17,186 test rows have exact molecule overlap. Both arms retain 29,471 training
+assays, 3,682 proteins, 270,755 BCE positives and 267,768 contrastive actives.
+The production cache views passed identity, subset-label and sampler checks:
+35,136 sampler items and 183 optimizer steps per epoch in each arm. Protein
+support is identical between arms, including 8,951 test rows with unseen
+proteins. Performance comparisons must report that common limitation.
+
+B reserves one label-blind whole donor assay from each multi-assay original
+test component and fixes the remaining 7,724 test assays before matching.
+All 570 training components contain at least one protein absent from this donor
+pool, preventing whole-component removal with unchanged protein support for
+this construction. The optional whole-assay proposal exchanges 1,529 rows,
+partially retains nine training components and exposes 5,494 test rows, including
+2,897 exact molecule overlaps. It is awaiting the user's choice; no B exception
+training is authorized by these manifests. Both B arms match 1,143,159 BCE
+positives and 1,123,169 strict contrastive actives. Sources:
+`leak_design_v2/complete.json`, `leak_design_v2/views/A/qualified.json`, and
+`leak_design_assay_proposal_v2/complete.json` on Atum. All recorded artifact
+checksums were verified after the CPU jobs completed.
+
 The original scaffold splitter's seeds 42, 43 and 44 produce identical component
 assignments: the deterministic size-sorted candidate wins all three searches.
 They cannot be counted as three realizations. Randomizing input order among

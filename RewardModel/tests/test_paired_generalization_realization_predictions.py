@@ -100,3 +100,29 @@ def test_complete_allocation_selection_verifies_every_epoch_and_payload(tmp_path
     with pytest.raises(ValueError, match='payload changed'):
         module.verify_validation(run)
     assert json.loads((output/'validation_complete.json').read_text()) == result
+
+
+@pytest.mark.parametrize('damage',[None,'view','plan','regime','unregistered'])
+def test_curve_allocation_exports_require_registered_b_run_and_frozen_view(tmp_path,monkeypatch,damage):
+    from experiments.paired_generalization import realization_predictions as module
+    monkeypatch.setattr(module,'WORK',tmp_path)
+    write_json(tmp_path/'controlled/plan.json',dict(primary='fixture'))
+    directory = tmp_path/'learning_curves'
+    view = directory/'view.json';write_json(view,dict(whole_components=True))
+    config = directory/'config.yaml';config.write_text('fixture: config')
+    plan = dict(primary_plan_sha256=sha256(tmp_path/'controlled/plan.json'),
+                views={'B':{'fraction010':dict(path=str(view),sha256=sha256(view))}})
+    write_json(directory/'plan.json',plan)
+    run = directory/'runs/fixture'
+    metadata = dict(id='fixture',regime='B',fraction=.1,output_dir=str(run),plan_sha256=sha256(directory/'plan.json'),
+                    config_path=str(config),config_sha256=sha256(config))
+    write_json(directory/'jobs/fixture.json',metadata)
+    launch = dict(config_sha256=sha256(config),config={'data':dict(train_view_manifest=str(view),train_view_sha256=sha256(view))})
+    if damage=='view':view.write_text('changed')
+    elif damage=='plan':write_json(tmp_path/'controlled/plan.json',dict(primary='changed'))
+    elif damage=='regime':metadata['regime']='A';write_json(directory/'jobs/fixture.json',metadata)
+    elif damage=='unregistered':run=tmp_path/'unregistered/fixture'
+    if damage:
+        with pytest.raises(ValueError):module.validate_run_registration(run,launch)
+    else:
+        assert module.validate_run_registration(run,launch)['family']=='learning_curves'
