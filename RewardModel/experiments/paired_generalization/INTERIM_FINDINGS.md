@@ -343,6 +343,44 @@ This does not predict the outcome of retraining with fixed temperature.
 Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
+The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
+native validation and fixed training-probe audits for epochs 1 and 2. These
+cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
+2,048-eligible-assay training probe. They reproduce both native headline metrics
+and preserve the Trainer's float32 label semantics.
+
+| A epoch | Validation macro rho | Training-probe macro rho | Validation BCE loss | Ranking loss | Contrastive loss |
+|---|---:|---:|---:|---:|---:|
+| 1 | 0.16488 | 0.16214 | 0.52074 | 2.66708 | 4.86771 |
+| 2 | 0.21244 | 0.22805 | 0.48617 | 2.61290 | 3.32545 |
+
+Validation AUROC rises 0.72635→0.77144 and the contrastive scale rises
+13.5412→14.5521. On the same eligible validation assays, NDCG@1/@3/@5 rises
+from 0.59835/0.66331/0.71098 to 0.62444/0.68500/0.72833. Epoch-2 BCE-logit
+and cosine-only macro Spearman are 0.16579 and 0.14203. Positive temperature
+calibration fitted on that validation set gives T=1.12009 and reduces its
+log-loss from 0.48617 to 0.48436; this is an in-sample fit, with no test transfer.
+
+At epoch 2, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.21156/0.22073/0.13285 (5,405/2,402/190 eligible assays).
+Restricting to unseen-scaffold rows within assays instead gives 0.17447 on
+1,608 eligible assays; these cohorts differ. Fixed composition weighting
+changes A common-support validation macro from 0.21279 to 0.20967. This
+adjustment uses the B validation label mix, not B predictions or test scores.
+
+These two epochs establish early improvement, not a final optimum or an
+overfitting turning point. Training-probe intervals are descriptive. All
+unit intervals condition on this single fitted trajectory; full-horizon,
+post-selection test, seed and matched B comparisons remain pending, as do A
+directional/fixed-temperature contrastive and representation analyses.
+Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
+on Atum, including `trajectory.json`, per-assay metric tables and
+`verification.json`. Independent average-rank calculations from the native
+prediction arrays reproduced all 110,874 per-assay/scorer correlations,
+including undefined cases, to 1e-14. Brute-force pairs reproduced 108 sampled
+noise-band/group/scorer combinations; direct weighted means reproduced both
+composition-standardized validation scores. All source/artifact hashes passed.
+
 ## Protein coverage in the B test set
 
 All 1,723 test proteins have training observations. The number of distinct
