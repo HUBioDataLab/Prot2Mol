@@ -109,6 +109,12 @@ def audit_snapshot(manifest, expected, fingerprint, component_map, output, *, pr
         metrics[scorer].update(eligible_groups=int(eligible.sum()),
             eligible_defined_fraction=float(table.loc[eligible,'spearman'].notna().mean()) if eligible.any() else None,
             matched_eligible_ndcg={str(k):float(table.loc[eligible,f'ndcg_at_{k}_linear'].mean()) if eligible.any() else None for k in (1,3,5)})
+        for name in ('unit_bootstrap_all_defined','unit_bootstrap_original_eligible'):
+            metrics[scorer][name]['interpretation'] = (
+                f'Whole {"assays" if regime == "A" else "scaffold-assay components"}; '
+                + ('descriptive resampling of the fixed training probe, not held-out generalization or training-seed uncertainty.'
+                   if prefix == 'train_eval' else
+                   'percentile interval conditional on these held-out units, not split-realization or training-seed uncertainty.'))
     rank = metrics['ranking_score']
     check_native_metric(rank['original_eligible_macro_spearman'],record['metrics'][f'{prefix}_macro_spearman'],'macro Spearman')
     check_native_metric(rank['eligible_defined_fraction'],record['metrics'][f'{prefix}_spearman_defined_fraction'],'defined fraction')

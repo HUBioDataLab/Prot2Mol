@@ -54,6 +54,7 @@ def test_actual_native_snapshot_audit_matches_independent_metrics_and_calibrates
         assert result['calibration']['validation_fit_logloss_after'] <= result['calibration']['validation_logloss_before']+1e-10
     else:
         assert 'fixed eligible-assay probe' in result['probe_limit']
+        assert 'descriptive resampling of the fixed training probe' in result['metrics']['ranking_score']['unit_bootstrap_original_eligible']['interpretation']
     assert len(result['noise_bands']) == 6
     assert {p.name:sha256(p) for p in path.parent.iterdir()} == before
     assert audit.audit_snapshot(path,frame,examples._fingerprint,unit_map,tmp_path/'audit',
