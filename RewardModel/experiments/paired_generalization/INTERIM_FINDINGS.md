@@ -28,8 +28,13 @@ labels as the Trainer does gives 0.1768796098 across 3,972 assays, exactly match
 the native test result. Label precision fully explains this discrepancy; it is
 not evidence of an inference-batch effect. The original post-hoc metric,
 noise-band and scorer-agreement reports retain their raw-label semantics.
-Separate float32-label analyses are being prepared, without changing weights,
-predictions or checkpoint selection. Source:
+Separate float32-label analyses are complete, without changing weights,
+predictions or checkpoint selection. All 93 export/scorer comparisons match the
+production metric's eligible groups and per-assay correlations to 1e-14;
+the selected test macro also matches the historical Trainer result exactly.
+The corrected reports are in `metrics_float32/`, `noise_bands_float32/` and
+`scorer_agreement_float32/`. Sources:
+`tier1/label_precision_complete.json`,
 `tier1/supervision_composition_v2/complete.json:initial_reference_label_precision`.
 
 | Test composition | A | B |
@@ -66,7 +71,8 @@ For the selected B checkpoint, ordering accuracy was 0.5892 without a noise band
 Those accuracies have different denominators. The all-pairs C−D concordance
 decreased from 0.1683 to 0.1471 and 0.1205 as more pairs became ties. A larger
 filtered accuracy therefore does not mean the model itself improved.
-Sources: `tier1/metrics/best_test.json`, `tier1/noise_bands/`.
+These noise-band values are unchanged after the label-precision correction.
+Sources: `tier1/metrics_float32/best_test.json`, `tier1/noise_bands_float32/`.
 
 Six categorical variance-component fits were identifiable algebraically, but
 several fitted noise/residual/interaction components reached the nonnegative
@@ -212,7 +218,9 @@ capture the launch commit and source hashes before fitting.
 ## Agreement between scoring pathways
 
 All 31 saved B prediction exports were scored for within-assay agreement using
-average ranks, including tied predictions. On the same 3,969 eligible validation
+Trainer-compatible label precision and average ranks, including tied predictions.
+The correction preserves the validation agreement values below.
+On the same 3,969 eligible validation
 assays, every pathway pair was defined at all three epochs below:
 
 | Validation scorer pair | Epoch 1 | Best checkpoint, epoch 6 | Epoch 15 |
@@ -232,7 +240,54 @@ On the fixed training probe, ranking–BCE agreement increases from 0.6452 to
 of predictions, not gradient measurements or proof of objective interference.
 The intervals condition on one fitted seed and scaffold realization. Q31 remains
 partial until the matched A trajectory is available. Source:
-`tier1/scorer_agreement/complete.json` and per-assay trajectory tables.
+`tier1/scorer_agreement_float32/complete.json` and per-assay trajectory tables.
+
+## Loss and ranking trajectories
+
+In the fresh B run, validation BCE loss reaches its minimum at epoch 2 (0.44531),
+ranking loss at epoch 5 (2.79392), and contrastive/total loss at epoch 15
+(5.83497/6.68790). At epoch 15, BCE is 0.48300 and ranking loss is 2.92871.
+Classification AUROC nevertheless improves from 0.73865 at epoch 2 to 0.77202
+at epoch 15. Decreasing contrastive loss therefore masks worsening ranking loss
+in the aggregate; the different terms do not share one turning point.
+
+The fixed 2,048-assay training probe's eligible macro Spearman rises from
+0.18336 at epoch 1 to 0.53189 at epoch 15. Validation peaks at 0.18460 in epoch 6
+and ends at 0.17561. Later improvements on the training probe transfer poorly
+in this run. These observations do not isolate encoder drift, loss conflict or
+another cause, and matched A/multi-seed comparisons remain pending.
+
+The learned logit scale rises from 13.5999 to 18.4685 to 22.5461 at epochs
+1/6/15. Validation contrastive loss falls from 8.54974 to 6.00606 to 5.83497;
+rescoring the same representations at fixed scale 13 gives 8.52970, 5.82207 and
+5.55379. Candidate identities are fixed throughout, including in the original
+validation procedure. Sharpening raises loss relative to fixed-scale rescoring,
+but there is no sustained total contrastive-loss rise in this fresh run.
+This does not predict the outcome of retraining with fixed temperature.
+Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
+`tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
+
+## Protein coverage in the B test set
+
+All 1,723 test proteins have training observations. The number of distinct
+training assays per test protein ranges from 1 to 1,303, with median 24.
+Weighting proteins by their number of test assays gives median 127 instead.
+The complete target list and counts are saved in `tier1/target_coverage/test_targets.parquet`.
+
+| Training assays for the protein | Eligible test assays | Test macro Spearman | Whole-component interval |
+|---|---:|---:|---:|
+| 1 | 71 | 0.0539 | −0.0701 to 0.1748 |
+| 2–5 | 149 | 0.0849 | 0.0018 to 0.1716 |
+| 6–20 | 311 | 0.1829 | 0.1324 to 0.2345 |
+| 21–100 | 1,184 | 0.1626 | 0.1350 to 0.1891 |
+| >100 | 2,257 | 0.1935 | 0.1710 to 0.2148 |
+
+Every eligible assay has defined predictions. The strata reconstruct the
+selected checkpoint's overall test macro exactly. Low-support point estimates
+are lower and uncertain; the pattern is not monotone across all bins. Assay
+composition also differs across bins, so this is not a causal coverage effect.
+Intervals condition on one fitted model and split. Source:
+`tier1/target_coverage/complete.json` and per-assay support table.
 
 ## Sampling and contrastive negatives
 
