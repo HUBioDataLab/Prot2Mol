@@ -43,6 +43,62 @@ noiseless data, absent biological interactions or an architectural ceiling.
 Direct marginal and replicate-contrast checks accompany each fit.
 Source: `tier1/variance/`; method: [REHE](https://pmc.ncbi.nlm.nih.gov/articles/PMC8604792/).
 
+An assay-balanced sensitivity fit changes the estimated within-assay interaction
+contribution from 0 to 0.1159 pChEMBL² on A test and from 0.1716 to 0.0568 on B
+test. For B training, balancing improves fitted marginal variance from 3.9844
+to 2.0749 (observed 1.9578), but the fitted measurement-noise variance remains
+far below direct replicate disagreement. Thus Q19 has no stable numerical
+partition under this additive constant-variance model. These fits cannot justify
+an interaction ceiling or choosing an architecture from a small interaction share.
+Raw-measurement noise also cannot be read as the uncertainty of a median label.
+
+## Baseline ladder
+
+All results below use frozen pretrained features or entity identities, training
+measurements only, and validation-only selection. A uses partition-local binary
+labels; continuous labels are unchanged. The Spearman eligibility rule is the
+original n≥3 and label span≥0.5. Undefined correlations are excluded, with their
+coverage reported explicitly.
+
+| Baseline | A test macro Spearman | Defined eligible assays | B test macro Spearman | Defined eligible assays |
+|---|---:|---:|---:|---:|
+| Molecule-only linear ridge | 0.0775 | 100% | 0.0624 | 100% |
+| Same-protein scaffold-nearest lookup | 0.2572 | 79.72% | undefined | 0% |
+| Independent per-protein ridge | 0.2419 | 99.83% | 0.0726 | 99.52% |
+| Two-step ridge | 0.1034 | 100% | 0.0488 | 100% |
+| Identity-based linear matrix filter | 0.4207 | 93.32% | undefined | 0% |
+
+The molecule-only and independent-task models each test five regularization
+values per split. Two-step ridge tests the 25 combinations of the two sides'
+five values. It fits measured pairs in stage one, then regresses those fitted
+functions on protein features. This is an explicit sparse-data adaptation, not
+a complete-matrix formula applied to artificial zero labels. Sources:
+`tier2/linear/`, `tier2/independent_task_ridge/`, `tier2/two_step_ridge/`.
+
+The lookup uses the actual split relation: exact scaffold identity, with all
+acyclic molecules sharing one scaffold node. Similarity ties are averaged over
+unique training molecules measured for the query protein. On B every nearest
+similarity is zero, so it reduces to a protein prior. Its within-assay ordering
+accuracy is 0.5. Source: `tier2/nearest_scaffold_lookup/`.
+
+The matrix filter uses the smoother kernel
+`(1 + same_protein) * (1 + same_molecule)`, fitted only to observed measurements
+with their original frequencies. Five ridge values are selected on validation.
+Its A test bootstrap interval is [0.4111, 0.4304], conditional on the held-out
+assays and the 93.32% defined coverage. On B, unseen molecules receive only a
+protein-specific score: pairwise ordering accuracy is 0.5. A strong A result
+is therefore possible without learning transferable molecular features. This
+does not estimate the causal leakage contribution to a neural model's gap.
+Source: `tier2/linear_matrix_filter/`; method family:
+[Stock et al.](https://arxiv.org/html/1803.01575v1).
+
+The protein-only linear BCE model has validation/test AUROC 0.6687/0.6696 on A
+and 0.6452/0.6493 on B. The lookup's B protein-prior scores have validation/test
+AUROC 0.6915/0.7060 while carrying no within-assay order. Classification can
+therefore reward target base rates. Comparing these AUCs does not identify a
+fraction of the full model's signal attributable to those priors; Q32 still
+needs the matched deep-model comparison on A.
+
 ## Distribution shift
 
 A fixed logistic classifier used group descriptors, with whole units held out
