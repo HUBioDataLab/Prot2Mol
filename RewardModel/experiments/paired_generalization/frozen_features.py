@@ -209,15 +209,57 @@ def combine(workers):
     write_json(DESTINATION / "complete.json", results)
 
 
+def driver():
+    import fcntl
+    import sys
+
+    DESTINATION.mkdir(parents=True, exist_ok=True)
+    lock = (DESTINATION / "driver.lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if (DESTINATION / "complete.json").exists():
+        print("Frozen features already complete", flush=True)
+        return
+    write_json(DESTINATION / "status.json", {"phase": "preparing_entities", "driver_pid": os.getpid()})
+    prepare()
+    devices = subprocess.check_output(["nvidia-smi", "-i", "0,2,5,6", "--query-gpu=uuid,memory.used",
+                                       "--format=csv,noheader,nounits"], text=True).splitlines()
+    device_rows = [row.strip().split(",") for row in devices]
+    if len(device_rows) != 4 or any(int(row[1].strip()) > 1024 for row in device_rows):
+        raise RuntimeError("Authorized GPUs are not all free; no feature workers launched")
+    environment = os.environ.copy()
+    environment.update(HF_HOME=str(ROOT / ".hf_cache"), XDG_CACHE_HOME=str(ROOT / ".cache"),
+        TORCH_HOME=str(ROOT / ".cache/torch"), TRITON_CACHE_DIR=str(ROOT / ".cache/triton"),
+        CUDA_CACHE_PATH=str(ROOT / ".cache/cuda"), TMPDIR=str(ROOT / ".cache/paired_generalization_tmp"),
+        TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS="4", MKL_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4")
+    processes, handles = [], []
+    for index, row in enumerate(device_rows):
+        env = {**environment, "CUDA_VISIBLE_DEVICES": row[0].strip()}
+        handle = (DESTINATION / f"worker{index}.log").open("a")
+        handles.append(handle)
+        processes.append(subprocess.Popen([sys.executable, "-u", str(Path(__file__)), "worker", "--worker", str(index),
+                                           "--workers", "4"], stdout=handle, stderr=subprocess.STDOUT, env=env))
+    write_json(DESTINATION / "status.json", {"phase": "extracting", "driver_pid": os.getpid(),
+        "worker_pids": [p.pid for p in processes], "gpu_uuids": [row[0].strip() for row in device_rows]})
+    print(f"Feature worker PIDs: {[p.pid for p in processes]}", flush=True)
+    codes = [process.wait() for process in processes]
+    for handle in handles:
+        handle.close()
+    if any(codes):
+        write_json(DESTINATION / "status.json", {"phase": "failed", "worker_exit_codes": codes})
+        raise RuntimeError(f"Feature worker failed: {codes}")
+    combine(4)
+    write_json(DESTINATION / "status.json", {"phase": "complete", "worker_exit_codes": codes})
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["prepare", "worker", "combine"])
+    parser.add_argument("action", choices=["prepare", "worker", "combine", "driver"])
     parser.add_argument("--worker", type=int, default=0)
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if ROOT != Path("/home/atabey/Prot2Mol"):
         raise RuntimeError("Runtime is restricted to the authorized Atum project")
-    {"prepare": prepare, "worker": lambda: worker(args.worker, args.workers), "combine": lambda: combine(args.workers)}[args.action]()
+    {"prepare": prepare, "worker": lambda: worker(args.worker, args.workers), "combine": lambda: combine(args.workers), "driver": driver}[args.action]()
 
 
 if __name__ == "__main__":
