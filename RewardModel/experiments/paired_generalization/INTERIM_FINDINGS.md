@@ -422,13 +422,46 @@ that split cannot localize the change across different similarity strata.
 Across A epochs 1→4, BCE falls for shared/mixed/unseen-scaffold assays
 (0.52598→0.43690 / 0.51247→0.48377 / 0.54630→0.53779); ranking improves in
 all three from epoch 1. This early prefix does not establish later behavior.
-Q11 remains partial pending the complete matched trajectories and localization
-of native listwise and contrastive losses. Source:
+Q11 remains partial pending the complete matched trajectories and remaining
+contrastive analysis. Source:
 `tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json}`.
 All 19 snapshots reproduce native aggregate BCE within 1e-5 and headline rho
 within 1e-14. Independent Bernoulli log-probability calculations verify all
 stratum BCE values; 204,924 group correlations agree with the previously
 verified metric tables, including undefined cases. No test predictions were read.
+
+The native listwise-loss localization now covers all 15 initial B epochs and
+A epochs 1–5. It preserves the original prediction order, three deterministic
+partitions, complete-assay eligibility, top-position/margin weights and
+zero-loss lists. The loss averages bounded lists, so a large assay contributes
+more than one list; strata below still use the complete assay's size.
+
+| B assay size | Lists per partition | Ranking-loss change, 5→15 | Paired component interval |
+|---|---:|---:|---:|
+| 3 | 329 | +0.03489 | [−0.00721, 0.07964] |
+| 4–10 | 1,330 | +0.07428 | [0.04723, 0.10139] |
+| 11–25 | 1,806 | +0.06589 | [0.04007, 0.09489] |
+| >25 | 6,476 | +0.17152 | [0.11978, 0.22901] |
+
+Overall ranking loss rises 2.79392→2.92871 from its minimum at epoch 5, a
+change of 0.13480 with interval [0.09921, 0.17574]. All eligible size bins have
+positive point changes. Using the same epochs 6→15 as the macro-Spearman
+comparison, >25-item assays account arithmetically for 80.2% of the net
+ranking-loss increase, and three-item assays for 0.9%. The former carry 65.1%
+of native list weight but 27.4% of eligible assays; the latter carry 3.3% of
+list weight but 8.3% of assays. Thus loss and macro-rank deterioration localize
+differently. This descriptive accounting does not establish that changing the
+normalization improves generalization; that needs the controlled training arm.
+All intervals retain the single-fit, observed-endpoint and multiplicity limits above.
+
+A's ranking loss falls 2.66708→2.50691 over epochs 1→5, decreasing in every
+eligible size bin and in all three scaffold-support classes. Its full-horizon
+turning points remain unknown. Source:
+`tier1/ranking_localization/39128f4740d630d4/{complete.json,verification.json}`.
+The 20 reconstructed global losses differ from their native values by at most
+3.85e-7. Direct production-loss calls on 260 real sampled lists agree within
+4.77e-7; all 680,445 list descriptors and source/output hashes were verified.
+No test predictions, model weights or GPUs were used.
 
 ## Protein coverage in the B test set
 
