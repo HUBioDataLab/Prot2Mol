@@ -101,6 +101,27 @@ protocol remain prerequisites to model fitting. Original validation labels were
 already used for base-model selection, so these are conditional probes on the
 existing benchmark, not an independent new test population.
 
+`adaptation_views.py` adds a separate CPU preparation step for those frozen
+memberships. It packs only row indices and subset-local binary labels; all
+protein/molecule token buffers remain in the existing caches. The loader checks
+the design, primary plan, raw source bytes, actual token shards, example order
+and float32 continuous labels, then recomputes every view's labels
+from raw-precision pair medians in that exact support/query set (positive at
+median pChEMBL≥6). Within-unit tasks remain separate fits, with a fixed query
+view and unchanged k=0 baseline.
+It records feasible and rank-evaluable cohorts separately; paired comparisons
+across k must use their common unit identities and identical query views.
+Unsupported budgets do not borrow support or query assays from other units.
+
+Run `CUDA_VISIBLE_DEVICES='' ACCELERATE_USE_CPU=true .venv/bin/python
+RewardModel/experiments/paired_generalization/adaptation_views.py` on Atum only
+after deploying the reviewed code. Outputs are under `tier4/adaptation_views/`.
+This command starts no fitting or inference. Local tests cover disk-cache
+alignment, subset-label isolation, shared token buffers, native dataset
+consumers, source/artifact tampering and both-regime preparation. Production
+data-view execution, adaptation protocol selection and runtime qualification
+are still required; the Tier-3 gate remains in force.
+
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,
 unique-protein and unique-molecule views, capped at 25,600 each. The latter two
