@@ -21,6 +21,17 @@ enter this headline metric. Constant label groups are excluded; tied ranks are
 averaged; constant predictions give undefined correlations and reduce coverage.
 Source: `reward_model/training/evaluation.py`.
 
+The original prediction exports retained raw float64 labels, while the Trainer
+evaluates float32 tensor values. On the identical saved best-test predictions,
+raw labels give macro Spearman 0.1770244006 across 3,971 eligible assays; rounding
+labels as the Trainer does gives 0.1768796098 across 3,972 assays, exactly matching
+the native test result. Label precision fully explains this discrepancy; it is
+not evidence of an inference-batch effect. The original post-hoc metric,
+noise-band and scorer-agreement reports retain their raw-label semantics.
+Separate float32-label analyses are being prepared, without changing weights,
+predictions or checkpoint selection. Source:
+`tier1/supervision_composition_v2/complete.json:initial_reference_label_precision`.
+
 | Test composition | A | B |
 |---|---:|---:|
 | Assays | 16,431 | 9,578 |
@@ -73,6 +84,45 @@ far below direct replicate disagreement. Thus Q19 has no stable numerical
 partition under this additive constant-variance model. These fits cannot justify
 an interaction ceiling or choosing an architecture from a small interaction share.
 Raw-measurement noise also cannot be read as the uncertainty of a median label.
+
+## Ranking eligibility and binary supervision
+
+Using the current partition-local binary labels:
+
+| Partition | Assays | Headline eligible | All-positive assays | All-negative assays | Same-side labels among headline-eligible assays |
+|---|---:|---:|---:|---:|---:|
+| A train | 131,450 | 48.59% | 63,190 | 28,715 | 44.50% |
+| A validation | 16,431 | 48.67% | 8,069 | 3,537 | 45.28% |
+| A test | 16,431 | 50.38% | 7,791 | 3,524 | 43.63% |
+| B train | 145,454 | 49.64% | 69,799 | 30,457 | 43.87% |
+| B validation | 9,280 | 42.77% | 4,683 | 2,443 | 50.09% |
+| B test | 9,578 | 41.47% | 4,919 | 2,664 | 54.20% |
+
+Under headline precision, most training eligibility exclusions come from assays with fewer than three items:
+62,516 on A and 67,994 on B. A further 5,067/5,259 assays have enough items
+but insufficient float32 label span. Eligible training assays have median size
+11 versus 1 for ineligible assays on both splits. Mean within-assay variance is
+0.5360 versus 0.0863 on A and 0.5492 versus 0.0918 on B. Target composition also
+differs: the eligible/ineligible target-frequency distributions have total
+variation 0.2904/0.2908, and 3,420/3,393 of 7,873 training targets have no eligible
+ranking assay. These are descriptive selection differences. The headline metric
+uses the same nominal eligibility rule, so it does not directly score most
+excluded assays. The sampler reads float64 cached labels; headline evaluation
+casts labels to float32. There are two training-assay inclusion disagreements
+on A and one on B at the exact span boundary. The sampler therefore has 72,202
+eligible B training assays, versus 72,201 under headline precision. A's two
+disagreements cancel in the total count. These tiny boundary effects are kept
+separate from the broad size/variance selection described above.
+
+Binary labels give no ordering preference between members with identical labels.
+This affects 54.20% of ranking-eligible B test assays, but does not prove BCE
+cannot help the shared representation; the loss ablations must test that.
+For the threshold at pChEMBL 6, 35.58%/32.21% of A/B test rows have their
+partition-local pair median within the training replicate-RMS band
+(0.78055/0.76605). This is threshold proximity, not a calibrated probability of
+label error or uncertainty interval for median labels.
+Source: `tier1/supervision_composition_v2/complete.json`, with six-partition group,
+target and unit tables. This supplements the earlier original-label audit.
 
 ## Baseline ladder
 
@@ -213,6 +263,48 @@ skew alone does not establish a learned popularity shortcut. Sources:
 `tier1/sampling/{A,B}/complete.json`, with per-batch and per-protein tables.
 
 ## Distribution shift
+
+The actual indivisible units have markedly different size distributions:
+
+| Partition | Unit definition | Units | Median rows | 99th percentile rows | Maximum rows |
+|---|---|---:|---:|---:|---:|
+| A train | assay | 131,450 | 3 | 122.0 | 49,020 |
+| A validation | assay | 16,431 | 3 | 143.4 | 1,409 |
+| A test | assay | 16,431 | 3 | 137.7 | 1,147 |
+| B train | scaffold–assay component | 570 | 6 | 620.0 | 1,661,628 |
+| B validation | scaffold–assay component | 4,032 | 5 | 431.4 | 7,382 |
+| B test | scaffold–assay component | 4,034 | 5 | 447.4 | 5,683 |
+
+A randomly reserves one training anchor assay per target/sequence, then randomly
+assigns the remaining whole assays; it does not preferentially select large
+assays. B forces its giant component and 569 target-coverage rescue components
+into training, then balances the remaining whole units between validation/test
+by row count and positive rate. The giant alone supplies 98.70% of B training
+rows. B assignment therefore is not random sampling of comparable training and
+held-out units. These counts establish construction asymmetry, not a numerical
+causal share of the performance gap. Sources: `tier1/supervision_composition_v2/`,
+the original split manifests, `random_assay.py`, and `scaffold_component_split.py`.
+
+The E41 whole-unit learning-curve data are prepared, with no fits performed:
+
+| Requested unit fraction | A rows retained | B rows retained | A binary labels changed from full-training labels | B binary labels changed |
+|---|---:|---:|---:|---:|
+| 10% | 9.51% | 98.86% | 2,141 | 0 |
+| 25% | 25.93% | 99.01% | 4,247 | 0 |
+| 50% | 49.85% | 99.52% | 5,732 | 0 |
+| 100% | 100% | 100% | 0 | 0 |
+
+Each subset contains whole units from a fixed nested permutation. A binary-label
+change means medians were correctly recomputed using only included training
+measurements, not evidence that a model improved. At 10% units, A retains targets
+covering 93.46% of test assays; B retains 100% target coverage at every fraction.
+B's selected prefixes all contain the giant component, so these curves cover
+a narrow 98.86–100% row regime. A flat B curve would not establish broad data
+saturation. Source: `learning_curves/plan.json` and the eight pinned view manifests.
+Production-data CPU checks passed for the 10% A/B views, including row identities,
+subset-local binary labels, shared token buffers and the actual sampler. This
+qualifies data loading; it does not establish training or performance results.
+Source: `learning_curves/qualified_data_views.json`.
 
 The original scaffold splitter's seeds 42, 43 and 44 produce identical component
 assignments: the deterministic size-sorted candidate wins all three searches.

@@ -16,8 +16,8 @@
       "rationale": "Spearman is undefined for constant groups. The median of an even number of replicates can create exact ties. An eligibility rule that differs from the training rule scores pairs the loss ignored.",
       "interpretation": "If the eligible fraction or tie rate differs between the two test partitions, part of the gap is compositional rather than a failure to generalize.",
       "status": "answered",
-      "answer": "The actual headline requires n>=3 and pChEMBL span>=0.5, excludes constant labels, and uses average ranks for exact ties. Size-one and size-two assays are excluded. Constant predictions produce undefined rho, excluded with defined coverage recorded. A test has 8278/16431 eligible assays (50.38%); B has 3972/9578 (41.47%).",
-      "evidence": "RewardModel/reward_model/training/evaluation.py; tier1/data/composition.json; tier2/*/{A,B}/test/metrics.json"
+      "answer": "The actual headline requires n>=3 and pChEMBL span>=0.5, excludes constant labels, and uses average ranks for exact ties. Size-one and size-two assays are excluded. Constant predictions produce undefined rho, excluded with defined coverage recorded. A test has 8278/16431 eligible assays (50.38%); B has 3972/9578 (41.47%). Headline labels are float32 tensor values promoted to Python float. The raw exported float64 B test labels instead admit 3971 assays; correcting that precision reproduces the native test macro exactly (0.1768796098004701) on identical saved scores.",
+      "evidence": "RewardModel/reward_model/training/evaluation.py; tier1/data/composition.json; tier2/*/{A,B}/test/metrics.json; tier1/supervision_composition_v2/complete.json"
     },
     {
       "id": "Q03",
@@ -107,7 +107,9 @@
       "question": "What is the size distribution of indivisible units in each partition? Were units assigned at random, or did large units default to training?",
       "rationale": "Single-linkage grouping lets a few \"bridge\" members merge otherwise dissimilar groups, and larger families fail to split more often ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)).",
       "interpretation": "A giant training unit alongside small, peripheral test units means Split B's test set was selected for remoteness. Non-random assignment also breaks the exchangeability between validation and test units that checkpoint selection relies on.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "A uses 131450/16431/16431 whole-assay units in train/val/test, median size 3 in all, maxima 49020/1409/1147. It randomly reserves one anchor assay per target-sequence then randomly allocates remaining assays. B has 570/4032/4034 scaffold-assay components, median sizes 6/5/5, maxima 1661628/7382/5683. Its giant and 569 target-coverage rescue units are forced into training; the rest are balanced by rows and positive rate into val/test. The giant supplies 98.70% of B training rows. This is not exchangeable random assignment across train and held-out units and does not by itself quantify a causal performance penalty.",
+      "evidence": "tier1/supervision_composition_v2/complete.json and *_units.parquet; original split manifests; reward_model/training/random_assay.py and scaffold_component_split.py"
     },
     {
       "id": "Q15",
@@ -162,7 +164,9 @@
       "question": "Why do only half the groups support ranking supervision, and does that half differ in size, variance or x?",
       "rationale": "The ranking head learns from a subset that may not represent the evaluation groups.",
       "interpretation": "A systematic difference means the ranking head is trained on a different distribution from the one it is evaluated on, even on Split A.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "The actual float64-cache sampler admits 63867/131450 A and 72202/145454 B training assays (48.59%/49.64%). Most exclusions are n<3 (62516/67994); another 5067/5258 have insufficient span. Headline evaluation uses float32 labels and admits 63867/72201: two A assay memberships differ but cancel in the count, and one B membership differs at the span boundary. Under headline precision, eligible versus ineligible training assays have median size 11 versus 1, mean variance 0.5360 versus 0.0863 on A and 0.5492 versus 0.0918 on B. Target-frequency total variation is 0.2904/0.2908; 3420/3393 of 7873 training targets have no headline-eligible assay. These are systematic composition differences. Evaluation uses the same nominal n>=3/span>=0.5 rule, with the small precision discrepancy documented separately; most excluded assays are also excluded from the headline metric.",
+      "evidence": "tier1/supervision_composition_v2/complete.json and six-partition *_groups.parquet/*_targets.parquet"
     },
     {
       "id": "Q22",
@@ -176,7 +180,9 @@
       "question": "How many groups have all members on one side of the threshold, and how far is the threshold from the replicate noise?",
       "rationale": "BCE carries no within-group ordering information for items on the same side of the threshold.",
       "interpretation": "If many groups are all-positive, BCE contributes little to the ranked target and mostly shapes calibration and x priors.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "With current partition-local binary labels, A all-positive/all-negative assay counts are train 63190/28715, val 8069/3537, test 7791/3524; B counts are train 69799/30457, val 4683/2443, test 4919/2664. Same-side labels occur in 43.63%/54.20% of ranking-eligible A/B test assays, so BCE has no within-assay label-order preference there. At threshold6, 35.58%/32.21% of test rows have pair medians within the training raw-replicate RMS band 0.78055/0.76605. This proximity is not median-label uncertainty or proof that BCE cannot help shared features; loss-subset performance remains pending.",
+      "evidence": "tier1/supervision_composition_v2/complete.json; INTERIM_FINDINGS.md six-partition counts"
     },
     {
       "id": "Q24",
@@ -228,7 +234,9 @@
       "question": "Are subsets for ablations and learning curves drawn by indivisible unit?",
       "rationale": "Subsampling by observation leaks similar items back into training.",
       "interpretation": "Only subsampling by unit gives interpretable learning curves on Split B.",
-      "status": "pending"
+      "status": "partial",
+      "answer": "E41 views use nested whole assays on A and whole scaffold-assay components on B, with subset-local binary labels and fixed held-out data. All eight manifests are prepared; actual 10% A/B data loading and sampler checks passed on Atum. Requested 10/25/50/100% are unit fractions: A retains 9.51/25.93/49.85/100% of rows, while B retains 98.86/99.01/99.52/100% because all prefixes include the giant component. The B curve therefore cannot establish broad data saturation. Curve training and the separate matched leak-in/out ablation remain pending.",
+      "evidence": "learning_curves/plan.json; learning_curves/qualified_data_views.json; CONTROLLED_PROTOCOL.md"
     },
     {
       "id": "Q30",
@@ -243,7 +251,7 @@
       "rationale": "This quantifies the stated mismatch between ranking order and contrastive geometry.",
       "interpretation": "Near-zero within-group correlation between contrastive similarity and s means the contrastive branch encodes cross-group compatibility, not within-group order.",
       "status": "partial",
-      "completed_scope": "All 15 B validation/training-probe epochs plus selected test. Validation ranking-BCE agreement falls 0.6798 to 0.6017 while ranking-cosine rises 0.0743 to 0.2341. This is not general scorer divergence or proof of gradient conflict. Matched A trajectory remains pending.",
+      "completed_scope": "All 15 B validation/training-probe epochs plus selected test. Validation ranking-BCE agreement falls 0.6798 to 0.6017 while ranking-cosine rises 0.0743 to 0.2341. This is not general scorer divergence or proof of gradient conflict. Matched A trajectory remains pending. These initial post-hoc values used raw exported labels; a separate Trainer-float32-label analysis is pending.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/scorer_agreement/complete.json on Atum"
     },
     {
@@ -737,9 +745,10 @@
       "tier": "Tier 3",
       "key": "unit_learning_curves",
       "experiment": "Subsample complete indivisible units and report realized sizes",
-      "status": "pending",
+      "status": "partial",
       "conditional": false,
-      "registered_design": "Nested whole-unit fractions 0.10/0.25/0.50/1.00, subset seed42 held fixed across optimizer seeds42/43/44; subset-local pair-median binary labels; actual row fractions, target coverage and sampler steps reported. Three LR candidates per A/B fraction; B-selected LR for confirmations. Full-data endpoint reused only after row/label equivalence. Data preparation and all performance comparisons remain pending."
+      "registered_design": "Nested whole-unit fractions 0.10/0.25/0.50/1.00, subset seed42 held fixed across optimizer seeds42/43/44; subset-local pair-median binary labels; actual row fractions, target coverage and sampler steps reported. Three LR candidates per A/B fraction; B-selected LR for confirmations. Full-data endpoint reused only after row/label equivalence. All eight views and 18 initial tuning configurations are prepared. Production-data CPU qualification passed on 10% A/B views; all training and performance comparisons remain pending. B fractions retain 98.86-100% of rows, limiting the range of this curve.",
+      "evidence": "learning_curves/preparation_complete.json; learning_curves/qualified_data_views.json"
     },
     {
       "id": "E42",

@@ -9,9 +9,11 @@ import pandas as pd
 from scipy.stats import rankdata
 
 if __package__:
+    from .label_precision import read_predictions
     from .analyze_predictions import unit_bootstrap
     from .run import WORK, ROOT, sha256, write_json
 else:
+    from label_precision import read_predictions
     from analyze_predictions import unit_bootstrap
     from run import WORK, ROOT, sha256, write_json
 
@@ -76,9 +78,9 @@ def matched_endpoint_changes(first, last):
     return changes
 
 
-def main():
+def main(trainer_labels=False):
     base = WORK/'tier1'
-    destination = base/'scorer_agreement'
+    destination = base/('scorer_agreement_float32' if trainer_labels else 'scorer_agreement')
     destination.mkdir(parents=True, exist_ok=True)
     units = pd.read_parquet(base/'data/assay_units.parquet')
     if units.assay_id.duplicated().any():
@@ -92,7 +94,7 @@ def main():
         info = json.loads(marker.read_text())
         name, split = info['name'], info['split']
         source = marker.parent/'predictions.parquet'
-        frame = pd.read_parquet(source)
+        frame, precision = read_predictions(source, trainer_labels)
         if len(frame) != info['rows'] or not np.array_equal(frame.row_index, np.arange(len(frame))):
             raise ValueError('Incomplete or unordered prediction export')
         ids = frame[['group_id', 'target_chembl_id', 'compound_id', 'pchembl_value', 'binary_label']]
@@ -101,7 +103,7 @@ def main():
         identities.setdefault(split, ids)
         table = group_agreement(frame, component_map)
         table.to_parquet(destination/f'{name}.parquet', index=False)
-        result = dict(name=name, split=split, checkpoint_sha256=info['checkpoint_sha256'],
+        result = dict(name=name, split=split, checkpoint_sha256=info['checkpoint_sha256'], **precision,
                       source_sha256=sha256(source), summary=summarize(table))
         write_json(destination/f'{name}.json', result)
         trajectory.append(result)

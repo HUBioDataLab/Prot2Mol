@@ -10,9 +10,11 @@ from scipy.optimize import minimize_scalar
 from sklearn.metrics import ndcg_score, roc_auc_score
 
 if __package__:
+    from .label_precision import read_predictions
     from .metrics import aggregate_groups, group_metrics
     from .run import WORK, write_json
 else:
+    from label_precision import read_predictions
     from metrics import aggregate_groups, group_metrics
     from run import WORK, write_json
 
@@ -85,27 +87,29 @@ def rescore(frame, component_map):
     return summaries, pathways
 
 
-def analyze_all():
+def analyze_all(trainer_labels=False):
     base = WORK / "tier1"
     component_map = pd.read_parquet(base / "data/assay_units.parquet").set_index("assay_id").component.to_dict()
-    out = base / "metrics"
+    out = base / ("metrics_float32" if trainer_labels else "metrics")
     out.mkdir(parents=True, exist_ok=True)
     exports = sorted((base / "predictions").glob("*/complete.json"))
     trajectory = []
     for manifest in exports:
         provenance = json.loads(manifest.read_text())
         name = provenance["name"]
+        frame, precision = read_predictions(manifest.parent / "predictions.parquet", trainer_labels)
         summary_path = out / f"{name}.json"
         if summary_path.exists():
             result = json.loads(summary_path.read_text())
             if result["checkpoint_sha256"] != provenance["checkpoint_sha256"]:
                 raise RuntimeError("Metric cache refers to different weights")
+            if trainer_labels and any(result.get(key) != value for key, value in precision.items()):
+                raise RuntimeError('Metric cache has different prediction or precision provenance')
         else:
-            frame = pd.read_parquet(manifest.parent / "predictions.parquet")
             if len(frame) != provenance["rows"] or not np.array_equal(frame.row_index, np.arange(len(frame))):
                 raise RuntimeError("Exported observations are incomplete or misaligned")
             summaries, records = rescore(frame, component_map)
-            result = {**provenance, "metrics": summaries,
+            result = {**provenance, **precision, "metrics": summaries,
                       "epsilon_metrics": "pending raw-replicate noise estimation; no guessed noise threshold used"}
             if provenance["split"] == "val":
                 temperature = fit_temperature(frame.binary_label, frame.activity_logits)
