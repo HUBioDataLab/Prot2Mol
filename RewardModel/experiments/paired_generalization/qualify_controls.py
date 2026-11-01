@@ -11,7 +11,9 @@ import argparse
 from contextlib import nullcontext
 from datetime import timedelta
 import gc
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -58,17 +60,18 @@ def cases():
     return result
 
 
-def make_model(config_path, changes):
+def make_model(config_path, changes, *, tiny_widths=(12, 16)):
     set_seed(42)
     if config_path:
         config = load_reward_training_config(str(config_path)).model.to_dict()
         config.update(changes)
         return RewardModel(config)
-    protein = EsmModel(EsmConfig(vocab_size=33, hidden_size=12, num_hidden_layers=3,
-        num_attention_heads=3, intermediate_size=24, pad_token_id=1, mask_token_id=32,
+    protein_width, molecule_width = tiny_widths
+    protein = EsmModel(EsmConfig(vocab_size=33, hidden_size=protein_width, num_hidden_layers=3,
+        num_attention_heads=3, intermediate_size=protein_width*2, pad_token_id=1, mask_token_id=32,
         hidden_dropout_prob=.1, attention_probs_dropout_prob=0., token_dropout=False), add_pooling_layer=False)
-    molecule = RobertaModel(RobertaConfig(vocab_size=33, hidden_size=16, num_hidden_layers=3,
-        num_attention_heads=4, intermediate_size=32, pad_token_id=1,
+    molecule = RobertaModel(RobertaConfig(vocab_size=33, hidden_size=molecule_width, num_hidden_layers=3,
+        num_attention_heads=4, intermediate_size=molecule_width*2, pad_token_id=1,
         hidden_dropout_prob=.1, attention_probs_dropout_prob=0.), add_pooling_layer=False)
     config = dict(protein_model_name_or_path="tiny/protein", molecule_model_name_or_path="tiny/molecule",
         fusion_hidden_dim=12, fusion_num_heads=3, fusion_attention_backend="sdpa", dropout=.1,
@@ -78,8 +81,24 @@ def make_model(config_path, changes):
         contrastive_active_threshold=6., contrastive_strict_active_only=True)
     config.update(changes)
     return RewardModel(RewardModelConfig(**config),
-        protein_bundle=LoadedEncoder("tiny/protein", None, protein, 12),
-        molecule_bundle=LoadedEncoder("tiny/molecule", None, molecule, 16))
+        protein_bundle=LoadedEncoder("tiny/protein", None, protein, protein_width),
+        molecule_bundle=LoadedEncoder("tiny/molecule", None, molecule, molecule_width))
+
+
+def controlled_cases(noise_rms):
+    if __package__:
+        from .control_plan import control_arms
+    else:
+        from control_plan import control_arms
+    if noise_rms is None or not math.isfinite(noise_rms) or noise_rms <= 0:
+        raise ValueError('Control-grid qualification needs a positive training noise RMS')
+    result = []
+    for arm in control_arms():
+        changes = arm['model'].copy()
+        if changes.get('ranking_pair_target_temperature') == 'training_replicate_rms':
+            changes['ranking_pair_target_temperature'] = math.sqrt(3.) * noise_rms / math.pi
+        result.append((arm['name'], changes, arm['training'].get('weight_decay', .01)))
+    return result
 
 
 def make_batch(model, device, real):
@@ -115,6 +134,8 @@ def main():
     parser.add_argument("--config", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument('--control-grid', action='store_true')
+    parser.add_argument('--training-noise-rms', type=float)
     args = parser.parse_args()
     world = int(os.environ.get("WORLD_SIZE", "1"))
     if world < 2:
@@ -130,11 +151,15 @@ def main():
     torch.set_num_threads(2)
     torch.distributed.init_process_group("nccl" if gpu else "gloo", timeout=timedelta(minutes=5))
     records = []
-    for name, changes in cases():
-        model = make_model(args.config, changes).to(device).train()
+    configurations = controlled_cases(args.training_noise_rms) if args.control_grid else [(name, changes, .01) for name, changes in cases()]
+    # The rank-64 adapter cannot fit the original 12/16-wide smoke encoders.
+    # Keep one common, sufficiently wide tiny architecture for this whole grid.
+    tiny_widths = (72, 80) if args.control_grid else (12, 16)
+    for name, changes, weight_decay in configurations:
+        model = make_model(args.config, changes, tiny_widths=tiny_widths).to(device).train()
         batch = make_batch(model, device, bool(args.config))
         ddp = DistributedDataParallel(model, device_ids=[local_rank] if gpu else None, find_unused_parameters=True)
-        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-4)
+        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-4, weight_decay=weight_decay)
         losses = []
         # Different rank-local dropout streams test actual averaged gradients.
         set_seed(100 + rank)
@@ -155,8 +180,19 @@ def main():
         reference = checks.clone()
         torch.distributed.broadcast(reference, 0)
         torch.testing.assert_close(checks, reference, rtol=0, atol=1e-8)
+        digest = hashlib.sha256()
+        for parameter_name, parameter in model.named_parameters():
+            if parameter.requires_grad:
+                digest.update(parameter_name.encode())
+                digest.update(parameter.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
+        hashes = [None] * world
+        torch.distributed.all_gather_object(hashes, digest.hexdigest())
+        if len(set(hashes)) != 1:
+            raise RuntimeError(f'Fitted parameter bytes differ across ranks: {name}')
         record = dict(case=name, losses=losses, trainable=model.num_trainable_parameters(),
-                      readout=model.config.ranking_readout, adaptation=model.encoder_adaptation_report)
+                      readout=model.config.ranking_readout, adaptation=model.encoder_adaptation_report,
+                      parameter_sha256=digest.hexdigest(), model_overrides=changes,
+                      optimizer_weight_decay=weight_decay)
         records.append(record)
         if rank == 0:
             print(json.dumps(record), flush=True)
@@ -170,6 +206,8 @@ def main():
         args.output.write_text(json.dumps(dict(purpose="runtime qualification only", cases=records,
             world_size=world, device=str(device), torch_version=torch.__version__,
             real_config=str(args.config) if args.config else None,
+            control_grid=args.control_grid, training_noise_rms=args.training_noise_rms,
+            tiny_encoder_widths=list(tiny_widths) if args.config is None else None,
             visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES")), indent=2) + "\n")
     torch.distributed.barrier()
     torch.distributed.destroy_process_group()

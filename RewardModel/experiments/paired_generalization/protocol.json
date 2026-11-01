@@ -723,7 +723,12 @@
       "key": "leak_in_out_2x2",
       "experiment": "Fixed-test 2x2 leak-in/leak-out design with composition and training-size matching",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "user_confirmed_axes": [
+        "molecule-only versus full protein-molecule model",
+        "leak-in versus leak-out training"
+      ],
+      "design_constraint": "Hold test groups fixed and match training size, assay-size mix, positive rate and replicate counts. Data manifests and qualification remain pending."
     },
     {
       "id": "E41",

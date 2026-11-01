@@ -33,6 +33,41 @@ item in `protocol.json`; this document does not replace or narrow that scope.
   pooled A transformation leaked held-out measurements into training labels.
   Continuous labels and the B reference transformation are unchanged.
 
+## Materialized control grid and accounting
+
+`control_plan.py` declares 28 settings: the full reference; weight decay 0.001
+and 0.1 (the reference uses 0.01); frozen and last-two-block encoders; LoRA ranks
+4/16/64; six additional loss subsets; four static-weight alternatives; four
+contrastive controls; and six ranking controls. It generates 168 tuning configs
+(28 × 3 learning rates × 2 splits), then 112 confirmation configs only after
+B-validation selection (28 × 2 further seeds × 2 splits). Every fit retains the
+15-epoch horizon. These 280 fits exclude the dataset ablations, additional B
+realizations, Tier 4 and conditional method-catalog experiments.
+
+The five-point static-weight sweep includes the shared reference R/B/C weights
+0.25/0.25/1. Change B alone to 0.0625 or 1, or C alone to 0.25 or 4. This is an
+axis sweep, not a full Cartesian search or evidence of a globally optimal weight
+mix. Raw loss scales change as well as the relative weights; the matched LR
+budget does not make those effects identical. The regularization comparison
+similarly uses the shared full reference plus its two declared decay settings.
+Report each family’s total tuning count, including its shared reference, rather
+than comparing family maxima as if all families had the same number of trials.
+
+Checkpoint selection-rule and averaging contrasts use the same B-selected LR
+within each setting to isolate those changes. They do not independently retune
+the LR for each checkpoint rule. The original requested B reference remains a
+separate protected run; it is not silently reused in this grid, which adds a
+fixed training evaluation probe and prediction export instrumentation.
+
+Preparation writes immutable YAML configs, job metadata and a plan fingerprint
+without launching training. It hashes the input partitions and uses only the
+training replicate RMS for soft targets. `control_driver.py` runs one ready job
+per invocation. It requires all cheap baselines to finish on the same data,
+checks all four authorized GPUs are free, and qualifies the 28 model settings
+plus the real Trainer on four GPUs before starting the grid. A partial existing
+run is never automatically restarted. Test evaluation remains a separate step
+after validation-only selection; training completion is not experiment completion.
+
 ## Encoder freedom and loss readouts
 
 - Full, frozen, last-two-transformer-block unfreezing, and LoRA ranks 4, 16 and
@@ -176,7 +211,12 @@ metadata, then removes only redundant weights/optimizer payloads of a marked
 controlled run. Original data and the first reference are not eligible. Cleanup
 removes optimizer-resume capability from these already completed runs.
 
-The static weight grid, leak-in/out design, unit learning-curve fractions,
-and Tier 4
-adaptation schedule still require their explicit manifests and qualification.
+The user confirmed the leak experiment’s two axes: molecule-only versus full
+protein–molecule scoring, crossed with leak-in versus leak-out training. Test
+groups remain fixed, and leak-in training must match leak-out training size,
+group-size mix, positive rate and replicate counts. Dataset construction and
+matching diagnostics are still required before these four cells can run.
+
+The leak-in/out data design, unit learning-curve fractions, and Tier 4 adaptation
+schedule still require their explicit manifests and qualification.
 Nothing here labels those experiments complete.
