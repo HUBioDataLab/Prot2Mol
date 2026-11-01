@@ -62,6 +62,26 @@ def test_mismatched_replicates_or_protein_are_not_accepted_as_matched():
         pd.testing.assert_frame_equal(tables['leak_in'],tables['leak_out'])
 
 
+def test_equal_bce_positive_counts_do_not_mask_different_contrastive_exposure():
+    frames = inputs('A')
+    train = frames['train']
+    train.loc[(train.assay_id=='donor') & (train.pchembl_value==6.),'pchembl_value'] = 6.2
+    summary,tables = construct(frames,'A')
+    assert summary['matched_assay_exchanges'] == 0
+    assert not summary['usable_leak_contrast']
+    pd.testing.assert_frame_equal(tables['leak_in'],tables['leak_out'])
+
+
+def test_contrastive_matching_uses_training_float32_threshold():
+    frames = inputs('A')
+    train = frames['train']
+    train.loc[(train.assay_id=='donor') & (train.pchembl_value==6.),'pchembl_value'] = 6.+1e-8
+    summary,_ = construct(frames,'A')
+    assert summary['matched_assay_exchanges'] == 1
+    assert summary['training']['leak_out']['strict_contrastive_active_rows'] == 2
+    assert summary['training']['leak_in']['strict_contrastive_active_rows'] == 2
+
+
 def test_shared_pair_labels_cannot_change_when_an_assay_is_removed():
     frames = inputs('A')
     train = frames['train']
@@ -95,5 +115,6 @@ def test_b_partial_component_proposal_is_explicit_and_preserves_matching():
     assert proposal['matched_assay_exchanges'] == 1
     assert proposal['requires_user_decision']
     assert proposal['partial_original_training_components'] == 1
+    assert proposal['whole_component_support_feasibility']['necessary_condition_satisfied_by_components'] == 0
     assert proposal['training']['leak_out'] == proposal['training']['leak_in']
     assert not set(tables['test'].assay_id)&set(tables['leak_in'].assay_id)

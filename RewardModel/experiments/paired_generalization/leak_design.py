@@ -23,6 +23,7 @@ else:
 from reward_model.training.train_views import subset_pair_labels
 
 SEED = 42
+CONSTRUCTION_VERSION = 2
 COLS = ['assay_id','target_chembl_id','compound_id','pchembl_value','binary_label','measurement_count']
 
 
@@ -77,7 +78,8 @@ def match_features(frame):
         profile = sorted(Counter(replicas.tolist()).items())
         descriptor = [str(group.target_chembl_id.iloc[0]),len(group),int(group.binary_label.sum()),profile,
                       bool(len(group)>=3 and np.ptp(values)>=.5),
-                      bool(len(group)>=3 and np.ptp(values.astype(np.float32).astype(np.float64))>=.5)]
+                      bool(len(group)>=3 and np.ptp(values.astype(np.float32).astype(np.float64))>=.5),
+                      int((values.astype(np.float32)>6.).sum())]
         records.append(dict(assay_id=assay,key=json.dumps(descriptor,separators=(',',':')),
                             rows=len(group),target_chembl_id=descriptor[0]))
     return pd.DataFrame(records,columns=['assay_id','key','rows','target_chembl_id'])
@@ -98,6 +100,7 @@ def composition(frame):
     groups = frame.groupby('assay_id').pchembl_value.agg(['size','min','max'])
     return dict(rows=len(frame),assays=len(sizes),targets=int(frame.target_chembl_id.nunique()),
         positive_rows=int(frame.binary_label.sum()),positive_rate=float(frame.binary_label.mean()),
+        strict_contrastive_active_rows=int((frame.pchembl_value.to_numpy(dtype=np.float32)>6.).sum()),
         replicate_histogram={str(k):int(v) for k,v in frame.measurement_count.value_counts().sort_index().items()},
         assay_size_histogram={str(k):int(v) for k,v in sizes.value_counts().sort_index().items()},
         sampler_eligible_groups=int(((groups['size']>=3)&((groups['max']-groups['min'])>=.5)).sum()),
@@ -151,7 +154,7 @@ def construct(frames, regime, *, allow_b_assay_exchanges=False):
     if sorted(match_features(removed).key) != sorted(match_features(inside.iloc[len(common):]).key):
         raise ValueError('Final subset-local labels or matching descriptors differ')
     summaries = {key:composition(frame) for key,frame in [('leak_out',out),('leak_in',inside)]}
-    for key in ['rows','assays','targets','positive_rows','replicate_histogram','assay_size_histogram','sampler_eligible_groups']:
+    for key in ['rows','assays','targets','positive_rows','strict_contrastive_active_rows','replicate_histogram','assay_size_histogram','sampler_eligible_groups']:
         if summaries['leak_out'][key] != summaries['leak_in'][key]:
             raise ValueError(f'Training composition changed: {key}')
     for label,frame in [('out',out),('in',inside)]:
@@ -167,12 +170,22 @@ def construct(frames, regime, *, allow_b_assay_exchanges=False):
     exposure['molecule_in_leak_in'] = exposure.compound_id.isin(inside.compound_id.unique())
     exposure['training_assays_for_target'] = exposure.target_chembl_id.map(out_profile.assays).fillna(0).astype(int)
     partial_components = 0
+    component_feasibility = None
     if regime == 'B':
         original_counts = train.groupby('component').size()
         retained_counts = common.groupby('component').size().reindex(original_counts.index,fill_value=0)
         partial_components = int(((retained_counts>0)&(retained_counts<original_counts)).sum())
         if partial_components and not allow_b_assay_exchanges:
             raise ValueError('An original B training component was fragmented')
+        # A necessary condition for removing a complete training component while
+        # preserving protein counts: every removed protein must exist in donors.
+        proteins = train[['component','target_chembl_id']].drop_duplicates()
+        unavailable = ~proteins.target_chembl_id.isin(donors.target_chembl_id.unique())
+        blocked = proteins.loc[unavailable,'component'].nunique()
+        component_feasibility = dict(training_components=int(train.component.nunique()),
+            components_with_protein_absent_from_donors=int(blocked),
+            necessary_condition_satisfied_by_components=int(train.component.nunique()-blocked),
+            scope='Necessary protein-support condition for this fixed reserved donor pool, not a general impossibility result for all possible leak designs')
     result = dict(regime=regime,seed=SEED,original_full_test_relative_rows_outside_test=original_relatives,
         fixed_test_rows=len(test),fixed_test_assays=int(test.assay_id.nunique()),reservation=reservation,
         replacement_candidate_assays=int(replacements.assay_id.nunique()),donor_candidate_assays=int(donors.assay_id.nunique()),
@@ -186,7 +199,8 @@ def construct(frames, regime, *, allow_b_assay_exchanges=False):
         usable_leak_contrast=bool(len(matches) and exposure.relative_in_leak_in.any()),
         requires_user_decision=allow_b_assay_exchanges,
         partial_original_training_components=partial_components,
-        interpretation='Data construction only, no model outcomes. Identical test groups in all four cells; shared validation. Exactly matched protein/size/positive/replicate/eligibility descriptors. Whole A assays retained/removed. B uses whole original training components unless the explicit whole-assay exception proposal is selected. B leak-in intentionally places a reserved whole donor assay from a test component in training; component isolation is the manipulated variable. Test exposure may be sparse and limits power. Unused donor assays are excluded in both arms.')
+        whole_component_support_feasibility=component_feasibility,
+        interpretation='Data construction only, no model outcomes. Identical test groups in all four cells; shared validation. Exactly matched protein/size/BCE-positive/strict-contrastive-active/replicate/eligibility descriptors. Contrastive counts use float32 labels and >6, independently of pair-median BCE labels >=6. Whole A assays retained/removed. B uses whole original training components unless the explicit whole-assay exception proposal is selected. B leak-in intentionally places a reserved whole donor assay from a test component in training; component isolation is the manipulated variable. Test exposure may be sparse and limits power. Unused donor assays are excluded in both arms.')
     return result,dict(leak_out=out,leak_in=inside,test=test,donors=donors,matches=matches,exposure=exposure)
 
 
@@ -197,7 +211,7 @@ def main(assay_exchange_proposal=False):
         from prepare_random import archive_directory
     if ROOT != Path('/home/atabey/Prot2Mol'):
         raise RuntimeError('Use authorized Atum project')
-    directory = WORK/('leak_design_assay_proposal' if assay_exchange_proposal else 'leak_design')
+    directory = WORK/(('leak_design_assay_proposal' if assay_exchange_proposal else 'leak_design')+f'_v{CONSTRUCTION_VERSION}')
     if directory.exists():
         raise RuntimeError('Existing construction must be inspected before replacing it')
     archive_directory(directory)
@@ -230,11 +244,12 @@ def main(assay_exchange_proposal=False):
             table.to_parquet(path,index=False)
             artifacts[path.name] = sha256(path)
         print(json.dumps(results[regime]),flush=True)
-    write_json(directory/'complete.json',dict(format_version=1,experiment='E40',results=results,
+    write_json(directory/'complete.json',dict(format_version=1,construction_version=CONSTRUCTION_VERSION,experiment='E40',results=results,
         primary_plan_sha256=sha256(plan_path),source_data_sha256=plan['source_data_sha256'],
         molecule_scaffolds_sha256=sha256(map_path),assay_units_sha256=sha256(unit_path),
         artifacts_sha256=artifacts,code_sha256=sha256(Path(__file__)),
         requires_user_decision=assay_exchange_proposal,
+        matching_policy='Exact per-assay protein, row count, pair-median BCE-positive count, float32 strict >6 contrastive-active count, replicate histogram, float64 sampler eligibility and float32 headline eligibility',
         remaining='Review realized exposure and matching before freezing model configs; tokenize/view qualification, all four-cell multi-seed fitting and performance comparisons remain pending'))
 
 
