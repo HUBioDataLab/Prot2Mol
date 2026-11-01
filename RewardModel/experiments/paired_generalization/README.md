@@ -134,6 +134,17 @@ whereas uniformity and rank are label-free. Geometry is not a substitute for
 held-out ranking performance. Local numerical/model tests and frozen memberships
 do not count as scientific E54/E55 results.
 
+`geometry_export.py` supplies the fixed-weight export worker and analysis. It
+joins raw cohort memberships to token-cache identities rather than assuming
+identical row order, checks selected continuous labels at native precision, and
+exports four raw matrices plus the exact observation/view mapping. It verifies
+unchanged model parameters and reproduction of the native cosine pathway, then
+calculates each side/stage on the observation and corresponding unique-entity
+cohorts. Source/output checksums and CPU-qualification labels accompany results.
+The independent scientific launcher must still verify the Tier 3 gate, selected
+checkpoint, full token-payload provenance and the shared GPU lock before calling
+this worker. Tiny-model CPU tests do not establish scientific GPU qualification.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
