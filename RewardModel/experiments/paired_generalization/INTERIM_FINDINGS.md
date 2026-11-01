@@ -250,12 +250,25 @@ ranking loss at epoch 5 (2.79392), and contrastive/total loss at epoch 15
 Classification AUROC nevertheless improves from 0.73865 at epoch 2 to 0.77202
 at epoch 15. Decreasing contrastive loss therefore masks worsening ranking loss
 in the aggregate; the different terms do not share one turning point.
+The first adjacent-epoch increases occur at 2→3 for BCE, 3→4 for ranking and
+6→7 for contrastive/total loss. These local fluctuations are not themselves
+statistical change points or evidence of sustained deterioration.
 
 The fixed 2,048-assay training probe's eligible macro Spearman rises from
 0.18336 at epoch 1 to 0.53189 at epoch 15. Validation peaks at 0.18460 in epoch 6
 and ends at 0.17561. Later improvements on the training probe transfer poorly
 in this run. These observations do not isolate encoder drift, loss conflict or
 another cause, and matched A/multi-seed comparisons remain pending.
+
+On the same 3,969 eligible validation assays as Spearman, linear-gain NDCG@1
+and NDCG@3 peak at epoch 11, while NDCG@5 and Spearman peak at epoch 6.
+NDCG@1/@3/@5 at epoch 6 are 0.59687/0.66438/0.71182; at epoch 15 they are
+0.59098/0.66322/0.70751. Thus top-ranking quality has a later local maximum,
+but no sustained improvement through epoch 15. Averaging NDCG over all
+nonconstant assays instead changes the top-1/top-3 peak to epoch 8, illustrating
+why cohort definitions must be aligned before comparing objectives. These
+descriptive extrema do not establish significant differences or objective conflict.
+Source: `tier1/baseline_trajectory_summary_v2.json`.
 
 The learned logit scale rises from 13.5999 to 18.4685 to 22.5461 at epochs
 1/6/15. Validation contrastive loss falls from 8.54974 to 6.00606 to 5.83497;
