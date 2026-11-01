@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–4. These
+native validation and fixed training-probe audits for epochs 1–5. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -355,41 +355,42 @@ and preserve the Trainer's float32 label semantics.
 | 2 | 0.21244 | 0.22805 | 0.48617 | 2.61290 | 3.32545 |
 | 3 | 0.24317 | 0.27084 | 0.46223 | 2.57423 | 2.72154 |
 | 4 | 0.26145 | 0.30188 | 0.46034 | 2.54027 | 2.42469 |
+| 5 | 0.27953 | 0.33753 | 0.44381 | 2.50691 | 2.20079 |
 
-Validation AUROC rises 0.72635→0.77144→0.79702→0.80344 and the contrastive scale
-rises 13.5412→14.5521→15.5213→16.4275. On the same eligible validation assays,
+Validation AUROC rises 0.72635→0.81971 across epochs 1→5 and the contrastive
+scale rises 13.5412→17.2867. On the same eligible validation assays,
 NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
-0.65891/0.70869/0.74848 at epoch 4. Epoch-4 BCE-logit and cosine-only macro
-Spearman are 0.21232 and 0.16298. Positive temperature calibration fitted on
-that validation set gives T=1.11777 and reduces log-loss from 0.46034 to 0.45857;
+0.67335/0.71781/0.75630 at epoch 5. Epoch-5 BCE-logit and cosine-only macro
+Spearman are 0.22052 and 0.16848. Positive temperature calibration fitted on
+that validation set gives T=1.16176 and reduces log-loss from 0.44381 to 0.44042;
 this is an in-sample
 fit, with no test transfer.
 
-At epoch 4, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.27008/0.24807/0.18514 (5,405/2,402/190 eligible assays).
-Restricting to unseen-scaffold rows within assays instead gives 0.19547 on
+At epoch 5, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.29216/0.25707/0.20422 (5,405/2,402/190 eligible assays).
+Restricting to unseen-scaffold rows within assays instead gives 0.19920 on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.26158 to 0.25561. This
+changes A common-support validation macro from 0.27943 to 0.27428. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→4, validation ranking–BCE agreement rises 0.63066→0.66557
+Across epochs 1→5, validation ranking–BCE agreement changes 0.63066→0.61880
 on the same 7,995 mutually defined eligible assays; the paired whole-assay
-interval for the change is [0.02468, 0.04435]. Ranking–cosine agreement rises
-0.12360→0.28508 on 7,997 assays, with change interval [0.14908, 0.17335].
-Thus the observed prefix does not show uniform scorer divergence.
+interval for the change is [−0.02235, −0.00195]. Ranking–cosine agreement rises
+0.12360→0.29369 on 7,997 assays, with change interval [0.15653, 0.18295].
+Agreement fluctuates across epochs; the prefix does not show uniform scorer divergence.
 
-These four epochs establish early improvement, not a final optimum or an
+These five epochs establish early improvement, not a final optimum or an
 overfitting turning point. Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch04.json`, per-assay
-metric tables and `verification_through_epoch04.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 221,748
+on Atum, including the immutable `trajectory_through_epoch05.json`, per-assay
+metric tables and `verification_through_epoch05.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 277,185
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
-pairs reproduced 216 sampled noise-band/group/scorer combinations; direct
-weighted means reproduced all four
+pairs reproduced sampled noise-band/group/scorer counts; direct
+weighted means reproduced all five
 composition-standardized validation scores. All source/artifact hashes passed.
 
 Q11's scalar localization audit covers all 15 initial B validation epochs and

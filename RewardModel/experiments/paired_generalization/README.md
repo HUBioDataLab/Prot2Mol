@@ -116,6 +116,18 @@ trajectory; B has no shared-scaffold groups under this relation. Listwise and
 contrastive loss localization remain separate. Results and exact source hashes
 are saved in `tier1/stratified_trajectories/`; no test predictions are read.
 
+`ranking_localization.py --a-trajectory <immutable-A-trajectory.json>` extends
+Q11 to the reference's actual listwise ranking objective. It preserves native
+prediction row order and the three deterministic complete-coverage partitions.
+Lists retain their original full-assay size/scaffold labels and their native
+weight, including zero-loss lists. A bounded vectorized implementation is
+checked against the production loss, and every scientific epoch must reproduce
+its saved native loss within 1e-5. Whole-unit endpoint intervals are descriptive
+and conditional on the observed endpoints. This command accepts only the fixed
+reference objective/normalization; it does not reinterpret controlled loss arms.
+It reads no test scores or model weights. Results live in
+`tier1/ranking_localization/`; contrastive-loss localization remains separate.
+
 After the matched A reference has finished training and retention,
 `reference_contrastive.py run --workers 4` completes its remaining checkpoint
 audit before the next controlled fit. It requires all fifteen verified protected
