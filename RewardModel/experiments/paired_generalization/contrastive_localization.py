@@ -215,6 +215,9 @@ def main(regime, a_reference=None):
     if [r['epoch'] for r in candidates] != list(range(1, 16)):
         raise ValueError('Missing or duplicate reference epochs')
     for item in candidates:
+        # Native Trainer manifests serialize integral epochs as floats. The
+        # exact 1..15 check above rejects fractional or missing epochs first.
+        item['epoch'] = int(item['epoch'])
         for name in ['predictions.parquet', 'protein.npy', 'molecule.npy']:
             checked(Path(item['folder'])/name)
     from importlib.metadata import version
