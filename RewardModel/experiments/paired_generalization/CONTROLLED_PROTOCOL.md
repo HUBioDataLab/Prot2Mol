@@ -223,6 +223,26 @@ metadata, then removes only redundant weights/optimizer payloads of a marked
 controlled run. Original data and the first reference are not eligible. Cleanup
 removes optimizer-resume capability from these already completed runs.
 
+The matched A reference `full__A__seed42__lr1p0` additionally needs every epoch
+for the Tier 1 directional contrastive audit and representation analyses.
+Compact scalar snapshots omit the embeddings required for those calculations;
+they cannot substitute for the model weights. `protect_trajectory.py` preserves
+all 15 weights, model configurations and epoch states under
+`controlled/protected_trajectories/full__A__seed42__lr1p0` on the existing archive.
+Weights are hard-linked, so source-path cleanup does not free their data; this
+is retention protection, not an independent byte-level backup.
+
+The already running driver imported the original retention function. The
+protector therefore temporarily sets only its managed-run cleanup permission
+to false, keeping an exact copy of the original marker. Training configuration,
+optimization and GPU processes are unchanged. It restores the original marker
+only after all epoch payloads verify. If the driver reaches cleanup first, that
+stage fails safely without pruning; finish retention after protection is verified,
+without rerunning training. Interrupted protection leaves the cleanup hold in
+place. This mechanism is restricted to the first matched A reference, and does
+not declare any scientific audit complete. The full original B reference was
+already retained separately.
+
 `checkpoint_evaluation.py` provides fixed-weight native evaluation for the
 retained neural models. It preserves the original evaluation partition seed,
 candidate-pool assay batch size and ranking readout, exports the native scalar
