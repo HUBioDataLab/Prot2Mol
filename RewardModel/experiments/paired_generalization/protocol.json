@@ -313,7 +313,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported. User ended the LambdaMART search and chose completed depth-3 fits; fixed-model test finalization is pending. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
+    "remaining_tiers": "Ten Tier 2 baseline families complete on both splits, including the user-selected fixed depth-3 LambdaMART comparison. Factorized neural-pathway comparison still needs matched A predictions. Controlled neural runtime qualification is now live on GPUs 0,2,5,6; multi-seed experiments, Tier 4 and applicable conditional interventions remain incomplete.",
     "controlled_runtime_qualification": "17 cases passed on two actual GPUs (physical 5 and 6): all loss subsets, frozen/partial/LoRA, fixed scale, stop-gradient, list normalization, assay balancing and pairwise variants. Each used three optimizer steps with two accumulated microbatches and synchronized fitted parameters. This is execution evidence on synthetic short inputs, not scientific performance or a full-size four-GPU trainer run. Evidence: controls_gpu_qualification_17b30ae.json on Atum.",
     "sampling_audit": "Complete for both configured first epochs: all local microbatches, plus 512 evenly spaced candidate batches per split. Token/source identities and float32 labels verified before counting. Actual training-known false negatives remain after existing masks; performance impact awaits controlled masking runs.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
@@ -341,9 +341,11 @@
       "linear_matrix_filter",
       "kronecker_kernel_ridge",
       "protein_shuffled",
-      "bilinear_completion_3000iter"
+      "bilinear_completion_3000iter",
+      "lambdamart_depth3"
     ],
-    "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results."
+    "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
+    "current_controlled_launch": "Driver PID836409; qualification launcher PID837087, signature26d6c2fc024f95db, observed live on 2026-11-01. This is runtime qualification, not scientific training completion. Consult controlled/driver_status.json and live PIDs for current state."
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
@@ -685,11 +687,11 @@
       "tier": "Tier 2",
       "key": "lambdamart",
       "experiment": "Frozen-feature LambdaMART with linear gains, noise-calibrated levels and group normalization",
-      "status": "partial",
+      "status": "complete",
       "conditional": false,
-      "completed_scope": "Depth-3 fits completed on both splits. Selected validation macro Spearman A=0.1307700438 at 500 trees, B=0.0484568625 at 270 trees. Both define all eligible validation assay correlations. User fixed this common configuration and ended the larger search; test scoring and final metrics are pending.",
-      "evidence": "tier2/lambdamart/user_decision.json; tier2/lambdamart/{A,B}/trial00/complete.json",
-      "user_override": "User ended further LambdaMART search and selected the already completed depth-3 configuration for the A/B comparison. Four extra fits were terminated with process identity verification. No additional tree training is permitted; fixed-model validation/test finalization remains pending."
+      "completed_scope": "User-selected fixed depth-3 models evaluated on both complete validation/test partitions. Test eligible macro Spearman A=0.1284857568 (95% whole-assay bootstrap 0.1195996893 to 0.1373345476), B=0.0607128502 (95% component bootstrap 0.0450746682 to 0.0756829939); 100% eligible-assay correlation coverage on both. Selected tree counts A=500 and B=270. This reproduces the direction A>B, not a causal decomposition of the gap. The larger five-setting search was explicitly ended by the user; do not call these best-of-grid results.",
+      "evidence": "tier2/lambdamart/user_decision.json; tier2/lambdamart/{A,B}/complete.json and val/test metric, group and prediction tables; all final artifact checksums verified",
+      "user_override": "User ended further LambdaMART search and selected completed depth-3 fits for the A/B comparison. All four extra processes were verified terminated. New tree fitting is disabled when the recorded decision exists. All completed and partial search artifacts are preserved."
     },
     {
       "id": "E32",

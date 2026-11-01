@@ -33,6 +33,13 @@ item in `protocol.json`; this document does not replace or narrow that scope.
   pooled A transformation leaked held-out measurements into training labels.
   Continuous labels and the B reference transformation are unchanged.
 
+The user ended the Tier 2 LambdaMART search and selected the already completed
+depth-3 models on both splits. `user_decision.json` pins that choice and disables
+further tree fitting; `finalize_lambdamart.py` computes fixed-model validation
+and test results without training. The neural-training baseline requirement is
+satisfied by those finalized user-selected results, not by completion of the
+cancelled five-setting search. This override applies only to LambdaMART.
+
 ## Materialized control grid and accounting
 
 `control_plan.py` declares 28 settings: the full reference; weight decay 0.001
@@ -210,6 +217,16 @@ and verifies the averaged model, preserves selection weights and all checkpoint
 metadata, then removes only redundant weights/optimizer payloads of a marked
 controlled run. Original data and the first reference are not eligible. Cleanup
 removes optimizer-resume capability from these already completed runs.
+
+`checkpoint_evaluation.py` provides fixed-weight native evaluation for the
+retained neural models. It preserves the original evaluation partition seed,
+candidate-pool assay batch size and ranking readout, exports the native scalar
+predictions, and verifies unchanged model parameters and absence of an optimizer.
+Training-known masks require the original training-positive index; held-out
+labels never build that index. Tiny CPU execution passed for all three readouts
+and the known-positive-mask path. Production postselection job planning and
+scientific evaluation remain separate work; this utility alone is not evidence
+that the checkpoint comparisons have run.
 
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test

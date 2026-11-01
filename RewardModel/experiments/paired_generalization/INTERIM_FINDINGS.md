@@ -148,6 +148,21 @@ coverage reported explicitly.
 | Paired Kronecker ridge | 0.1690 | 100% | 0.0631 | 100% |
 | Protein-shuffled Kronecker ridge | 0.0662 | 100% | 0.0596 | 100% |
 | Low-rank bilinear inductive completion | 0.2126 | 100% | 0.0779 | 100% |
+| LambdaMART, user-fixed depth 3 | 0.1285 | 100% | 0.0607 | 100% |
+
+The user ended the larger LambdaMART search and chose the completed depth-3
+configuration for the A/B comparison. All four remaining search processes were
+verified terminated; the other completed/partial artifacts are preserved. This
+is a fixed-configuration result, not the winner of the planned five-setting
+search. Tree counts remained validation-selected: 500 on A and 270 on B.
+Test whole-unit bootstrap intervals are [0.11960, 0.13733] on A and
+[0.04507, 0.07568] on B, conditional on these fits and held-out units. The same
+A>B direction appears in this frozen-feature tree baseline; that observation
+does not isolate the cause of the split gap. CPU validation rescoring reproduced
+A exactly and differed from B's saved fit-time score by -1.4163e-8, with unchanged
+coverage. That measured discrepancy is recorded without changing the selected
+checkpoint. Sources: `tier2/lambdamart/user_decision.json` and both split
+`complete.json`, `val/` and `test/` artifacts; final checksums were verified.
 
 The molecule-only and independent-task models each test five regularization
 values per split. Two-step ridge tests the 25 combinations of the two sides'
