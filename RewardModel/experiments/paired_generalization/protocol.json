@@ -313,8 +313,8 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Ten Tier 2 baseline families complete on both splits, including the user-selected fixed depth-3 LambdaMART comparison. Factorized neural-pathway comparison still needs matched A predictions. Controlled neural runtime qualification is now live on GPUs 0,2,5,6; multi-seed experiments, Tier 4 and applicable conditional interventions remain incomplete.",
-    "controlled_runtime_qualification": "17 cases passed on two actual GPUs (physical 5 and 6): all loss subsets, frozen/partial/LoRA, fixed scale, stop-gradient, list normalization, assay balancing and pairwise variants. Each used three optimizer steps with two accumulated microbatches and synchronized fitted parameters. This is execution evidence on synthetic short inputs, not scientific performance or a full-size four-GPU trainer run. Evidence: controls_gpu_qualification_17b30ae.json on Atum.",
+    "remaining_tiers": "Ten Tier 2 baseline families complete on both splits, including the user-selected fixed depth-3 LambdaMART comparison. Factorized neural-pathway comparison still needs matched A predictions. Four-GPU qualification passed and the first full-data A run is training; multi-seed experiments, Tier 4 and applicable conditional interventions remain incomplete.",
+    "controlled_runtime_qualification": "All 28 primary settings passed with real encoders on physical GPUs 0,2,5,6. A two-epoch real-Trainer smoke run also passed with all four rank completions and retention evidence verified. This is runtime evidence on synthetic/smoke inputs, not scientific performance. Evidence: controlled/qualifications/26d6c2fc024f95db/complete.json on Atum; all listed artifact hashes reverified.",
     "sampling_audit": "Complete for both configured first epochs: all local microbatches, plus 512 evenly spaced candidate batches per split. Token/source identities and float32 labels verified before counting. Actual training-known false negatives remain after existing masks; performance impact awaits controlled masking runs.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
@@ -327,7 +327,7 @@
     "new_training_label_policy": "Partition-local pair medians, recommended and stated as the default while an optional preference question remains unanswered; completed scaffold baseline is unchanged.",
     "replicate_reliability": "complete on all six partitions; subset coverage and heuristic limitations explicit",
     "contrastive_direction_audit": "complete for all 31 Split B exports",
-    "random_split_preparation": "complete with partition-local labels; matched deep training not started",
+    "random_split_preparation": "complete with partition-local labels; matched full-data 15-epoch training started as full__A__seed42__lr1p0, W&B xffenit7",
     "variance_components": "All six primary and assay-balanced sensitivity fits complete; unstable decomposition explicitly limits Q19.",
     "noise_band_metrics": "complete for all six compositions and 31 Split B prediction exports",
     "formal_shift_tests": "six C2ST comparisons and Split B BBSE complete",
@@ -345,7 +345,8 @@
       "lambdamart_depth3"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "Driver PID836409; qualification launcher PID837087, signature26d6c2fc024f95db, observed live on 2026-11-01. This is runtime qualification, not scientific training completion. Consult controlled/driver_status.json and live PIDs for current state."
+    "current_controlled_launch": "Full-data A seed42 base-LR 15-epoch fit, W&B xffenit7. Driver PID836409 and training launcher PID840738 verified live on 2026-11-01, with finite optimizer logs advancing through epoch 0.4867. GPUs 0,2,5,6, batch12 x4 devices x4 accumulation. Consult controlled/driver_status.json and live processes for current state; this snapshot does not establish completion.",
+    "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending."
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [

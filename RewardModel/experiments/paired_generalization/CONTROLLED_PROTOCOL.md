@@ -121,8 +121,13 @@ at 585ed07 completed two epochs and six optimizer updates on the same two GPUs.
 It verified both ranks, four trajectory and two selected-weight exports, skipped
 test scoring, exact singleton-average tensors, and retained artifacts after
 cleanup (`trainer_export_qualification_585ed07/qualification_verification.json`).
-These are runtime checks on the smoke data; four-GPU full-size controlled runs
-and their scientific comparisons remain outstanding.
+These earlier checks were followed by qualification signature
+`26d6c2fc024f95dbacf433387f9488bff1f6c615318a85c68108a7429a54209e`:
+all 28 settings passed with the real encoders on GPUs 0,2,5,6, followed by a
+two-epoch real-Trainer smoke run with all four rank completions and retention
+evidence verified. These remain runtime checks on synthetic/smoke inputs.
+The first full-data A fit subsequently started as W&B run `xffenit7`;
+its training and scientific comparisons remain unfinished.
 
 ## Ranking controls
 
@@ -224,9 +229,32 @@ candidate-pool assay batch size and ranking readout, exports the native scalar
 predictions, and verifies unchanged model parameters and absence of an optimizer.
 Training-known masks require the original training-positive index; held-out
 labels never build that index. Tiny CPU execution passed for all three readouts
-and the known-positive-mask path. Production postselection job planning and
-scientific evaluation remain separate work; this utility alone is not evidence
-that the checkpoint comparisons have run.
+and the known-positive-mask path.
+
+`postselection.py` connects this evaluator to completed primary-grid runs.
+Before writing an immutable evaluation plan it verifies all six matched tuning
+completions, reconstructs the saved decision from B validation alone, and checks
+the retained selections, model weights, configurations, data and software.
+Every matched LR candidate contributes its best-macro checkpoint. Only the
+common B-selected LR receives all five checkpoint-rule comparisons, including
+the weight average. Rules selecting the same epoch share inference; a singleton
+average stays explicitly identified. Seeds retain their tuning/confirmation
+roles. Validation and test are re-evaluated through the same native evaluator;
+the original four-rank validation scores still determine every selection.
+
+Use `postselection.py prepare --job-id ID` to freeze a ready run, then
+`postselection.py run --job-id ID --workers 4` to evaluate it. The launcher uses
+the existing training lock and only the four allowed GPU UUIDs. Results live
+under the authorized archive via `outputs/paired_generalization/postselection`.
+An incomplete output requires inspection; complete outputs must pass checksum
+and provenance verification before reuse. A CPU qualification path cannot pass
+the scientific completion verifier. Saved tiny-model execution exercises both
+held-out partitions and the reconstruction of the original training-positive
+index, without training or modifying retained training artifacts.
+
+Scientific postselection evaluation has not run yet. Statistical comparisons,
+calibration summaries, additional B allocations and multi-seed reporting remain
+separate required work; completing native inference alone does not finish them.
 
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
