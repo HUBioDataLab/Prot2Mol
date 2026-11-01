@@ -1,0 +1,75 @@
+{
+  "bootstrap_repetitions": 2000,
+  "checkpoint_selection_changed": false,
+  "checkpoint_verification": {
+    "baseline_status_sha256": "b7ab721be68d07cc474ce9f922b4c14f96afd25d78d2d3f133808079be5542a8",
+    "best_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/baseline_scaffold_seed42_15ep/checkpoint-5262",
+    "best_epoch": 6.0,
+    "best_step": 5262,
+    "best_validation_macro_spearman": 0.1846001459709722,
+    "checked_unix": 1793570726.227654,
+    "spec_sha256": "d23d3ea6f26d05aa3917fce52542a0045542b3a07e40bbe345f4876bf0678cb6",
+    "trainer_state_path": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json",
+    "trainer_state_sha256": "21a0f18870f3c662a16a93f49db9f9cf23b936f7fe7fc292a1a88777cbb73c39",
+    "training_complete": true,
+    "validation_epochs": 15,
+    "weights_bytes": 496585959,
+    "weights_path": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/baseline_scaffold_seed42_15ep/checkpoint-5262/pytorch_model.bin",
+    "weights_sha256": "271f3da7059bb37f06106c6cb0e462da3929e2371127fbb3bf55a30af12c304b"
+  },
+  "components": 4034,
+  "eligible_groups": 3972,
+  "environment": {
+    "numpy": "2.5.1",
+    "pandas": "3.0.5",
+    "python": "3.13.12",
+    "scipy": "1.18.0"
+  },
+  "experiment": "E32",
+  "groups": 9578,
+  "limitations": "Intervals condition on this fitted seed, selected checkpoint and held-out components; they do not include seed or selection uncertainty. Existing model trained jointly with all three losses. No claim about contrastive-only training, generator performance, or a causal effect of removing cross-attention. Saved validation cosine metric is not independently recalculated by this check.",
+  "method": "Float32 labels promoted to float64; independent average ranks and centered dot products for every assay. Eligibility and original unit membership checked. Whole-component resampling uses multiplicity vectors and unit sufficient statistics, preserving zero-eligible units; seed42, 2000 draws.",
+  "model_inference": false,
+  "results": {
+    "cosine_similarity": {
+      "defined_eligible_groups": 3972,
+      "group_correlations_checked": 9578,
+      "macro_spearman": 0.06623441377386337,
+      "max_group_error": 2.220446049250313e-16,
+      "whole_component_interval": [
+        0.050477435803119704,
+        0.08216130481254039
+      ]
+    },
+    "ranking_score": {
+      "defined_eligible_groups": 3972,
+      "group_correlations_checked": 9578,
+      "macro_spearman": 0.1768796098004701,
+      "max_group_error": 2.220446049250313e-16,
+      "whole_component_interval": [
+        0.15990677399829295,
+        0.1936223232057861
+      ]
+    }
+  },
+  "rows": 136956,
+  "scope_correction": "Tier2 requests this existing-model readout on Split B. Both-split pathway analysis remains E53; Tier3 multi-seed loss-only training remains required.",
+  "source_sha256": {
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/baseline_scaffold_seed42_15ep/experiment_summary.json": "9efbee216ca2c648a55f8629222cfacb8382ba9937d3abf147ece8daaad840fb",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/data/assay_units.parquet": "04c092a3f6b3ff255f499961587b9845bd04a6e4fb0506013d0bdfedebc49e2a",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/label_precision_complete.json": "9ccf97e392f980808c34c88305381a1aa02ac2fd88d51c66fa22a977ee45636c",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/metrics_float32/best_test.json": "86b62d3ef9f7cb24a77a059f5393a8b68359a44395943f9d6f661a7f7f3da6aa",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/metrics_float32/epoch06_val.json": "bdcfbc42462d8b0fc2a3869c84e457a67ea4337fba78162b26149cc46b1a1b22",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/metrics_float32/groups_best_test_cosine_similarity.parquet": "4d96f02a996bbea4dce26c8947b8564426983fed5cbbb9444163e4cf6257d675",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/metrics_float32/groups_best_test_ranking_score.parquet": "29e506d29e797c1242c675634039d2924aa7226b71d16861d085dbaabf1a9c76",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/predictions/best_test/complete.json": "4c888bee40aed5a623bb5ce040a3176262a4c454883821e9ef2faaca0b57a387",
+    "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/tier1/predictions/best_test/predictions.parquet": "6f0c061ba5e54ab04cf802855cd886b1c5e00f5e21cda396b17919ae5c2fee53"
+  },
+  "spec_quote": "**A factorized baseline.** Score Split B groups with the current model's contrastive similarity alone.",
+  "spec_sha256": "d23d3ea6f26d05aa3917fce52542a0045542b3a07e40bbe345f4876bf0678cb6",
+  "status": "verified_complete_for_explicit_Tier2_SplitB_scope",
+  "training": false,
+  "validation_cosine_macro_reported": 0.07643644340518028,
+  "verified_unix": 1793570557.5320919,
+  "verifier_sha256": "569b6ee74c2c341408a8e5319e8b8ac2542b578b395208ad820f1e76d96557c0"
+}

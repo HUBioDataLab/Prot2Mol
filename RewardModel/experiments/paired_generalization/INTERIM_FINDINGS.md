@@ -2,8 +2,13 @@
 
 This records completed audits, not the final answer to all 34 questions. Runtime
 evidence is under `RewardModel/outputs/paired_generalization` on Atum. The
-remaining baselines, controlled multi-seed runs and mechanistic probes remain
-in scope. Test results do not select models or hyperparameters.
+remaining controlled multi-seed runs and mechanistic probes remain in scope.
+Test results do not select models or hyperparameters.
+
+The ledger has 16 complete, 19 partial and 35 pending experiment entries,
+including 12 conditional entries. Tier 2 is complete (11/11 entries); the other
+three tiers remain incomplete. Of the 34 questions, 11 are answered, seven have
+answers with limitations, 11 are partial and five are pending.
 
 The fresh scaffold baseline finished 15 epochs. Validation macro Spearman
 selected epoch 6 (0.18460); its original test macro Spearman was 0.17688.
@@ -277,6 +282,27 @@ The bilinear manifest's `git_commit` was captured at completion. The baseline
 entrypoint and its project-local dependencies were verified unchanged between
 the launch checkout c920520 and completion checkout 355d147. Future runs
 capture the launch commit and source hashes before fitting.
+
+The MD's final Tier-2 rung explicitly says: "Score Split B groups with the
+current model's contrastive similarity alone." At the jointly trained B model's
+validation-selected epoch-6 checkpoint, cosine alone gives test macro Spearman
+**0.06623**, with whole-component interval **[0.05048, 0.08216]**, compared with
+the ranking head's **0.17688 [0.15991, 0.19362]**. Both are defined on all 3,972
+eligible test assays. These are two readouts of the same fitted model, not a
+contrastive-only training experiment or a causal test of removing cross-attention.
+
+E32 is therefore complete under the explicit Tier-2 Split-B requirement;
+the separate both-split pathway analysis remains partial under E53. A current
+check of the retained weights and all 15 validation evaluations confirms the
+unchanged epoch-6 selection. Independent average-rank calculations reproduced
+both readouts for all 9,578 test assays (maximum difference 2.23e-16), and
+independent unit-count aggregation reproduced the 2,000-draw intervals while
+retaining all 4,034 components, including those with no eligible assays.
+Intervals condition on this fitted seed, selected checkpoint and held-out
+components; they do not include seed or selection uncertainty. No fitting,
+inference or new checkpoint selection occurred. Sources:
+`tier1/metrics_float32/best_test.json`, the saved `predictions/best_test/` export,
+and `RewardModel/experiments/paired_generalization/evidence/factorized_B_scope_verification.json`.
 
 ## Agreement between scoring pathways
 

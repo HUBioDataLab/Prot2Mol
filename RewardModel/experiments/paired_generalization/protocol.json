@@ -346,7 +346,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Ten Tier 2 baseline families complete on both splits, including the user-selected fixed depth-3 LambdaMART comparison. Factorized neural-pathway comparison still needs matched A predictions. Four-GPU qualification passed and the first full-data A run is training; multi-seed experiments, Tier 4 and applicable conditional interventions remain incomplete.",
+    "remaining_tiers": "Tier2 is complete: ten baseline families on both splits plus the MD-explicit SplitB-only existing-model factorized readout (E32). Both-split pathway scoring remains partial under E53. Tier1 matched-A audits, controlled multi-seed experiments, Tier4 and applicable conditional interventions remain incomplete.",
     "controlled_runtime_qualification": "All 28 primary settings passed with real encoders on physical GPUs 0,2,5,6. A two-epoch real-Trainer smoke run also passed with all four rank completions and retention evidence verified. This is runtime evidence on synthetic/smoke inputs, not scientific performance. Evidence: controlled/qualifications/26d6c2fc024f95db/complete.json on Atum; all listed artifact hashes reverified.",
     "sampling_audit": "Complete for both configured first epochs: all local microbatches, plus 512 evenly spaced candidate batches per split. Token/source identities and float32 labels verified before counting. Actual training-known false negatives remain after existing masks; performance impact awaits controlled masking runs.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
@@ -375,7 +375,8 @@
       "kronecker_kernel_ridge",
       "protein_shuffled",
       "bilinear_completion_3000iter",
-      "lambdamart_depth3"
+      "lambdamart_depth3",
+      "factorized_scoring_B"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
     "current_controlled_launch": "Full-data A seed42 base-LR15-epoch fit, W&B xffenit7. Driver PID836409, training launcher PID840738, checkpoint protector PID884646 and handoff watcher PID1097836 verified live at Unix1793570025.29; finite optimizer log reached epoch12.19. Physical GPUs0,2,5,6; batch12 x4 devices x4 accumulation. Native epochs1-12 independently verified. Scalar/listwise localization covers A1-11/B1-15. Training completion absent; watcher still waits for the original handles before the remaining A contrastive audit and one next frozen-grid job.",
@@ -1068,6 +1069,27 @@
       "study_complete": false,
       "last_observed_phase": "waiting_for_original_processes",
       "last_watcher_check_unix": 1793570019.773412
+    },
+    "factorized_B_scope_verification": {
+      "status": "complete_for_explicit_Tier2_SplitB_scope",
+      "evidence": "RewardModel/experiments/paired_generalization/evidence/factorized_B_scope_verification.json",
+      "sha256": "30f4afe822e47c338e30a805b704e99fa0f89496844af5028115a65787d2da6c",
+      "verified_unix": 1793570557.5320919,
+      "scope_quote": "**A factorized baseline.** Score Split B groups with the current model's contrastive similarity alone.",
+      "checkpoint_epoch": 6,
+      "test_macro_spearman": 0.06623441377386337,
+      "whole_component_interval": [
+        0.050477435803119704,
+        0.08216130481254039
+      ],
+      "eligible_test_assays": 3972,
+      "defined_fraction": 1.0,
+      "group_correlations_checked": 19156,
+      "bootstrap_repetitions": 2000,
+      "bootstrap_components": 4034,
+      "weights_and_validation_selection_reverified": true,
+      "question_status_changes": false,
+      "remaining_scope": "E53 both-split pathway comparison and Tier3 loss-only multi-seed training remain unfinished. No training, inference, selection change or new experimental arm."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -1470,13 +1492,13 @@
       "id": "E32",
       "tier": "Tier 2",
       "key": "factorized_scoring",
-      "experiment": "Score using current contrastive similarity alone",
-      "status": "partial",
+      "experiment": "Score the current model contrastive similarity alone on Split B",
+      "status": "complete",
       "conditional": false,
-      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
-      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-12 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch12.json on Atum"
+      "completed_scope": "Explicit MD Tier2 requirement: score Split B groups using the jointly trained current model contrastive similarity alone. Existing validation-selected epoch6 checkpoint test macro Spearman0.06623441377386337, all3972 eligible assays defined, whole-component interval[0.050477435803119704,0.08216130481254039]. This is not contrastive-only training. The separate both-split pathway analysis remains E53; Tier3 multi-seed comparisons remain required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics_float32/best_test.json and tier1/predictions/best_test/ on Atum; RewardModel/experiments/paired_generalization/evidence/factorized_B_scope_verification.json",
+      "scope_quote": "**A factorized baseline.** Score Split B groups with the current model's contrastive similarity alone.",
+      "verification_sha256": "30f4afe822e47c338e30a805b704e99fa0f89496844af5028115a65787d2da6c"
     },
     {
       "id": "E33",
