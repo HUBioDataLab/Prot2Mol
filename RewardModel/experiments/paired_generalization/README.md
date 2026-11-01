@@ -91,6 +91,26 @@ does not itself establish training completion, final checkpoint selection,
 test performance or multi-seed conclusions. Directional contrastive losses,
 fixed-temperature inference and geometry still need the protected epoch weights.
 
+After the matched A reference has finished training and retention,
+`reference_contrastive.py run --workers 4` completes its remaining checkpoint
+audit before the next controlled fit. It requires all fifteen verified protected
+epochs, uses the shared GPU lock, and assigns one of the authorized GPU UUIDs to
+each worker. Every epoch is evaluated on validation and the exact original
+fixed training probe; it never reads a test partition or fits any parameters.
+All token payloads are checked against the frozen training plan before launch.
+
+The export preserves normalized embeddings, quantifies differences from native
+four-rank scalar predictions, and recomputes both contrastive directions on the
+same three complete-coverage candidate partitions at the learned scale and at
+the initial scale13. It uses the original B audit's material-drift limits
+(0.01 contrastive loss and 0.001 macro Spearman); differences are reported even
+when below those limits. Candidate-pool hashes must match across all epochs.
+The command is restricted to the original reference mask, threshold and seed,
+so controlled masking variants cannot silently reuse the wrong loss policy.
+Outputs live in `tier1/reference_contrastive/`. Local tiny-model checks and a
+refusal to run before training completes are runtime qualification only;
+the thirty scientific exports and their loss trajectories must still execute.
+
 The reference run recorded W&B 0.22.3, Torch 2.13.0+cu129, Transformers 5.5.0,
 Datasets 2.21.0, and Accelerate 1.10.1. Atum matched the training libraries but
 had W&B 0.17.6, which failed during server-settings introspection before any
