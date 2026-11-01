@@ -145,6 +145,39 @@ The independent scientific launcher must still verify the Tier 3 gate, selected
 checkpoint, full token-payload provenance and the shared GPU lock before calling
 this worker. Tiny-model CPU tests do not establish scientific GPU qualification.
 
+`objective_probes.py` is the E56/E57 numerical worker, with no scientific job
+launcher. It measures weighted R/B/C gradients on disjoint parameter blocks:
+individual encoder layers, embeddings/other encoder parameters, token
+projections/norms, fusion blocks and objective-specific heads/projections/scale.
+Frozen, disconnected and zero-gradient cases remain explicit; undefined cosines
+are not replaced with zero. The existing Trainer helper instead measures R/C
+at normalized contrastive embeddings. In `mlp_contrastive`, R does not use that
+separate output branch, so its boundary diagnostic cannot answer Q33 about
+shared encoder or cross-attention parameters.
+
+Following the relative-loss construction in
+[Fifty et al.](https://arxiv.org/abs/2109.04617), lookahead records
+`1 - validation_loss_after / validation_loss_before`. The source gradient comes
+from the training batch; the target is a separate fixed cold validation batch,
+as requested by the MD, whereas the original TAG definition uses one training
+batch. Each temporary weighted-SGD step updates trainable encoders, interaction,
+or their union while holding private parameters fixed. This is not AdamW replay,
+task grouping or model retraining. Source weights and explicit per-block step
+sizes are recorded; zero target losses and ineffective steps have undefined
+relative transfer. Cloned functional parameters/buffers, disabled dropout and
+restored module/RNG state keep the loaded checkpoint unchanged.
+
+`objective_probe_design.py` prepares cold validation memberships on CPU. Each
+regime uses its own held-out units with no training scaffold match: whole assays
+for A, whole components for B. Mixed units are excluded intact. Selection uses
+identities/scaffolds only; label-derived eligibility and active counts describe
+feasibility. The A cohort is a cold subset, not the full A validation estimand.
+The design also records exact overlap between B validation and A training so
+those tables cannot silently be treated as disjoint. Fixed training/validation
+batch identities, candidate pools, step sizes, token/checkpoint provenance,
+GPU numerical resolution and the Tier 3 gate still require qualification before
+scientific probes. No E56/E57 result follows from these preparation checks.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
