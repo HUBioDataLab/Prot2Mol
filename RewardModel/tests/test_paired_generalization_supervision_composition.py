@@ -40,3 +40,15 @@ def test_binary_label_policy_and_missing_units_are_not_silently_accepted():
     units.iloc[0] = np.nan
     with pytest.raises(ValueError,match='complete row-level units'):
         composition(frame,.75,units)
+
+
+@pytest.mark.parametrize('values,sampler_count,headline_count',[
+    ([7.9,8.15,8.4],1,0),([3.6,3.8,4.1],0,1)])
+def test_sampler_and_metric_float_precision_are_reported_separately(values,sampler_count,headline_count):
+    frame = pd.DataFrame([dict(assay_id='edge',target_chembl_id='p',compound_id=f'm{i}',
+        pchembl_value=value,binary_label=int(value>=6.),measurement_count=1) for i,value in enumerate(values)])
+    result,groups,_,_ = composition(frame,.75,frame.assay_id)
+    assert result['eligibility']['sampler_eligible_groups'] == sampler_count
+    assert result['eligibility']['eligible_groups'] == headline_count
+    assert result['eligibility']['precision_disagreements'] == 1
+    assert result['sampler_eligible']['groups'] == sampler_count

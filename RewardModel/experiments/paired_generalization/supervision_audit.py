@@ -10,9 +10,11 @@ import pandas as pd
 if __package__:
     from .run import ROOT, WORK, sha256, write_json
     from .audit_data import group_descriptors
+    from .baseline_common import RankingSelection
 else:
     from run import ROOT, WORK, sha256, write_json
     from audit_data import group_descriptors
+    from baseline_common import RankingSelection
 
 
 def distribution(values):
@@ -30,6 +32,12 @@ def composition(frame, noise_rms, unit_ids):
     if not np.isfinite(frame.pchembl_value).all() or not frame.binary_label.isin([0,1]).all():
         raise ValueError('Supervision labels must be finite and binary')
     groups = group_descriptors(frame)
+    # The sampler reads cached float64 labels. Full-model evaluation first
+    # casts labels to float32, then compares their Python-float range. Keep
+    # these actual arithmetic paths separate at the strict span boundary.
+    groups['sampler_ranking_eligible'] = (groups['size'] >= 3) & (groups.span >= .5)
+    groups['headline_span'] = groups.high.astype('float32').astype('float64') - groups.low.astype('float32').astype('float64')
+    groups['ranking_eligible'] = (groups['size'] >= 3) & (groups.headline_span >= .5)
     eligible = groups.ranking_eligible
     profiles = groups.groupby('target_chembl_id').agg(groups=('group_id','size'),eligible=('ranking_eligible','sum'))
     profiles['eligible_fraction'] = profiles.eligible/profiles.groups
@@ -56,8 +64,12 @@ def composition(frame, noise_rms, unit_ids):
         eligibility=dict(eligible_groups=int(eligible.sum()),eligible_fraction=float(eligible.mean()),
             too_small_groups=int((groups['size'] < 3).sum()),
             enough_items_but_insufficient_span_groups=int(((groups['size'] >= 3) & ~eligible).sum()),
-            criterion='n >= 3 and float32 pChEMBL range >= 0.5; same criterion in training and headline evaluation'),
+            sampler_eligible_groups=int(groups.sampler_ranking_eligible.sum()),
+            precision_disagreements=int((groups.sampler_ranking_eligible != eligible).sum()),
+            criterion='Nominal n>=3/span>=0.5 in both paths. Sampler uses cached float64 labels; headline uses float32 labels promoted to Python floats for the range check. Boundary disagreements are explicit.'),
         all_groups=subset_summary(groups),eligible=subset_summary(groups[eligible]),ineligible=subset_summary(groups[~eligible]),
+        sampler_eligible=subset_summary(groups[groups.sampler_ranking_eligible]),
+        sampler_ineligible=subset_summary(groups[~groups.sampler_ranking_eligible]),
         targets=dict(total=len(profiles),with_no_eligible_groups=int((profiles.eligible == 0).sum()),
             with_only_eligible_groups=int((profiles.ineligible == 0).sum()),
             with_both=int(((profiles.eligible > 0) & (profiles.ineligible > 0)).sum()),
@@ -85,7 +97,7 @@ def main():
     if sha256(unit_path) != split_audit['unit_map_sha256']:
         raise ValueError('Scaffold unit map changed after assignment audit')
     unit_map = pd.read_parquet(unit_path).set_index('assay_id').component
-    destination = WORK/'tier1/supervision_composition'
+    destination = WORK/'tier1/supervision_composition_v2'
     destination.mkdir(parents=True,exist_ok=True)
     results,artifacts = {},{}
     for regime in ('A','B'):
@@ -105,11 +117,23 @@ def main():
                 artifacts[path.name] = sha256(path)
             print(json.dumps(dict(regime=regime,partition=role,eligibility=summary['eligibility'],
                 all_positive=summary['all_groups']['all_positive_groups'],all_negative=summary['all_groups']['all_negative_groups'])),flush=True)
-    record = dict(format_version=1,questions=['Q14','Q21','Q23'],results=results,
+    prediction_path = WORK/'tier1/predictions/best_test/predictions.parquet'
+    native_path = WORK/'baseline_scaffold_seed42_15ep/experiment_summary.json'
+    predictions = pd.read_parquet(prediction_path)
+    raw_label_result = RankingSelection(predictions)(predictions.ranking_score.to_numpy())
+    tensor_labels = predictions.assign(pchembl_value=predictions.pchembl_value.astype('float32').astype('float64'))
+    tensor_label_result = RankingSelection(tensor_labels)(predictions.ranking_score.to_numpy())
+    native = json.loads(native_path.read_text())['test_metrics']
+    precision_comparison = dict(predictions_sha256=sha256(prediction_path),native_summary_sha256=sha256(native_path),
+        exported_scores_raw_float64_labels=raw_label_result,exported_scores_float32_labels=tensor_label_result,
+        native_trainer_test={key:value for key,value in native.items() if 'spearman' in key},
+        interpretation='Same fixed checkpoint and exported scores, changing only label precision. Native Trainer uses float32 labels; residual differences can also reflect its different inference batches. No checkpoint selection changed.')
+    record = dict(format_version=2,questions=['Q14','Q21','Q23'],results=results,
+        initial_reference_label_precision=precision_comparison,
         primary_plan_sha256=sha256(primary_path),data_sha256=plan['source_data_sha256'],
         unit_map_sha256=sha256(unit_path),noise_summary_sha256=sha256(noise_path),artifacts_sha256=artifacts,
         code_sha256=sha256(Path(__file__)),
-        interpretation='Descriptive complete-partition audit with current partition-local labels. No model outputs, causal attribution, selection test or training performed.')
+        interpretation='Descriptive complete-partition audit with current partition-local labels and separate sampler/headline arithmetic. Supersedes the v1 omission of boundary disagreements; no model outputs, causal attribution, selection test or training performed.')
     write_json(destination/'complete.json',record)
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import math
+import argparse
+import time
 from pathlib import Path
 
 import numpy as np
@@ -201,6 +203,61 @@ def prepare():
     return plan
 
 
+def qualify_views():
+    """Exercise both production cache/view paths without GPU work or training."""
+    from datasets import load_from_disk
+    from reward_model.training.config import load_reward_training_config
+    from reward_model.training.data import RewardAssayListDataset
+    from reward_model.training.train_views import load_training_view
+    if ROOT != Path('/home/atabey/Prot2Mol'):
+        raise RuntimeError('Runtime qualification is restricted to Atum Prot2Mol')
+    directory = WORK/'learning_curves'
+    plan = json.loads((directory/'plan.json').read_text())
+    ready = json.loads((directory/'preparation_complete.json').read_text())
+    if ready['plan_sha256'] != sha256(directory/'plan.json'):
+        raise ValueError('Prepared learning-curve plan changed')
+    records = []
+    for regime in ('A','B'):
+        job = next(j for j in plan['tuning_jobs'] if j['regime'] == regime and j['fraction'] == .1 and j['learning_rate_multiplier'] == 1.)
+        metadata = json.loads((directory/'jobs'/f"{job['id']}.json").read_text())
+        if sha256(Path(metadata['config_path'])) != metadata['config_sha256']:
+            raise ValueError('Prepared training configuration changed')
+        config = load_reward_training_config(metadata['config_path'])
+        original = load_from_disk(str(Path(config.data.tokenized_dataset_dir)/'train_examples'))
+        started = time.monotonic()
+        view,provenance = load_training_view(original,config.data)
+        for column in ('protein_input_ids','molecule_input_ids','protein_attention_mask','molecule_attention_mask'):
+            before = {chunk.values.buffers()[1].address for chunk in original.data.column(column).chunks}
+            after = {chunk.values.buffers()[1].address for chunk in view.data.column(column).chunks}
+            if not after <= before:
+                raise ValueError('Training view copied a token payload buffer')
+        if {p['filename'] for p in view.cache_files} != {p['filename'] for p in original.cache_files}:
+            raise ValueError('Training view lost its original memory-mapped cache provenance')
+        sampler = RewardAssayListDataset(view,seed=config.training.seed,
+            ranking_max_ligands=config.data.ranking_max_ligands,
+            ranking_opportunity_divisor=config.data.ranking_opportunity_divisor,
+            ranking_min_pchembl_span=config.data.ranking_min_pchembl_span,
+            max_classification_only_per_item=config.data.max_classification_only_per_item,
+            include_all_assays_for_contrastive=True,item_count_multiple=48)
+        if len(sampler) != provenance['statistics']['dataset_items_per_epoch']:
+            raise ValueError('Production view has different sampler cardinality from preparation')
+        record = dict(regime=regime,job_id=job['id'],config_sha256=metadata['config_sha256'],
+            **provenance,actual_sampler_eligible_groups=sampler.stats.num_eligible_assays,
+            shared_token_buffers_verified=True,elapsed_seconds=time.monotonic()-started)
+        records.append(record)
+        print(json.dumps(dict(regime=regime,rows=len(view),sampler_items=len(sampler),
+                             sampler_eligible_groups=sampler.stats.num_eligible_assays)),flush=True)
+        del sampler,view,original
+    result = dict(plan_sha256=sha256(directory/'plan.json'),views=records,
+        code_sha256=sha256(Path(__file__)),
+        scope='CPU production-data loading, labels, shared buffers and actual sampler only; no optimizer/GPU training or scientific performance')
+    write_json(directory/'qualified_data_views.json',result)
+    return result
+
+
 if __name__ == '__main__':
-    result = prepare()
-    print(json.dumps(result['accounting'],indent=2))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--qualify-views',action='store_true')
+    args = parser.parse_args()
+    result = qualify_views() if args.qualify_views else prepare()
+    print(json.dumps(result.get('accounting',{'scope':result['scope']} if 'scope' in result else {}),indent=2))
