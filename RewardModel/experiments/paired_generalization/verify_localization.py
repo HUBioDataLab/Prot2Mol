@@ -75,7 +75,9 @@ def verify_scalar(frame, groups, table, summaries):
     frame['bce'] = np.where(frame.binary_label.to_numpy() == 1,
                            -log_expit(frame.activity_logits.to_numpy(float)),
                            -log_expit(-frame.activity_logits.to_numpy(float)))
-    frame['abs_logit'] = frame.activity_logits.abs()
+    # Exported logits may be float32; accumulate their exact values in float64
+    # just as for the independently reconstructed Bernoulli loss above.
+    frame['abs_logit'] = np.abs(frame.activity_logits.to_numpy(np.float64))
     groups = groups.sort_values('group_id').reset_index(drop=True)
     table = table.sort_values('group_id').reset_index(drop=True)
     pd.testing.assert_frame_equal(table[groups.columns], groups, check_exact=True)

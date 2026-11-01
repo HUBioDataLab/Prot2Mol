@@ -27,6 +27,16 @@ def test_independent_scalar_checks_ties_extreme_logits_and_undefined_correlation
     assert verify.rank_auc([1, 1], [1., 2.]) is None
 
 
+def test_float32_exported_logits_are_accumulated_without_float32_rounding():
+    frame, groups = data()
+    frame['activity_logits'] = np.random.default_rng(91).normal(size=len(frame)).astype(np.float32)
+    summaries, table = scalar.score(frame, frame, groups)
+    original = frame.activity_logits.to_numpy().copy()
+    assert frame.activity_logits.dtype == np.float32
+    verify.verify_scalar(frame, groups, table, summaries)
+    np.testing.assert_array_equal(frame.activity_logits.to_numpy(), original)
+
+
 @pytest.mark.parametrize('field', ['bce_sum', 'spearman', 'size', 'roc_auc'])
 def test_scalar_table_or_summary_corruption_is_rejected(field):
     frame, groups = data()
