@@ -264,6 +264,17 @@ reference objective/normalization; it does not reinterpret controlled loss arms.
 It reads no test scores or model weights. Results live in
 `tier1/ranking_localization/`; contrastive-loss localization remains separate.
 
+After both reference trajectories reach 15 epochs, run
+`verify_localization.py --root /home/atabey/Prot2Mol --a-trajectory <immutable-A-trajectory.json> --scalar <scalar-output-directory> --ranking <ranking-output-directory>`
+with `CUDA_VISIBLE_DEVICES=''`. It checks provenance and every scalar group
+correlation, BCE sum, stratum reduction and rank-sum AUROC against the saved
+validation rows. It also reconstructs all native list descriptors and checks
+production listwise loss on samples from each partition and assay-size bin.
+Both output directories receive `verification.json` only after every epoch
+passes; existing receipts are never overwritten. Bootstrap intervals and
+endpoint-selection uncertainty are outside this independent verification.
+It performs no model inference, fitting or test-set evaluation.
+
 `contrastive_localization.py --regime B` attributes both contrastive directions
 to the original assay-size and scaffold strata using the existing fifteen
 validation embedding exports. It keeps the original candidate batches intact,
