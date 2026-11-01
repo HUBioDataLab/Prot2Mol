@@ -103,6 +103,19 @@ does not itself establish training completion, final checkpoint selection,
 test performance or multi-seed conclusions. Directional contrastive losses,
 fixed-temperature inference and geometry still need the protected epoch weights.
 
+`stratified_trajectory.py --a-trajectory <immutable-A-trajectory.json>` answers
+the scalar part of Q11 on CPU. It uses saved validation scores for all fifteen
+initial B epochs and an independently verified A prefix. Fixed whole-assay
+size bins and binary scaffold-support classes carry row-weighted BCE, assay
+macro BCE, AUROC and eligible macro Spearman; paired endpoint changes resample
+whole units, including units outside each stratum. The earliest observed BCE
+minimum and ranking maximum are descriptive endpoints, not new checkpoint
+selection. Intervals condition on those endpoints and omit selection/seed
+uncertainty and multiple-stratum adjustment. A prefix is not a completed
+trajectory; B has no shared-scaffold groups under this relation. Listwise and
+contrastive loss localization remain separate. Results and exact source hashes
+are saved in `tier1/stratified_trajectories/`; no test predictions are read.
+
 After the matched A reference has finished training and retention,
 `reference_contrastive.py run --workers 4` completes its remaining checkpoint
 audit before the next controlled fit. It requires all fifteen verified protected
