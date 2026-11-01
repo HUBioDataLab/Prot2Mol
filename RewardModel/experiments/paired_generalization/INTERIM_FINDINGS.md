@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–11. These
+native validation and fixed training-probe audits for epochs 1–12. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -362,58 +362,61 @@ and preserve the Trainer's float32 label semantics.
 | 9 | 0.31908 | 0.42791 | 0.43174 | 2.45581 | 1.80663 |
 | 10 | 0.32604 | 0.45533 | 0.43004 | 2.44086 | 1.76385 |
 | 11 | 0.33268 | 0.46520 | 0.42968 | 2.42924 | 1.72345 |
+| 12 | 0.33637 | 0.47843 | 0.42907 | 2.42858 | 1.69640 |
 
-Validation AUROC rises 0.72635→0.84194 across epochs 1→11 and the contrastive
-scale rises 13.5412→21.0255. Epochs 5→6 show the first adjacent BCE increase
+Validation AUROC rises 0.72635→0.84345 across epochs 1→12 and the contrastive
+scale rises 13.5412→21.3781. Epochs 5→6 show the first adjacent BCE increase
 (0.44381→0.44842), a small AUROC decrease (0.81971→0.81954), and continued
 ranking-loss and macro-Spearman improvement. BCE falls to 0.44339 at epoch 7,
-below the epoch-5 value, then to 0.44007/0.43174/0.43004/0.42968 at epochs 8/9/10/11;
+below the epoch-5 value, then to 0.44007/0.43174/0.43004/0.42968/0.42907 at epochs 8/9/10/11/12;
 that increase did not persist.
 On the same eligible validation assays,
 NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
-0.70232/0.74369/0.77826 at epoch 11. All three increase from epoch 10.
-Epoch-11 BCE-logit and cosine-only macro Spearman are 0.26184 and 0.17165;
-the latter recovers from 0.16717 at epoch 10 but remains below 0.17385 at epoch 9.
-Ranking and cosine have defined rho on all 7,997 eligible assays at epoch 11;
-the BCE logit is constant in one eligible assay and is defined on 7,996.
+0.70716/0.74470/0.77914 at epoch 12. All three increase from epoch 11.
+Epoch-12 BCE-logit and cosine-only macro Spearman are 0.26451 and 0.17366;
+the latter rises from 0.17165 at epoch 11 but remains below 0.17385 at epoch 9.
+All three scorers have defined rho on all 7,997 eligible assays at epoch 12;
+the BCE logit had one constant eligible assay at epoch 11.
 Constant predictions are not jittered or assigned artificial
 correlations. Positive temperature calibration fitted on that validation set
-gives T=1.25537 and reduces log-loss from 0.42968 to 0.42185; this is an
+gives T=1.28742 and reduces log-loss from 0.42907 to 0.41930; this is an
 in-sample fit, with no test transfer.
 
-At epoch 11, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.35987/0.27902/0.23762 (5,405/2,402/190 eligible assays).
-All three point estimates rise from epoch 10; the all-unseen score also exceeds
-its epoch-9 value of 0.23027, so the small epoch-10 dip did not persist.
-Restricting to unseen-scaffold rows within assays instead gives 0.19835,
-up from 0.19525 at epoch 10, on
+At epoch 12, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.36495/0.28158/0.21576 (5,405/2,402/190 eligible assays).
+Shared and mixed point estimates rise from epoch 11, whereas the all-unseen
+score falls from 0.23762 despite the overall ranking improvement.
+Restricting to unseen-scaffold rows within assays instead gives 0.19626,
+down from 0.19835 at epoch 11, on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.33249 to 0.32330. These local
-changes do not establish a turning point. This
+changes A common-support validation macro from 0.33605 to 0.32698. These local
+changes have not been tested as adjacent-epoch contrasts and do not establish a
+sustained turning point. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→11, validation ranking–BCE agreement changes 0.63061→0.63223
-on the same 7,994 mutually defined eligible assays; the paired whole-assay
-interval for the change is [−0.00836, 0.01233], including zero. This intersection
-differs from the earlier epoch-1/10 comparison because constant-score assays
-differ by epoch. Ranking–cosine agreement rises 0.12360→0.30290 on 7,997 assays,
-with change interval [0.16510, 0.19283].
+Across epochs 1→12, validation ranking–BCE agreement changes 0.63066→0.63210
+on the same 7,995 mutually defined eligible assays; the paired whole-assay
+interval for the change is [−0.00880, 0.01183], including zero. This intersection
+differs from the earlier epoch-1/11 comparison because constant-score assays
+differ by epoch. Ranking–cosine agreement rises 0.12360→0.29517 on 7,997 assays,
+with change interval [0.15808, 0.18491], although its epoch-12 point estimate is
+below epoch 11's 0.30290.
 Agreement fluctuates across epochs; the prefix does not show uniform scorer divergence.
 
 Both the best validation macro Spearman and minimum aggregate validation loss
-in this eleven-epoch prefix occur at epoch 11. These are observed-prefix extrema,
+in this twelve-epoch prefix occur at epoch 12. These are observed-prefix extrema,
 not the final checkpoint choices or an established overfitting turning point.
 Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch11.json`, per-assay
-metric tables and `verification_through_epoch11.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 609,807
+on Atum, including the immutable `trajectory_through_epoch12.json`, per-assay
+metric tables and `verification_through_epoch12.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 665,244
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
 pairs reproduced sampled noise-band/group/scorer counts; direct
-weighted means reproduced all eleven
+weighted means reproduced all twelve
 composition-standardized validation scores. All source/artifact hashes passed.
 The reusable `verify_native_analysis.py` performed the epoch-7 onward checks and
 rechecked the prior prefix's sources and table bytes before inheriting its
@@ -422,8 +425,9 @@ counts and composition-weighted point estimates; it does not independently
 reconstruct bootstrap intervals, temperature fits or all NDCG values.
 
 A CPU handoff watcher is now armed on Atum (PID1097836, verified live at
-Unix1793569262.63). The A optimizer log has reached epoch 11.71; independent native
-analysis now covers epochs 1–11. The watcher waits for the exact original
+Unix1793570025.29). The A optimizer log has reached epoch 12.19; independent native
+analysis now covers epochs 1–12. The protector reports epochs 1–12 retained and
+its retention hold remains active. The watcher waits for the exact original
 training/driver/protector handles to end, verifies all 15 protected checkpoints
 and completed training/retention, runs the 30 protected A contrastive exports,
 then starts one next job through the existing frozen-grid driver. It passed 15
