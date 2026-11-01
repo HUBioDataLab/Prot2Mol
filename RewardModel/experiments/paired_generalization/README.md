@@ -71,6 +71,26 @@ Runtime artifacts and logs live in `RewardModel/outputs/paired_generalization`.
 Scientific experiments are not complete merely because preparation or the
 distributed smoke check passes.
 
+`native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
+completed native validation and fixed training-probe snapshots on CPU while
+training continues. It verifies row identities, labels, dataset fingerprints,
+source and snapshot hashes, and exact native headline metric parity before
+reporting alternative metrics, noise bands, scorer agreement, validation-only
+temperature fits, scaffold strata and fixed composition standardization.
+The exact production training-probe selection is reconstructed from the cache;
+its statistics describe the selected eligible assays, not all training data.
+Training source/token provenance remains the registered launch: the audit
+checks every consumed identity and raw label but does not read or rehash token
+payloads. Test predictions are excluded from this command.
+
+Results live in `tier1/native_trajectories/<job>/<software-signature>/`;
+`latest.json` identifies the currently analysed contiguous epoch prefix. Re-run
+the command after later epochs finish. Immutable snapshot analyses are reused
+only after provenance and output checksum verification. Observing all epochs
+does not itself establish training completion, final checkpoint selection,
+test performance or multi-seed conclusions. Directional contrastive losses,
+fixed-temperature inference and geometry still need the protected epoch weights.
+
 The reference run recorded W&B 0.22.3, Torch 2.13.0+cu129, Transformers 5.5.0,
 Datasets 2.21.0, and Accelerate 1.10.1. Atum matched the training libraries but
 had W&B 0.17.6, which failed during server-settings introspection before any
