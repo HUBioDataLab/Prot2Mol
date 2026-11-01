@@ -741,6 +741,129 @@
       "model_fitting": false,
       "model_inference": false,
       "test_predictions_read": false
+    },
+    "geometry_membership_design": {
+      "status": "prepared_and_independently_verified_no_scientific_inference",
+      "experiment_ids": [
+        "E54",
+        "E55"
+      ],
+      "evidence": "tier4/geometry_design/{complete.json,verification.json} on Atum",
+      "complete_sha256": "99707acbeed1ecf7863674f2a4d953c086fd5a3138310c151a9ec86956177144",
+      "verification_sha256": "ccd8cfb25ffb3f50dfccb8abdbb23626dff768376458cb2165e0acbf23d47f14",
+      "code_commit": "e488cf1",
+      "code_sha256": "a14f38ad0eef05af4616631a3b546230e11e06d97d6f6858a3760372cc766fc4",
+      "cohorts": {
+        "A_test": {
+          "observations": {
+            "cap": 25600,
+            "population": 192687,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 162361,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 2421,
+            "sampled": 2421
+          }
+        },
+        "A_train": {
+          "observations": {
+            "cap": 25600,
+            "population": 1569095,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 882510,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 7873,
+            "sampled": 7873
+          }
+        },
+        "A_val": {
+          "observations": {
+            "cap": 25600,
+            "population": 195618,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 166367,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 2380,
+            "sampled": 2380
+          }
+        },
+        "B_test": {
+          "observations": {
+            "cap": 25600,
+            "population": 136956,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 81140,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 1723,
+            "sampled": 1723
+          }
+        },
+        "B_train": {
+          "observations": {
+            "cap": 25600,
+            "population": 1683487,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 839318,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 7873,
+            "sampled": 7873
+          }
+        },
+        "B_val": {
+          "observations": {
+            "cap": 25600,
+            "population": 136957,
+            "sampled": 25600
+          },
+          "unique_molecules": {
+            "cap": 25600,
+            "population": 80690,
+            "sampled": 25600
+          },
+          "unique_proteins": {
+            "cap": 25600,
+            "population": 1721,
+            "sampled": 1721
+          }
+        }
+      },
+      "cohorts_verified": 18,
+      "cohort_memberships_verified": 331191,
+      "selection": "Identity-only fixed observations and unique-entity views, cap25600; canonical representative observations, seed42. Fixed across checkpoints.",
+      "numerical_qualification": "9 CPU tests passed: exact spectrum cases distinguish singular entropy from covariance entropy; explicit pair distances; zero-vector coverage; deterministic sampling; actual tiny-model contrastive projection boundaries and unchanged weights.",
+      "execution_scope": "CPU-only membership preparation PID1047105 finished, absent at Unix1793565136.80; no labels, predictions, model weights or GPUs used by preparation. Independent verification reads source identities, not the production sampling helper.",
+      "remaining": "Scientific inference/export orchestration with frozen checkpoint/token/row provenance and permitted-GPU qualification, then geometry results after Tier3; E54/E55 remain pending.",
+      "interpretation": "Geometry is descriptive, not proof of ranking transfer. Cross-modal alignment only in the learned postprojection space; label-conditioned active-pair alignment must be distinguished from label-free rank/uniformity."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -1348,7 +1471,9 @@
       "key": "alignment_uniformity",
       "experiment": "Measure alignment/uniformity per side and split before/after projections",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Fixed label-free cohorts across all six partitions independently verified (18 observation/entity views, 331191 memberships). Numerical metric and contrastive projection capture helpers passed9 CPU tests. Scientific checkpoint/token/row qualification, inference and all geometry results remain pending behind Tier3.",
+      "preparation_evidence": "tier4/geometry_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E55",
@@ -1356,7 +1481,9 @@
       "key": "effective_rank",
       "experiment": "Measure representation effective rank at the specified representation stages",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Fixed label-free cohorts across all six partitions independently verified (18 observation/entity views, 331191 memberships). Numerical metric and contrastive projection capture helpers passed9 CPU tests. Scientific checkpoint/token/row qualification, inference and all geometry results remain pending behind Tier3.",
+      "preparation_evidence": "tier4/geometry_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E56",

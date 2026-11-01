@@ -782,6 +782,41 @@ Subset-local BCE labels must be reconstructed before fitting. All source hashes,
 count were independently verified. Source:
 `tier4/adaptation_design/{complete.json,verification.json}` on Atum.
 
+## Representation geometry preparation — inference pending
+
+E54/E55 have fixed, label-free sampling cohorts for each A/B train, validation
+and test partition. Every partition has 25,600 observation-weighted rows and
+25,600 unique-molecule representatives, plus all its distinct proteins:
+
+| Partition | A distinct proteins | B distinct proteins |
+|---|---:|---:|
+| Train | 7,873 | 7,873 |
+| Validation | 2,380 | 1,721 |
+| Test | 2,421 | 1,723 |
+
+Identity hashes determine selection and ordering, with seed42; a canonical
+observation supplies each entity representative. The same rows and distance
+pairs will be used across checkpoints. Observation-weighted and unique-entity
+views measure different distributions and will remain separate. Independent
+checks reconstructed every selection from raw identities: 331,191 memberships
+across 18 cohorts, with all source/output hashes verified. Source:
+`tier4/geometry_design/{complete.json,verification.json}` on Atum.
+
+Nine CPU tests qualify singular-value effective rank, normalized alignment and
+uniformity, zero-vector coverage, and capture of the actual model's pooled
+contrastive projection boundaries without changing weights. The rank definition
+is uncentered singular-value entropy, as in
+[RankMe](https://arxiv.org/abs/2210.02885); the existing older diagnostic's centered
+covariance entropy is a different statistic. The
+[alignment/uniformity definitions](https://arxiv.org/abs/2005.10242) use normalized
+vectors. Cross-modal alignment applies only in the trained common projection
+space; unrelated encoder coordinates are not made comparable by padding.
+
+These are membership and numerical checks only. No scientific geometry value,
+representation-collapse conclusion or improvement is established. Checkpoint,
+token and row provenance, permitted-GPU inference qualification and the actual
+measurements remain pending behind Tier3. E54/E55 remain **pending**.
+
 Deployment is unseen generated molecules. That does not establish whether their
 scaffolds are unseen. The report must distinguish unseen identity from unseen
 scaffold, rather than presume either split alone matches the generator.
