@@ -159,6 +159,34 @@ entrypoint and its project-local dependencies were verified unchanged between
 the launch checkout c920520 and completion checkout 355d147. Future runs
 capture the launch commit and source hashes before fitting.
 
+## Sampling and contrastive negatives
+
+The configured first epoch contains 12,820 local microbatches on A and 14,020
+on B, with 12 dataset items per device. These are bounded assay lists plus
+classification-only rows. Ranking-eligible lists average 55.83%/56.25% of each
+batch, with standard deviations 14.68/14.74 percentage points. Both splits'
+5th-95th percentile range is 33.33%-83.33%; each has one batch with no ranked
+list. This audits the actual sampler implementation and first-epoch ordering,
+not a saved trace of historical device execution.
+
+The reference already masks cross-assay same-protein and duplicate-query-
+molecule negatives, as well as other candidates in an anchor's own assay.
+However, a molecule sampled under another protein can be a known positive for
+the query protein in a different training assay. In 512 evenly spaced batches
+per split, such entries make up 0.530%/0.714% of protein-to-molecule negative
+comparisons on A/B, or 0.437/0.576 per active anchor. Reverse-direction fractions
+are 0.441%/0.657%. A numerical gradient check confirms that the current loss
+pushes these entries down. Known positives are defined only by curated training
+observations above pChEMBL 6; unmeasured positives are unknown. These counts
+justify testing a global training-positive mask but do not demonstrate a
+performance improvement from it.
+
+Candidate protein frequency is skewed: the top 1% of 7,873 proteins supply
+30.07%/30.64% of A/B assay-list opportunities. The median is two per protein;
+maxima are 1,587/1,589. No sampling-probability correction is applied. Frequency
+skew alone does not establish a learned popularity shortcut. Sources:
+`tier1/sampling/{A,B}/complete.json`, with per-batch and per-protein tables.
+
 ## Distribution shift
 
 A fixed logistic classifier used group descriptors, with whole units held out

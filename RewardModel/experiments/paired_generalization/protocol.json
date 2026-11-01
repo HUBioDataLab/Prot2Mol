@@ -181,16 +181,18 @@
       "question": "Are batches built from whole groups or from observations, and is the fraction of ranking-eligible groups per batch fixed?",
       "rationale": "The ranking loss is defined on only about half the groups, so its effective weight fluctuates with batch composition.",
       "interpretation": "Large fluctuation means adaptive loss-weighting methods read noise. Use stratified batches before comparing objectives.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "Batches contain bounded assay lists plus classification-only rows, not independent pair rows or every member of every large assay. In the exact configured epoch-zero ordering, the ranking-eligible list fraction averages 0.5583 on A and 0.5625 on B, with standard deviations 0.1468/0.1474; the 5th-95th percentiles are 1/3 to 5/6 on both. Each split has one local batch with no eligible ranking list. Eligibility is not stratified to a fixed fraction. Counts cover all 12,820/14,020 local microbatches; they reconstruct the sampler, not historical device traces.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/sampling/{A,B}/complete.json and epoch0_batches.parquet on Atum"
     },
     {
       "id": "Q25",
       "question": "Does the contrastive loss treat other positives of the same x in the batch as negatives?",
       "rationale": "With group batching and diagonal-only targets, a positive anchor in a 25-item group at 70% positives sees about 16\u201317 labeled positives as negatives (inference). Standard two-tower practice masks only identical candidate IDs ([TFRS](https://www.tensorflow.org/recommenders/api_docs/python/tfrs/tasks/Retrieval)).",
       "interpretation": "If co-positives are treated as negatives, the contrastive loss directly opposes the BCE and ranking losses. Masking them, or using multi-positive targets, is the first fix to test.",
-      "status": "partial",
-      "answer": "The reference already hides other ligands of an anchor's own assay and masks cross-assay same-protein and duplicate-query-molecule entries. It does not consult a global table of training positives: a candidate sampled under a different protein can still be a known positive for the query protein in another training assay. A numerical gradient fixture verifies this remaining negative push; actual epoch/batch counts are being audited.",
-      "evidence": "reward_model/model/losses.py; tests/test_paired_generalization_sampling_audit.py; pending tier1/sampling/{A,B}/complete.json"
+      "status": "answered_with_limits",
+      "answer": "The reference already hides own-assay co-candidates and masks cross-assay same-protein and duplicate-query-molecule entries. Those observed same-protein negatives are zero in the audit. Global training-known positives can remain negatives when sampled under another protein. Across 512 deterministic epoch-zero batches per split, these are 0.530%/0.714% of protein-to-molecule negative comparisons on A/B (0.437/0.576 per active anchor), and 0.441%/0.657% in the reverse direction. A gradient fixture verifies their negative push. This is a lower bound from any curated training observation above 6, not all biological positives, and does not establish the performance impact of masking them.",
+      "evidence": "reward_model/model/losses.py; tests/test_paired_generalization_sampling_audit.py; tier1/sampling/{A,B}/complete.json and known_false_negative_batches.parquet on Atum"
     },
     {
       "id": "Q26",
@@ -215,7 +217,9 @@
       "question": "Are x frequencies in batches skewed, and is any sampling-probability correction applied?",
       "rationale": "Uncorrected in-batch softmax is biased under power-law frequencies ([Yi et al. 2019](https://research.google/pubs/sampling-bias-corrected-neural-modeling-for-large-corpus-item-recommendations/)). The y-to-x direction can learn an offset for x popularity (inference).",
       "interpretation": "A strong x-popularity component in the contrastive branch is a shortcut that needs no information about y.",
-      "status": "pending"
+      "status": "answered_with_limits",
+      "answer": "Yes: across the configured first epoch, the top 1% of 7,873 proteins supply 30.07% of A and 30.64% of B assay-list opportunities. The median is two lists per protein, versus maxima 1,587/1,589. The reference has no sampling-probability/log-Q correction. This establishes skewed candidate frequency, not that the learned contrastive score actually uses a popularity shortcut; that requires pathway/probe evidence.",
+      "evidence": "tier1/sampling/{A,B}/complete.json and target_opportunities.parquet; reward_model/model/losses.py"
     },
     {
       "id": "Q29",
@@ -285,6 +289,7 @@
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
     "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported, LambdaMART still running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
     "controlled_runtime_qualification": "17 cases passed on two actual GPUs (physical 5 and 6): all loss subsets, frozen/partial/LoRA, fixed scale, stop-gradient, list normalization, assay balancing and pairwise variants. Each used three optimizer steps with two accumulated microbatches and synchronized fitted parameters. This is execution evidence on synthetic short inputs, not scientific performance or a full-size four-GPU trainer run. Evidence: controls_gpu_qualification_17b30ae.json on Atum.",
+    "sampling_audit": "Complete for both configured first epochs: all local microbatches, plus 512 evenly spaced candidate batches per split. Token/source identities and float32 labels verified before counting. Actual training-known false negatives remain after existing masks; performance impact awaits controlled masking runs.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
