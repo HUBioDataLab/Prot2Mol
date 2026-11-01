@@ -1,8 +1,9 @@
 import numpy as np
+import pandas as pd
 import pytest
 from scipy.optimize import nnls
 
-from experiments.paired_generalization.variance_audit import covariance_moments, fit_components
+from experiments.paired_generalization.variance_audit import covariance_moments, fit_components, fit_diagnostics
 
 
 def test_categorical_trace_fit_matches_explicit_dense_covariance_regression():
@@ -30,3 +31,13 @@ def test_nested_duplicate_effects_are_reported_as_nonidentifiable():
     assert result["design_rank"] == 2
     with pytest.raises(ValueError):
         fit_components([1., np.nan], {"x": [0, 1]})
+
+
+def test_replicate_contrast_diagnostic_uses_within_observation_degrees_of_freedom():
+    frame = pd.DataFrame({"pchembl_value": [0., 2., 8., 10., 12., 100.], "observation_id": [0, 0, 1, 1, 1, 2]})
+    fit = fit_components(frame.pchembl_value, {"observation": frame.observation_id})
+    diagnosis = fit_diagnostics(frame, fit)
+    assert diagnosis["replicate_contrast_degrees_of_freedom"] == 3
+    # SSE: 2 for the first observation, 8 for the second, zero for the singleton.
+    assert diagnosis["direct_within_observation_noise_variance"] == pytest.approx(10 / 3)
+    assert diagnosis["observed_centered_variance"] == pytest.approx(frame.pchembl_value.var(ddof=0))

@@ -87,6 +87,26 @@ def fit_components(values, labels):
     }
 
 
+def fit_diagnostics(subset, result):
+    grouped = subset.groupby("observation_id").pchembl_value.agg(["size", "var"])
+    degrees = int((grouped["size"] - 1).sum())
+    direct_noise = float((grouped["var"].fillna(0.) * (grouped["size"] - 1)).sum() / degrees) if degrees else None
+    components = result["variance_components"]
+    predicted = None
+    if components is not None:
+        # The last covariance-design column is tr(P Ki), including residual I.
+        traces = np.asarray(result["covariance_design_gram"])[:, -1]
+        predicted = float(np.array([components[name] for name in result["components"]]) @ traces / len(subset))
+    return {
+        "observed_centered_variance": float(np.var(subset.pchembl_value)),
+        "fitted_expected_centered_variance": predicted,
+        "direct_within_observation_noise_variance": direct_noise,
+        "replicate_contrast_degrees_of_freedom": degrees,
+        "boundary_components": [name for name, value in (components or {}).items() if value <= 1e-12],
+        "interpretation": "Boundary estimates do not establish absent biology or noiseless measurements. Covariance least squares can fit large shared groups at the expense of diagonal/replicate contrasts. Compare the fitted marginal variance and noise against these directly observed quantities before attributing variance or deriving a ceiling.",
+    }
+
+
 def main():
     base = WORK / "tier1"
     destination = base / "variance"
@@ -103,8 +123,6 @@ def main():
                                ("B", DATA / "scaffold_seed42")):
         for partition in ("train", "val", "test"):
             path = destination / f"{regime}_{partition}.json"
-            if path.exists():
-                continue
             assays = pd.read_parquet(directory / f"{partition}.parquet", columns=["assay_id"]).assay_id.unique()
             subset = raw[raw.assay_id.isin(assays)].copy()
             print(f"Variance components: {regime}/{partition}, {len(subset)} raw measurements", flush=True)
@@ -113,7 +131,8 @@ def main():
                       "target_by_scaffold": subset.target_chembl_id + "__" + subset.scaffold,
                       "assay": subset.assay_id,
                       "observation_residual": subset.observation_id}
-            result = fit_components(subset.pchembl_value, labels)
+            result = json.loads(path.read_text()) if path.exists() else fit_components(subset.pchembl_value, labels)
+            result["fit_diagnostics"] = fit_diagnostics(subset, result)
             unique = subset.drop_duplicates("observation_id")
             assay_size = unique.groupby("assay_id").size()
             cluster_count = unique.groupby(["assay_id", "scaffold"]).size()

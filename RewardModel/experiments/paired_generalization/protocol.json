@@ -83,7 +83,9 @@
       "question": "Which split matches deployment? Will future y mostly be near neighbours of known y, or come from new regions?",
       "rationale": "Park and Marcotte accept random splits only when the warm regime is the sole regime of interest. DataSAIL's authors say leakage-reduced splitting is the wrong choice when application data resemble training data ([DataSAIL](https://github.com/kalininalab/DataSAIL)).",
       "interpretation": "**Warm deployment:** 0.41 is the relevant number and Split B is a stress test. **Cold deployment:** Split B is the target, and Split A should not drive tuning.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "Deployment is unseen generated molecules, as specified by the user. Unseen identity does not imply unseen scaffold. Report the unseen-molecule cell of Split A and the unseen-scaffold stress test in Split B; the future mixture cannot be inferred without generator outputs.",
+      "evidence": "User deployment clarification; tier1/data/overlap_A_test.parquet and overlap_B_test.parquet"
     },
     {
       "id": "Q13",
@@ -125,7 +127,9 @@
       "question": "What is the replicate-based noise ceiling of the chosen metric on each split?",
       "rationale": "A noise ceiling marks the point where \"any remaining mismatch is then attributable to the noise in the measurements\" ([Nili et al. 2014](https://pmc.ncbi.nlm.nih.gov/articles/PMC3990488)). The replicates that are currently aggregated by median make it computable: split each pair's replicates into halves, score one half against the other with the headline metric, and apply a Spearman\u2013Brown correction.",
       "interpretation": "If Split B's ceiling is lower, part of the gap is a difference in measurement quality, and the right report is the fraction of the ceiling reached. Two caveats apply. Spearman\u2013Brown assumes parallel measurements ([SAGE](https://sk.sagepub.com/ency/edvol/embed/the-sage-encyclopedia-of-research-design-2e/chpt/spearman-brown-prophecy-formula)), and this research found no ML precedent for a noise ceiling on a grouped rank metric.",
-      "status": "pending"
+      "status": "answered_with_limitations",
+      "answer": "Test split-half macro Spearman is A 0.5445 versus B 0.3780; the requested Spearman-Brown heuristic is A 0.7050 versus B 0.5485. Coverage is only 420/8278 (5.07%) and 348/3972 (8.76%) eligible assays, respectively. These conditional heuristics do not establish a ceiling or fraction-of-ceiling result for the entire test set.",
+      "evidence": "tier1/replicates/noise_summary.json"
     },
     {
       "id": "Q19",
@@ -139,7 +143,9 @@
       "question": "What fraction of within-group pairs differ by less than the replicate noise?",
       "rationale": "Near-ties add noise to both training and evaluation.",
       "interpretation": "A large fraction lowers the ceiling and argues for tie-tolerant losses and metrics.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "Training-only raw-replicate RMS differences are A 0.78055 and B 0.76605 pChEMBL. The test pair fractions with label gaps at or below those bands are A 60.802% and B 61.887%. Under the same original margin log10(3), fractions are A 42.297% and B 43.640%. These bands describe raw-replicate disagreement, not uncertainty intervals for aggregated medians.",
+      "evidence": "tier1/noise_bands/composition_*.json"
     },
     {
       "id": "Q21",
@@ -261,7 +267,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "not_started",
+    "remaining_tiers": "Tier 2 pretrained feature extraction started on physical GPUs 0,2,5,6; model baselines and controlled retraining remain pending",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
@@ -271,9 +277,13 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/replicates/reconstruction.json on Atum"
     },
     "new_training_label_policy": "Partition-local pair medians, recommended and stated as the default while an optional preference question remains unanswered; completed scaffold baseline is unchanged.",
-    "replicate_reliability": "running",
-    "contrastive_direction_audit": "running",
-    "random_split_preparation": "running; same model and training configuration, isolated labels; no new training started"
+    "replicate_reliability": "complete on all six partitions; subset coverage and heuristic limitations explicit",
+    "contrastive_direction_audit": "complete for all 31 Split B exports",
+    "random_split_preparation": "complete with partition-local labels; matched deep training not started",
+    "variance_components": "six fits complete; boundary and model-fit limitations explicitly diagnosed",
+    "noise_band_metrics": "complete for all six compositions and 31 Split B prediction exports",
+    "formal_shift_tests": "six C2ST comparisons and Split B BBSE complete",
+    "frozen_features": "7,873 target identities and 1,001,148 molecule identities prepared; four authorized GPU workers active"
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
@@ -321,8 +331,10 @@
       "tier": "Tier 1",
       "key": "epsilon_band_concordance",
       "experiment": "Treat differences within replicate noise as ties",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "All 31 Split B exports re-scored with training-only replicate RMS epsilon and the original ranking margin; A predictions pending.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/noise_bands on Atum"
     },
     {
       "id": "E05",
@@ -373,24 +385,30 @@
       "tier": "Tier 1",
       "key": "replicate_noise_ceiling",
       "experiment": "Estimate replicate split-half ceiling with assumptions and coverage stated",
-      "status": "pending",
-      "conditional": false
+      "status": "complete",
+      "conditional": false,
+      "completed_scope": "Split-half ranking reliability over 100 assignments in all six partitions; Spearman-Brown heuristic and replicated-assay coverage reported; full-dataset ceiling is not identifiable.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/replicates/noise_summary.json on Atum"
     },
     {
       "id": "E11",
       "tier": "Tier 1",
       "key": "variance_components",
       "experiment": "Fit molecule-cluster main effect, protein-by-cluster interaction, and noise components where identifiable",
-      "status": "pending",
-      "conditional": false
+      "status": "complete",
+      "conditional": false,
+      "completed_scope": "Six identifiable categorical covariance fits, with explicit boundary estimates and direct marginal/replicate fit diagnostics; no causal or full-dataset ceiling claim.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/variance on Atum"
     },
     {
       "id": "E12",
       "tier": "Tier 1",
       "key": "checkpoint_loss_decomposition",
       "experiment": "Decompose saved checkpoint losses, including both contrastive directions",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "All 15 Split B checkpoints decomposed by objective and contrastive direction; matched Split A checkpoints pending.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/contrastive on Atum"
     },
     {
       "id": "E13",
@@ -427,8 +445,10 @@
       "tier": "Tier 1",
       "key": "fixed_candidate_pool",
       "experiment": "Re-evaluate contrastive loss against a fixed candidate pool",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "All 31 Split B exports evaluated with fixed candidate partitions and both learned and initial fixed logit scales.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/contrastive on Atum"
     },
     {
       "id": "E17",
@@ -445,16 +465,20 @@
       "tier": "Tier 1",
       "key": "c2st",
       "experiment": "Classifier two-sample test on group descriptors",
-      "status": "pending",
-      "conditional": false
+      "status": "complete",
+      "conditional": false,
+      "completed_scope": "Six within-regime partition comparisons with whole-unit held-out classifiers, whole-unit permutation tests, bootstrap intervals and six-test Holm adjustment.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/shift/c2st_summary.json on Atum"
     },
     {
       "id": "E19",
       "tier": "Tier 1",
       "key": "bbse",
       "experiment": "Label-marginal shift estimation/test with invertibility checked",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Split B validation-to-test BBSE completed with invertibility and unit-bootstrap checks; post-selection limitation explicit; Split A predictions pending.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/shift/bbse_B.json on Atum"
     },
     {
       "id": "E20",
