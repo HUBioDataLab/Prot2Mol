@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -22,6 +23,26 @@ else:
 
 def read(path):
     return json.loads(path.read_text())
+
+
+def pidfd_open(pid):
+    if hasattr(os, 'pidfd_open'):
+        return os.pidfd_open(pid)
+    # Atum's conda Python was built without this binding; glibc still exposes it.
+    libc = ctypes.CDLL(None, use_errno=True)
+    descriptor = libc.pidfd_open(ctypes.c_int(pid), ctypes.c_uint(0))
+    if descriptor < 0:
+        raise OSError(ctypes.get_errno(), 'pidfd_open failed')
+    return descriptor
+
+
+def pidfd_signal(descriptor, signum):
+    if hasattr(signal, 'pidfd_send_signal'):
+        return signal.pidfd_send_signal(descriptor, signum)
+    libc = ctypes.CDLL(None, use_errno=True)
+    result = libc.pidfd_send_signal(ctypes.c_int(descriptor), ctypes.c_int(signum), None, ctypes.c_uint(0))
+    if result < 0:
+        raise OSError(ctypes.get_errno(), 'pidfd_send_signal failed')
 
 
 def verify_trial(source, destination, number):
@@ -74,7 +95,7 @@ def verify_trial(source, destination, number):
 @contextmanager
 def pause_driver(pid, regime):
     """Pin one owned Linux process; always resume it, including publication errors."""
-    descriptor = os.pidfd_open(pid)
+    descriptor = pidfd_open(pid)
     sent = False
     try:
         proc = Path(f'/proc/{pid}')
@@ -86,7 +107,7 @@ def pause_driver(pid, regime):
         states = [p.read_text().split(') ', 1)[1].split()[0] for p in proc.glob('task/*/stat')]
         if not states or any(s in ('T', 't', 'Z', 'X') for s in states):
             raise ValueError('Driver is already stopped or terminal')
-        signal.pidfd_send_signal(descriptor, signal.SIGSTOP)
+        pidfd_signal(descriptor, signal.SIGSTOP)
         sent = True
         deadline = time.monotonic()+10
         while True:
@@ -100,7 +121,7 @@ def pause_driver(pid, regime):
     finally:
         try:
             if sent:
-                signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+                pidfd_signal(descriptor, signal.SIGCONT)
         finally:
             os.close(descriptor)
 
