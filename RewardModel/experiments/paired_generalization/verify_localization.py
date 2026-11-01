@@ -63,7 +63,8 @@ def rank_auc(labels, logits):
     negatives = len(labels)-positives
     if not positives or not negatives:
         return None
-    return float((rankdata(logits)[labels == 1].sum()-positives*(positives+1)/2)/(positives*negatives))
+    ranks = rankdata(np.asarray(logits, dtype=np.float64))
+    return float((ranks[labels == 1].sum()-positives*(positives+1)/2)/(positives*negatives))
 
 
 def verify_scalar(frame, groups, table, summaries):
