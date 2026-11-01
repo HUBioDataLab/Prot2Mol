@@ -48,8 +48,56 @@ The corrected reports are in `metrics_float32/`, `noise_bands_float32/` and
 
 B has a smaller median assay but a larger mean due to its tail. The differences
 in eligibility, variance and near-ties preclude interpreting the raw split gap
-as a pure similarity effect. The planned reweighting comparison remains pending.
+as a pure similarity effect. Matched neural reweighting remains pending; the
+completed fixed depth-3 analysis below supplies supplementary evidence.
 Source: `tier1/data/composition.json`.
+
+The actual similarity relation is binary exact scaffold identity across all
+training molecules. In A test, 37,174/192,687 rows (19.29%) and 34,625/162,361
+unique molecules (21.33%) have no training scaffold match. A further 26,417
+rows contain unseen molecule identities with a shared scaffold. All 136,956 B
+test rows lack both molecule-identity and scaffold matches. This binary relation
+preserves the splitter's pooled acyclic and private unparseable nodes; it is not
+a graded chemical-distance measure.
+
+Saved depth-3 predictions give these test macro Spearman values:
+
+| Evaluation cohort | Eligible assays | Macro Spearman |
+|---|---:|---:|
+| A, complete assays with all scaffolds shared | 5,548 | 0.1390 |
+| A, complete assays with mixed scaffold support | 2,497 | 0.1071 |
+| A, complete assays with all scaffolds unseen | 233 | 0.1067 |
+| A, shared-scaffold rows within each assay | 7,556 | 0.1342 |
+| A, unseen-scaffold rows within each assay | 1,738 | 0.0669 |
+| B, complete assays, all scaffolds unseen | 3,972 | 0.0607 |
+
+The within-assay views reapply eligibility after restricting rows. Assays can
+appear in both views, so their counts are not additive. The unseen-row view is
+close to B, but it changes the evaluated groups. Complete all-unseen A assays
+instead give 0.1067 with a wide whole-assay interval [0.0564, 0.1559]. These
+cohorts do not identify a causal leakage share or establish neural performance.
+
+Composition weights were fixed without prediction scores, using group-size,
+positive-fraction and mean-pChEMBL bins. A supports 3,964/3,972 eligible B test
+assays (99.80%). On this common support, A falls from 0.1281 to **0.1154** after
+weighting; B is **0.0613**, leaving a descriptive gap of **0.0541**. The original
+full-partition values are A 0.1285 and B 0.0607. The paired A-unit bootstrap
+change is -0.01266, interval [-0.01551, -0.00969]; effective weighted A count is
+7,067 groups and defined coverage remains 100%. Validation shows the same
+direction: weighted A 0.1221 versus common-support B 0.04884.
+
+Cells match exactly in mass, but residual differences remain inside coarse bins:
+weighted mean eligible-assay size is 26.11 on A versus 31.93 on B; mean label span is
+2.173 versus 1.954. Thus this adjustment does not remove every composition
+difference. Intervals condition on one fit, fixed assignments and empirical
+weights; they omit training-seed and weight-estimation uncertainty. No additional
+LambdaMART fit or tuning was performed. Neural strata/reweighting and additional
+realization comparisons remain pending. Sources:
+`tier1/similarity_composition/design/complete.json`,
+`tier1/similarity_composition/lambdamart_depth3/complete.json`, and
+`tier1/similarity_composition/verification.json` on Atum. All source/artifact
+hashes were verified; an independent weighted sum reproduced both partitions,
+and maximum cell-mass error was below 7e-18.
 
 All 1,957,400 curated observations were reconstructed from 2,032,748 retained raw
 measurements with zero count or median mismatches. On the replicated subsets:
