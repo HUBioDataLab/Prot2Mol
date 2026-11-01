@@ -72,6 +72,16 @@ by actual cached-encoder qualification on the authorized GPU UUIDs before
 starting these new controlled arms. These checks establish execution, not
 scientific performance or sufficient statistical power.
 
+The 19-case cached-encoder qualification, including the reference/unmasked/
+training-known-positive policies, completed on GPUs 5 and 6 at commit cd6cea1
+(`controls_gpu_qualification_cd6cea1.json`). A separate real-Trainer smoke run
+at 585ed07 completed two epochs and six optimizer updates on the same two GPUs.
+It verified both ranks, four trajectory and two selected-weight exports, skipped
+test scoring, exact singleton-average tensors, and retained artifacts after
+cleanup (`trainer_export_qualification_585ed07/qualification_verification.json`).
+These are runtime checks on the smoke data; four-GPU full-size controlled runs
+and their scientific comparisons remain outstanding.
+
 ## Ranking controls
 
 The reference is a top-weighted Plackett-Luce selection loss, not a sum of

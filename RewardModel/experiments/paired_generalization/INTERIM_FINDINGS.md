@@ -159,6 +159,31 @@ entrypoint and its project-local dependencies were verified unchanged between
 the launch checkout c920520 and completion checkout 355d147. Future runs
 capture the launch commit and source hashes before fitting.
 
+## Agreement between scoring pathways
+
+All 31 saved B prediction exports were scored for within-assay agreement using
+average ranks, including tied predictions. On the same 3,969 eligible validation
+assays, every pathway pair was defined at all three epochs below:
+
+| Validation scorer pair | Epoch 1 | Best checkpoint, epoch 6 | Epoch 15 |
+|---|---:|---:|---:|
+| Ranking head / BCE logit | 0.6798 | 0.6363 | 0.6017 |
+| Ranking head / contrastive cosine | 0.0743 | 0.2359 | 0.2341 |
+| BCE logit / contrastive cosine | 0.0958 | 0.2759 | 0.2769 |
+
+Ranking–BCE agreement declines by 0.0781 from epoch 1 to 15 (whole-component
+bootstrap interval for the change [−0.0985, −0.0600]). Ranking–cosine agreement
+instead rises by 0.1598 ([0.1321, 0.1891]). Thus the evidence does not show
+general divergence among all three scorers. Despite increasing agreement with
+the other heads, cosine's correlation with the affinity labels changes only
+from 0.0653 to 0.0749; its change interval [−0.0085, 0.0270] includes zero.
+On the fixed training probe, ranking–BCE agreement increases from 0.6452 to
+0.6776 over the same mutually defined eligible assays. These are correlations
+of predictions, not gradient measurements or proof of objective interference.
+The intervals condition on one fitted seed and scaffold realization. Q31 remains
+partial until the matched A trajectory is available. Source:
+`tier1/scorer_agreement/complete.json` and per-assay trajectory tables.
+
 ## Sampling and contrastive negatives
 
 The configured first epoch contains 12,820 local microbatches on A and 14,020

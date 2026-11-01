@@ -240,7 +240,9 @@
       "question": "How well do the ranking head, the BCE logit and the contrastive similarity agree within groups, and does their agreement fall during training?",
       "rationale": "This quantifies the stated mismatch between ranking order and contrastive geometry.",
       "interpretation": "Near-zero within-group correlation between contrastive similarity and s means the contrastive branch encodes cross-group compatibility, not within-group order.",
-      "status": "pending"
+      "status": "partial",
+      "completed_scope": "All 15 B validation/training-probe epochs plus selected test. Validation ranking-BCE agreement falls 0.6798 to 0.6017 while ranking-cosine rises 0.0743 to 0.2341. This is not general scorer divergence or proof of gradient conflict. Matched A trajectory remains pending.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/scorer_agreement/complete.json on Atum"
     },
     {
       "id": "Q32",
@@ -826,7 +828,7 @@
       "experiment": "Score each pathway separately on both splits",
       "status": "partial",
       "conditional": false,
-      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required. Within-assay scorer-pair correlations and matched endpoint component bootstraps are now available for the B trajectory (Q31).",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {

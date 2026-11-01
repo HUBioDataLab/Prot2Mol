@@ -62,12 +62,17 @@ def matched_endpoint_changes(first, last):
         delta = last[name] - first[name]
         bootstrap = first[['component']].copy()
         bootstrap['spearman'] = delta.where(mask)
+        interval = unit_bootstrap(bootstrap)
+        interval['interpretation'] = (
+            'Percentile interval over observed scaffold units, conditional on this fitted trajectory; '
+            'not training-seed or split-realization uncertainty. Training-unit resampling is '
+            'descriptive and does not estimate held-out generalization.')
         changes[name] = dict(
             matched_groups=int(mask.sum()), eligible_groups=int(first.original_eligible.sum()),
             first_macro=float(first.loc[mask, name].mean()) if mask.any() else None,
             last_macro=float(last.loc[mask, name].mean()) if mask.any() else None,
             mean_change=float(delta[mask].mean()) if mask.any() else None,
-            unit_bootstrap=unit_bootstrap(bootstrap))
+            unit_bootstrap=interval)
     return changes
 
 
