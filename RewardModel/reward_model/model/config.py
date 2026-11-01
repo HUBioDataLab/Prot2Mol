@@ -75,6 +75,11 @@ class RewardModelConfig:
     protein_pooling_type: Optional[str] = None
     molecule_pooling_type: Optional[str] = None
     pair_scoring_mode: str = "mlp"
+    # Explicit deployed/evaluation scorer for loss-subset experiments. The
+    # historical default is unchanged. Alternative readouts require R=0 and
+    # a trained corresponding objective; an untrained R head must not select
+    # the checkpoint of a B-only or C-only model.
+    ranking_readout: str = "ranking_head"
     cosine_scale_init: float = 13.0
     cosine_scale_max: float = 100.0
     cosine_classification_bias_init: float = 0.0
@@ -105,6 +110,12 @@ class RewardModelConfig:
     deduplicate_molecule_inputs: bool = True
     freeze_protein_encoder: bool = False
     freeze_molecule_encoder: bool = False
+    protein_unfrozen_last_layers: Optional[int] = None
+    molecule_unfrozen_last_layers: Optional[int] = None
+    encoder_lora_rank: int = 0
+    encoder_lora_alpha: float = 16.0
+    learn_contrastive_scale: bool = True
+    contrastive_detach_encoders: bool = False
 
     def __post_init__(self) -> None:
         self.validate()
@@ -293,6 +304,32 @@ class RewardModelConfig:
             raise ValueError("freeze_protein_encoder must be a boolean")
         if not isinstance(self.freeze_molecule_encoder, bool):
             raise ValueError("freeze_molecule_encoder must be a boolean")
+        if not isinstance(self.encoder_lora_rank, int) or isinstance(self.encoder_lora_rank, bool) or self.encoder_lora_rank < 0:
+            raise ValueError("encoder_lora_rank must be a nonnegative integer")
+        if not math.isfinite(float(self.encoder_lora_alpha)) or self.encoder_lora_alpha <= 0:
+            raise ValueError("encoder_lora_alpha must be finite and positive")
+        for side in ("protein", "molecule"):
+            layers = getattr(self, f"{side}_unfrozen_last_layers")
+            if layers is not None and (not isinstance(layers, int) or isinstance(layers, bool) or layers <= 0):
+                raise ValueError(f"{side}_unfrozen_last_layers must be a positive integer or None")
+            if sum((getattr(self, f"freeze_{side}_encoder"), layers is not None, self.encoder_lora_rank > 0)) > 1:
+                raise ValueError(f"Choose one adaptation strategy for the {side} encoder")
+        for name in ("learn_contrastive_scale", "contrastive_detach_encoders"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
+        if self.contrastive_detach_encoders and self.pair_scoring_mode not in {"mlp_contrastive", "fusion_contrastive"}:
+            raise ValueError("contrastive_detach_encoders requires a separate contrastive projection pathway")
+        if not self.learn_contrastive_scale and self.pair_scoring_mode not in {"mlp_contrastive", "fusion_contrastive"}:
+            raise ValueError("A fixed contrastive scale requires a separate contrastive pathway")
+        if self.ranking_readout not in {"ranking_head", "activity_logit", "cosine"}:
+            raise ValueError("Unknown ranking_readout")
+        if self.ranking_readout != "ranking_head":
+            if self.pair_scoring_mode != "mlp_contrastive" or self.ranking_loss_weight != 0:
+                raise ValueError("Alternative ranking readouts require mlp_contrastive and zero ranking loss weight")
+            if self.ranking_readout == "activity_logit" and self.classification_loss_weight <= 0:
+                raise ValueError("activity_logit readout requires a trained classification objective")
+            if self.ranking_readout == "cosine" and self.contrastive_loss_weight <= 0:
+                raise ValueError("cosine readout requires a trained contrastive objective")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

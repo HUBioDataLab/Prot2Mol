@@ -1,0 +1,81 @@
+# Controlled training protocol
+
+This document fixes operational choices before Tier 3 results are available.
+The governing scope remains `Paired input ranking generalization.md` and every
+item in `protocol.json`; this document does not replace or narrow that scope.
+
+## Common comparison and tuning rules
+
+- Deployment is an unseen generated molecule. Split B validation selects
+  hyperparameters; Split A is a matched comparison, not the deployment selector.
+- Use both partitions A and B, seeds 42, 43 and 44, and the same 15-epoch
+  horizon, optimizer, schedule and effective batch as the fresh reference.
+  The requested first reference remains unchanged and retains all 15 checkpoints.
+- Each configuration arm receives three learning-rate candidates: multiply all
+  its nonzero base learning rates by 0.3, 1 or 3. Train each candidate for the
+  same full horizon at tuning seed 42 on both A and B. Select the candidate
+  using maximum B validation macro Spearman, then run that same candidate on
+  A and B at seeds 43 and 44. Keep seed-42 tuning and seed-43/44 confirmation
+  results identifiable; seed-42 scores have hyperparameter-selection exposure.
+- Ties select the lower multiplier. Nonfinite/undefined metric values are not
+  winners. Report the defined fraction alongside the score; a loss-subset arm
+  cannot win by silently dropping constant-prediction groups.
+- Report A-versus-B comparisons for every matched candidate and for the common
+  B-selected candidate, so independently tuned A/B settings do not create the
+  apparent relationship. No test result controls training, selection or budget.
+- For the weight sweep and multiple LoRA ranks, each declared setting is one
+  arm and gets the same three-candidate budget. Report total family budgets as
+  well; a family with several settings has more trials than a single arm.
+- Use unit-level uncertainty and seed spread. Additional B realizations remain
+  required subject to the specification's affordability condition; assess that
+  with measured runtime and storage, not by silently omitting them.
+- For A, binary labels use medians computed within each partition. The original
+  pooled A transformation leaked held-out measurements into training labels.
+  Continuous labels and the B reference transformation are unchanged.
+
+## Encoder freedom and loss readouts
+
+- Full, frozen, last-two-transformer-block unfreezing, and LoRA ranks 4, 16 and
+  64 are separate settings. Partial unfreezing also trains ESM's final layer
+  norm. Frozen embeddings/lower blocks stay in evaluation mode; adapted blocks
+  train normally. LoRA adapts attention query/value matrices on both encoders,
+  with alpha twice the rank, zero initial delta, and no additional dropout.
+  Original encoder dropout remains active in LoRA/full training.
+- Fork the initialization RNG around adapter creation, preserving the common
+  initial projection, fusion and head weights across encoder-freedom arms.
+- The model has separate ranking, BCE and contrastive scoring pathways. For
+  {R}, {RB}, {RC}, {RBC}, use the ranking head. For {B}, {BC}, use the BCE logit.
+  For {C}, use cosine similarity. Persist this policy in the checkpoint config
+  and use it for validation selection, evaluation, export and deployment.
+- Freeze modules belonging exclusively to disabled objectives. Do not change
+  the common architecture or initialize a different head for a subset arm.
+  Fixed contrastive scale stays at the original 13. Stop-gradient detaches
+  encoder outputs only before the separate contrastive projections; R/B still
+  update the encoders and C still updates its projection heads.
+- Score all trained pathways separately. Comparisons of R versus RB/RC/RBC
+  isolate auxiliary-objective effects on the same readout. The entire seven-arm
+  grid compares complete scoring systems; a factorial interaction computed
+  across changing readouts is not evidence of gradient conflict by itself.
+
+## Runtime qualification and retention
+
+`qualify_controls.py` exercises all seven loss subsets plus frozen, partial,
+LoRA, fixed-scale and stop-gradient settings through distributed forward,
+backward and three optimizer updates with accumulation/no_sync. It compares
+fitted parameters across ranks. Tiny ESM/RoBERTa CPU qualification is followed
+by actual cached-encoder qualification on the authorized GPU UUIDs before
+starting these new controlled arms. These checks establish execution, not
+scientific performance or sufficient statistical power.
+
+Controlled retention must preserve both selection rules, the trajectory
+measurements and the averaging candidates. It must fit the authorized storage
+quota without deleting original data or the first reference's checkpoints.
+Before controlled-run checkpoint cleanup, the implemented retention/export
+checks must first demonstrate that required artifacts survive.
+Training with both selection metrics will distinguish
+best-within-15 selection from an actual patience-based early-stopping rule.
+
+The static weight grid, leak-in/out design, unit learning-curve fractions,
+ranking variants, co-positive masking audit, averaging rule, and Tier 4
+adaptation schedule still require their explicit manifests and qualification.
+Nothing here labels those experiments complete.

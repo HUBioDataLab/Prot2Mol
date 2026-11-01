@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .adaptation import configure_encoder
 from .config import RewardModelConfig
 from .encoders import LoadedEncoder, batch_encode_texts, encode_tokens, load_encoder_bundle
 from .fusion import RewardMLPHead, TokenFusion, masked_pool, normalize_mask
@@ -84,12 +85,22 @@ class RewardModel(nn.Module):
         self.molecule_tokenizer = molecule_bundle.tokenizer
         self.protein_encoder = protein_bundle.model
         self.molecule_encoder = molecule_bundle.model
-        self.protein_encoder.requires_grad_(not self._config.freeze_protein_encoder)
-        self.molecule_encoder.requires_grad_(not self._config.freeze_molecule_encoder)
-        if self._config.freeze_protein_encoder:
-            self.protein_encoder.eval()
-        if self._config.freeze_molecule_encoder:
-            self.molecule_encoder.eval()
+        # Keep the projection/fusion/head initialization identical across encoder
+        # adaptation arms. Adapter randomness must not advance their RNG stream.
+        keep_eval, adaptation = [], {}
+        with torch.random.fork_rng(devices=[]):
+            for side in ("protein", "molecule"):
+                modules, report = configure_encoder(
+                    getattr(self, f"{side}_encoder"),
+                    frozen=getattr(self._config, f"freeze_{side}_encoder"),
+                    last_layers=getattr(self._config, f"{side}_unfrozen_last_layers"),
+                    lora_rank=self._config.encoder_lora_rank,
+                    lora_alpha=self._config.encoder_lora_alpha,
+                )
+                keep_eval.extend(modules)
+                adaptation[side] = report
+        self._encoder_modules_kept_in_eval = tuple(keep_eval)
+        self.encoder_adaptation_report = adaptation
 
         self._config.protein_hidden_size = self._config.protein_hidden_size or protein_bundle.hidden_size
         self._config.molecule_hidden_size = self._config.molecule_hidden_size or molecule_bundle.hidden_size
@@ -248,6 +259,40 @@ class RewardModel(nn.Module):
                 if bias_head is not None:
                     nn.init.zeros_(bias_head.weight)
                     nn.init.zeros_(bias_head.bias)
+        if not self._config.learn_contrastive_scale:
+            self.logit_scale.requires_grad_(False)
+        self._freeze_inactive_objective_parameters()
+
+    def _freeze_inactive_objective_parameters(self):
+        """Keep disabled, separate objective branches out of the optimizer/DDP.
+
+        Forward still exposes their outputs for an explicit pathway audit, but
+        they cannot learn from an objective with zero weight. Shared encoders
+        and fusion stay trainable whenever any active objective uses them.
+        The full R+B+C baseline is unchanged.
+        """
+        if self._config.pair_scoring_mode != "mlp_contrastive":
+            return
+        r = self._config.ranking_loss_weight > 0
+        b = self._config.classification_loss_weight > 0
+        c = self._config.contrastive_loss_weight > 0
+        modules = []
+        if not r:
+            modules.append(self.ranking_head)
+        if not b:
+            modules.append(self.classification_head)
+        if not c:
+            modules.extend((self.contrastive_protein_projection, self.contrastive_molecule_projection))
+            self.logit_scale.requires_grad_(False)
+        if not (r or b):
+            modules.extend((self.protein_projection, self.molecule_projection,
+                            self.protein_norm, self.molecule_norm,
+                            self.fusion, self.extra_fusion_layers))
+            if not c or self._config.contrastive_detach_encoders:
+                modules.extend((self.protein_encoder, self.molecule_encoder))
+        for module in modules:
+            if module is not None:
+                module.requires_grad_(False)
 
     @property
     def config(self) -> RewardModelConfig:
@@ -255,10 +300,8 @@ class RewardModel(nn.Module):
 
     def train(self, mode: bool = True):
         super().train(mode)
-        if self._config.freeze_protein_encoder:
-            self.protein_encoder.eval()
-        if self._config.freeze_molecule_encoder:
-            self.molecule_encoder.eval()
+        for module in self._encoder_modules_kept_in_eval:
+            module.eval()
         return self
 
     def encode_protein(
@@ -806,7 +849,7 @@ class RewardModel(nn.Module):
             contrastive_protein = self.projection_dropout(
                 self.contrastive_protein_projection(
                     masked_pool(
-                        protein_tokens,
+                        protein_tokens.detach() if self._config.contrastive_detach_encoders else protein_tokens,
                         protein_mask,
                         self._config.protein_pooling_type
                         or self._config.pooling_type,
@@ -816,7 +859,7 @@ class RewardModel(nn.Module):
             contrastive_molecule = self.projection_dropout(
                 self.contrastive_molecule_projection(
                     masked_pool(
-                        molecule_tokens,
+                        molecule_tokens.detach() if self._config.contrastive_detach_encoders else molecule_tokens,
                         molecule_mask,
                         self._config.molecule_pooling_type
                         or self._config.pooling_type,
@@ -982,6 +1025,11 @@ class RewardModel(nn.Module):
         if ranking_loss is not None:
             weighted_ranking = ranking_loss * self._config.ranking_loss_weight
             total_loss = weighted_ranking if total_loss is None else total_loss + weighted_ranking
+
+        if self._config.ranking_readout == "activity_logit":
+            ranking_score = activity_logits
+        elif self._config.ranking_readout == "cosine":
+            ranking_score = cosine_similarity
 
         outputs = RewardModelOutput(
             ranking_score=ranking_score,
