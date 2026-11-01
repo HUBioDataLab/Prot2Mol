@@ -62,6 +62,20 @@ def verify_fixed_trial(output, decision, regime):
     return contract,result
 
 
+def validation_reproduction(observed,reference):
+    # Fit-time validation uses a CUDA QuantileDMatrix; this pass uses chunked
+    # CPU DMatrix prediction. Preserve and report small numerical differences.
+    tolerance = 1e-6
+    difference = observed['macro_spearman']-reference['macro_spearman']
+    if not math.isfinite(difference) or abs(difference)>tolerance:
+        raise ValueError('Fixed-model validation differs beyond numerical tolerance')
+    if any(observed[k]!=reference[k] for k in ('eligible_groups','defined_groups')):
+        raise ValueError('Fixed-model validation coverage changed')
+    return dict(saved_fit_time_macro=reference['macro_spearman'],cpu_rescored_macro=observed['macro_spearman'],
+        difference=difference,absolute_tolerance=tolerance,coverage_unchanged=True,
+        interpretation='Same model weights and source feature bytes. Fit-time CUDA quantile-matrix validation versus chunked CPU dense-matrix prediction; report the measured numerical discrepancy, without changing checkpoint selection.')
+
+
 def main(regime):
     import fcntl
     import xgboost as xgb
@@ -106,6 +120,7 @@ def main(regime):
         if model.num_boosted_rounds()!=trial['selected']['rounds']:
             raise ValueError('Saved model has a different tree count')
         metrics = {}
+        reproduction = None
         for part in ('val','test'):
             scores = np.empty(len(frames[part]))
             for start in range(0,len(scores),32768):
@@ -114,9 +129,7 @@ def main(regime):
                 scores[start:start+len(current)] = model.predict(batch)
             if part=='val':
                 reproduced = RankingSelection(frames[part])(scores)
-                np.testing.assert_allclose(reproduced['macro_spearman'],trial['selected']['macro_spearman'],atol=1e-12,rtol=0)
-                if reproduced['defined_groups']!=trial['selected']['defined_groups']:
-                    raise ValueError('Validation coverage differs from the saved checkpoint')
+                reproduction = validation_reproduction(reproduced,trial['selected'])
             metrics[part] = evaluate_predictions(frames[part].assign(ranking_score=scores,classification_score=scores),regime,output/part)
             print(json.dumps(dict(regime=regime,partition=part,macro_spearman=metrics[part]['original_eligible_macro_spearman'])),flush=True)
         files = ['model.ubj',*[f'{part}/{name}' for part in ('val','test') for name in ('predictions.parquet','groups.parquet','metrics.json')]]
@@ -125,6 +138,7 @@ def main(regime):
             selected=dict(trial=0,**trial),trials=completed,metrics=metrics,
             model_sha256=sha256(target),user_decision_sha256=sha256(decision_path),
             selection=decision['selection_policy'],grid_search_complete=False,
+            validation_reproduction=reproduction,
             evaluated_settings=[decision['selected_setting']],no_new_training=True,
             inference_device='CPU',artifacts_sha256={name:sha256(output/name) for name in files},
             scope='Completed fixed depth-3 A/B baseline requested by the user. Tree count selected on each split validation. The larger search was cancelled and its partial artifacts retained; no claim of best-of-grid tuning.',

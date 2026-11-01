@@ -4,7 +4,7 @@ import json
 import pytest
 
 from experiments.paired_generalization import lambdamart
-from experiments.paired_generalization.finalize_lambdamart import verify_fixed_trial
+from experiments.paired_generalization.finalize_lambdamart import verify_fixed_trial, validation_reproduction
 from experiments.paired_generalization.run import sha256, write_json
 
 
@@ -51,3 +51,13 @@ def test_user_stop_prevents_both_sequential_and_independent_training(tmp_path,mo
     for precompute in [None,0,3,4]:
         with pytest.raises(RuntimeError,match='User ended'):
             lambdamart.main('A',precompute)
+
+
+def test_validation_rescoring_reports_roundoff_but_rejects_metric_or_coverage_changes():
+    reference = dict(macro_spearman=.05,eligible_groups=4000,defined_groups=4000)
+    observed = dict(reference,macro_spearman=.05+1.4e-8)
+    result = validation_reproduction(observed,reference)
+    assert result['difference']==observed['macro_spearman']-reference['macro_spearman']
+    assert result['difference']!=0
+    for changed in [dict(reference,macro_spearman=.051),dict(reference,defined_groups=3999)]:
+        with pytest.raises(ValueError):validation_reproduction(changed,reference)
