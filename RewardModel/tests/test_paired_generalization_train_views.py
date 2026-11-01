@@ -55,6 +55,19 @@ def test_nested_subsets_keep_whole_unequal_units_and_ignore_row_order():
             check_whole_units(np.array(['a','a','b']),bad)
 
 
+def test_string_units_do_not_use_numpy_quadratic_object_membership(monkeypatch):
+    original = np.isin
+    def reject_object_scan(values,*args,**kwargs):
+        if np.asarray(values).dtype.hasobject:
+            raise AssertionError('Quadratic object membership is not allowed')
+        return original(values,*args,**kwargs)
+    monkeypatch.setattr(np,'isin',reject_object_scan)
+    units = np.repeat(np.array([f'assay{i}' for i in range(1000)],dtype=object),3)
+    subsets,_ = nested_unit_indices(units)
+    assert len(subsets[.1]) == 300
+    assert len(subsets[1.]) == 3000
+
+
 def test_subset_labels_exclude_omitted_assay_measurements():
     raw = raw_fixture()
     indices = np.array([0,1,2,6,7,8])

@@ -30,7 +30,9 @@ def check_whole_units(unit_ids, indices):
         raise ValueError('Subset indices must be a nonempty integer vector')
     if indices[0] < 0 or indices[-1] >= len(units) or np.any(np.diff(indices.astype(np.int64)) <= 0):
         raise ValueError('Subset indices must be sorted, distinct and in bounds')
-    expected = np.flatnonzero(np.isin(units, np.unique(units[indices])))
+    # np.isin uses a nested scan for object/string IDs. A hash lookup keeps
+    # this linear in rows even with hundreds of thousands of assay units.
+    expected = np.flatnonzero(pd.Index(units).isin(pd.unique(units[indices])))
     if not np.array_equal(expected, indices):
         raise ValueError('Training subset fragments an indivisible unit')
 

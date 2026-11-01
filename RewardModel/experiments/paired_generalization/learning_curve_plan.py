@@ -40,7 +40,7 @@ def nested_unit_indices(unit_ids, *, fractions=FRACTIONS, seed=SUBSET_SEED):
     result = {}
     for fraction in fractions:
         count = max(1, int(math.floor(fraction*len(order))))
-        indices = np.flatnonzero(np.isin(units, order[:count]))
+        indices = np.flatnonzero(pd.Index(units).isin(order[:count]))
         check_whole_units(units, indices)
         result[fraction] = indices
     return result, order
@@ -97,6 +97,9 @@ def prepare():
             configurations=len(previous['tuning_jobs']),action='prepared only; no training started'))
         return previous
     units_path = WORK/'tier1/data/assay_units.parquet'
+    assignment_audit = json.loads((WORK/'tier1/split_realizations/complete.json').read_text())
+    if sha256(units_path) != assignment_audit['unit_map_sha256']:
+        raise ValueError('Scaffold unit map changed after the assignment audit')
     units = pd.read_parquet(units_path).set_index('assay_id').component
     views, stats, artifacts = {}, {}, {}
     for regime in ('A','B'):
