@@ -44,7 +44,7 @@ def train_probe_indices(dataset, number=2048, seed=42):
     return np.flatnonzero(np.isin(groups, chosen))
 
 
-def score_dataset(model, dataset, output, *, batch_size=32, device="cuda"):
+def score_dataset(model, dataset, output, *, batch_size=32, device="cuda", save_embeddings=True):
     import pandas as pd
     import torch
     from reward_model.training.data import RewardPairCollator
@@ -65,18 +65,20 @@ def score_dataset(model, dataset, output, *, batch_size=32, device="cuda"):
         inputs = {k: v.to(device) for k, v in collator.collate_example_tokens(rows).items()}
         with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
             result = model(**inputs, return_dict=True)
-        tensors = {name: getattr(result, name).detach().float().cpu().numpy() for name in (
-            "ranking_score", "activity_logits", "cosine_similarity",
-            "normalized_protein_embedding", "normalized_molecule_embedding")}
+        names = ["ranking_score", "activity_logits", "cosine_similarity"]
+        if save_embeddings:
+            names += ["normalized_protein_embedding", "normalized_molecule_embedding"]
+        tensors = {name: getattr(result, name).detach().float().cpu().numpy() for name in names}
         if not all(np.isfinite(v).all() for v in tensors.values()):
             raise RuntimeError("Nonfinite prediction or representation")
-        if protein is None:
+        if save_embeddings and protein is None:
             shape = (len(dataset), tensors["normalized_protein_embedding"].shape[1])
             protein = np.lib.format.open_memmap(output / "protein.npy", mode="w+", dtype="float32", shape=shape)
             molecule = np.lib.format.open_memmap(output / "molecule.npy", mode="w+", dtype="float32", shape=shape)
         stop = start + len(rows)
-        protein[start:stop] = tensors["normalized_protein_embedding"]
-        molecule[start:stop] = tensors["normalized_molecule_embedding"]
+        if save_embeddings:
+            protein[start:stop] = tensors["normalized_protein_embedding"]
+            molecule[start:stop] = tensors["normalized_molecule_embedding"]
         scales.append(float(result.score_scale.detach().float().cpu()))
         for offset, row in enumerate(rows):
             records.append({
@@ -88,8 +90,9 @@ def score_dataset(model, dataset, output, *, batch_size=32, device="cuda"):
             print(json.dumps({"output": output.name, "scored": stop, "total": len(dataset)}), flush=True)
     if not records or not np.allclose(scales, scales[0], rtol=1e-6, atol=1e-6):
         raise RuntimeError("Missing observations or changing inference scale")
-    protein.flush()
-    molecule.flush()
+    if save_embeddings:
+        protein.flush()
+        molecule.flush()
     pd.DataFrame(records).to_parquet(output / "predictions.parquet", index=False)
     return {"rows": len(records), "score_scale": scales[0], "dtype": "bf16 autocast; exported float32"}
 

@@ -144,7 +144,8 @@ def qualify_runtime(plan):
     source = Path(__file__).resolve()
     source_paths += [source, source.with_name('control_plan.py'),
                      source.with_name('qualify_controls.py'), source.with_name('run.py'),
-                     source.with_name('retain_controlled.py')]
+                     source.with_name('retain_controlled.py'), source.with_name('realization_protocol.py'),
+                     source.with_name('realization_predictions.py'), source.with_name('export_predictions.py')]
     sources = {str(path.relative_to(ROOT)): sha256(path) for path in source_paths}
     signature = digest_json(dict(sources=sources, plan_sha256=sha256(WORK/'controlled/plan.json')))
     directory = WORK/'controlled/qualifications'/signature[:16]
@@ -231,6 +232,13 @@ def run_next():
     if output.exists():
         raise RuntimeError(f'Incomplete or existing run requires inspection; refusing automatic relaunch: {output}')
     verify_training_data(plan, job['regime'])
+    if job['regime'] == 'B':
+        if __package__:
+            from .realization_protocol import load_contract
+        else:
+            from realization_protocol import load_contract
+        # The assignments and row views must be frozen before scientific fits.
+        load_contract()
     qualification = qualify_runtime(plan)
     busy = busy_authorized_devices(subprocess.check_output(
         ['nvidia-smi', '--query-compute-apps=gpu_uuid,pid', '--format=csv,noheader'], text=True))
@@ -244,6 +252,11 @@ def run_next():
                '--nproc_per_node=4', 'RewardModel/experiments/paired_generalization/run.py',
                'train', '--config', job['config_path']]
     _run_process(command, output/'train.log', 'training', job['id'])
+    if job['regime'] == 'B':
+        command = [str(ROOT/'.venv/bin/python'),
+                   'RewardModel/experiments/paired_generalization/realization_predictions.py',
+                   '--run', str(output), '--workers', '4']
+        _run_process(command, output/'realization_exports.log', 'exporting_allocation_predictions', job['id'])
     result = retain(output, prune=True)
     evidence = ['experiment_summary.json', 'trainer_state.json', 'retained/retention.json',
                 *(f'rank_{rank}_complete.json' for rank in range(4))]

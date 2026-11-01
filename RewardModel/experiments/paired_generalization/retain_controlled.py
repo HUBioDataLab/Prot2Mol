@@ -156,17 +156,43 @@ def retain(run, *, prune=False):
         raise ValueError('Selected prediction export differs from run summary')
     prediction_manifests.append(dict(path=str(selected_path.relative_to(run)), sha256=sha256(selected_path)))
 
+    additional, additional_steps = None, set()
+    if marker.get('regime') == 'B':
+        if __package__:
+            from .realization_predictions import verify_validation, destination
+        else:
+            from realization_predictions import verify_validation, destination
+        allocation = verify_validation(run)
+        if allocation['config_sha256'] != config_hash:
+            raise ValueError('Additional allocation exports belong to another training configuration')
+        if [(r['epoch'], r['step']) for r in allocation['source_weights']] != [(r['epoch'], r['step']) for r in records]:
+            raise ValueError('Additional allocation exports omit epoch checkpoints')
+        # Scalar exports suffice for macro-rho selection, but not for the
+        # allocation-specific contrastive/aggregate losses and weight averages.
+        # Protect every B epoch until those remaining analyses have their own
+        # verified release protocol; do not make them impossible to finish.
+        additional_steps = {item['step'] for item in allocation['source_weights']}
+        allocation_path = destination(run)/'validation_complete.json'
+        additional = dict(path=str(allocation_path), sha256=sha256(allocation_path),
+                          selected_steps=allocation['selected_steps'], protected_steps=sorted(additional_steps),
+                          protection_reason='All B epoch weights retained pending allocation-specific full-loss/averaging analyses',
+                          source_weights=allocation['source_weights'])
+
     retained = run / 'retained'
     manifest_path = retained / 'retention.json'
     if manifest_path.exists():
         result = json.loads(manifest_path.read_text())
         if result['config_sha256'] != config_hash or result['selections'] != selections or result['prediction_manifests'] != prediction_manifests:
             raise ValueError('Retention provenance changed')
+        if result.get('additional_realizations') != additional:
+            raise ValueError('Additional allocation retention evidence changed')
         for item in result['preserved_weights']:
             if sha256(run / item['path']) != item['sha256']:
                 raise RuntimeError('Preserved model payload failed verification')
     else:
         sources = [dict(path=str((p/'pytorch_model.bin').relative_to(run)), sha256=sha256(p/'pytorch_model.bin')) for p in checkpoints]
+        if additional is not None and sources != [{key: item[key] for key in ('path','sha256')} for item in additional['source_weights']]:
+            raise ValueError('Exported allocation checkpoints differ from source weights')
         macro_path = run / f"checkpoint-{selections['best_macro']['step']}" / 'pytorch_model.bin'
         root_weights = torch.load(run/'pytorch_model.bin', map_location='cpu', weights_only=True)
         macro_weights = torch.load(macro_path, map_location='cpu', weights_only=True)
@@ -178,14 +204,14 @@ def retain(run, *, prune=False):
         average = retained / 'average_from_loss_minimum' / 'pytorch_model.bin'
         average_weights([p/'pytorch_model.bin' for p in window], average)
         shutil.copyfile(run/'config.json', average.parent/'config.json')
-        retained_steps = {item['step'] for item in selections.values()}
+        retained_steps = {item['step'] for item in selections.values()} | additional_steps
         preserved = [run/'pytorch_model.bin', average] + [p/'pytorch_model.bin' for p in checkpoints if int(p.name.split('-')[1]) in retained_steps]
         result = dict(format_version=1, config_sha256=config_hash, selections=selections,
                       averaging=dict(rule='uniform native parameters from minimum validation loss through final epoch, inclusive',
                                      epochs=list(range(start_epoch, horizon+1)), singleton=len(window)==1),
                       prediction_manifests=prediction_manifests, source_weights=sources,
                       preserved_weights=[dict(path=str(p.relative_to(run)), sha256=sha256(p)) for p in preserved],
-                      pruned=False)
+                      additional_realizations=additional, pruned=False)
         write_json(manifest_path, result)
     if prune and not result['pruned']:
         for item in result['source_weights']:

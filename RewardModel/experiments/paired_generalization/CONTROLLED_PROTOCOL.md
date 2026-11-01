@@ -220,3 +220,47 @@ matching diagnostics are still required before these four cells can run.
 The leak-in/out data design, unit learning-curve fractions, and Tier 4 adaptation
 schedule still require their explicit manifests and qualification.
 Nothing here labels those experiments complete.
+
+## Additional B allocations and checkpoint protection
+
+The original splitter changes only validation/test assignment after fixing
+training membership. On the actual data, seeds 42/43/44 alone give identical
+assignments. The audited supplement randomizes equal-size component priority
+for seeds 43/44 within the same size-priority allocation, balancing objective
+and 64-restart budget. It produces three distinct held-out allocations with
+identical training support. They are dependent allocation sensitivities, not
+independent split draws or variation in scaffold geometry.
+
+`realization_protocol.py` freezes the additional assignments separately from
+the immutable primary control plan. It maps raw source rows to the actual
+cached-token order by assay, protein and molecule identities, checks labels at
+the training float32 precision, and rejects missing/duplicate observations,
+changed held-out support or fragmented units. Binary labels must match the
+prepared pair-median partitions; raw observation labels may differ.
+
+`realization_predictions.py` exports scalar predictions for every epoch over
+the fixed held-out union using batch size 32 and BF16 inference. It computes
+only each allocation's validation macro Spearman, breaking ties at the earliest
+epoch and reporting coverage. No test metric is calculated in this export or
+selection step. The primary Trainer selection remains unchanged; uniformly
+batched inference selections are reported separately because BF16 batch
+numerics can differ. This pipeline requires runtime qualification before
+claiming it has produced scientific results.
+
+Controlled B cleanup now requires all 30 epoch/partition exports, their verified
+checksums and the allocation-specific validation selections. It currently keeps
+all B epoch weights because allocation-specific full-loss and averaging analyses
+still need them. Completed optimizer payloads can be removed. A separate verified
+release protocol is required before reducing those model weights to the union
+of selected checkpoints and averages. Scalar exports live on the authorized
+archive and omit large embedding matrices. The protected first reference remains
+untouched.
+
+Each allocation must select its own LR from the common three candidates. If
+winning LRs differ, confirmation training must cover their union at seeds 43/44;
+the primary 280-fit count does not cover those additions automatically. Identical
+training support permits sharing an exactly matched fit, but does not justify
+sharing validation selection. Allocation-specific aggregate-loss and averaging
+comparisons still require full loss evaluation, which scalar exports alone do
+not provide. Measured inference runtime/storage and any remaining affordability
+limits must be reported; none of these pending comparisons is declared complete.

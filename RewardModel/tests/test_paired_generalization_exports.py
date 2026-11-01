@@ -37,7 +37,8 @@ def test_probe_is_reproducible_and_never_splits_an_assay():
         assert not members & selected or members <= selected
 
 
-def test_export_keeps_observation_identity_and_representations_aligned(tmp_path):
+@pytest.mark.parametrize('save_embeddings', [True, False])
+def test_export_keeps_observation_identity_and_representations_aligned(tmp_path, save_embeddings):
     class Model(torch.nn.Module):
         protein_tokenizer = molecule_tokenizer = SimpleNamespace(pad_token_id=0)
 
@@ -56,11 +57,14 @@ def test_export_keeps_observation_identity_and_representations_aligned(tmp_path)
         "target_chembl_id": ["x"] * 5, "compound_id": [str(i) for i in range(5)],
         "pchembl_value": [4., 5., 6., 7., 8.], "binary_label": [0, 0, 1, 1, 1],
     })
-    result = score_dataset(Model(), dataset, tmp_path, batch_size=2, device="cpu")
+    result = score_dataset(Model(), dataset, tmp_path, batch_size=2, device="cpu", save_embeddings=save_embeddings)
     frame = pd.read_parquet(tmp_path / "predictions.parquet")
     assert result["rows"] == 5 and result["score_scale"] == 13
     assert frame.row_index.tolist() == list(range(5))
     assert frame.compound_id.tolist() == dataset["compound_id"]
     np.testing.assert_array_equal(frame.ranking_score, np.arange(1, 6))
-    np.testing.assert_array_equal(np.load(tmp_path / "protein.npy")[:, 0], frame.ranking_score)
-    np.testing.assert_array_equal(np.load(tmp_path / "molecule.npy")[:, 0], frame.ranking_score + 10)
+    if save_embeddings:
+        np.testing.assert_array_equal(np.load(tmp_path / "protein.npy")[:, 0], frame.ranking_score)
+        np.testing.assert_array_equal(np.load(tmp_path / "molecule.npy")[:, 0], frame.ranking_score + 10)
+    else:
+        assert not list(tmp_path.glob('*.npy'))

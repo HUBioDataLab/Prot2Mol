@@ -214,6 +214,23 @@ skew alone does not establish a learned popularity shortcut. Sources:
 
 ## Distribution shift
 
+The original scaffold splitter's seeds 42, 43 and 44 produce identical component
+assignments: the deterministic size-sorted candidate wins all three searches.
+They cannot be counted as three realizations. Randomizing input order among
+equal-sized components before the same size-priority allocation and 64-restart
+balance search produces two distinct additional validation/test allocations.
+Against the original, these move 86,592 and 94,118 of the 273,913 held-out rows
+(3,987 and 3,962 whole components). All three retain exactly the same 570
+training components and 1,683,487 training rows. Validation/test row counts and
+raw positive rates are unchanged.
+
+These are dependent reallocations of a fixed held-out pool, with no change to
+training support or scaffold geometry. They support a bounded allocation
+sensitivity analysis, not independent split draws. Each needs its own validation
+checkpoint and learning-rate selection before test scoring. The assignment
+audit is complete; performance spread and multi-seed comparisons remain pending.
+Source: `tier1/split_realizations/complete.json`.
+
 A fixed logistic classifier used group descriptors, with whole units held out
 of fitting. Each domain and each unit within a domain had equal fitting weight.
 

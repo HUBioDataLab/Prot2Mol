@@ -107,3 +107,29 @@ def test_average_refuses_different_integer_buffers(tmp_path):
     with pytest.raises(ValueError, match='Nonfloating'):
         average_weights(sources, tmp_path/'average.bin')
     assert not (tmp_path/'average.bin').exists()
+
+
+def test_b_cleanup_requires_allocation_evidence_and_keeps_its_selected_weights(tmp_path, monkeypatch):
+    from experiments.paired_generalization import realization_predictions as allocation
+    from experiments.paired_generalization.run import sha256
+    make_run(tmp_path)
+    marker = json.loads((tmp_path/'controlled_run.json').read_text())
+    marker['regime'] = 'B'
+    write_json(tmp_path/'controlled_run.json', marker)
+    monkeypatch.setattr(allocation, 'destination', lambda run: tmp_path/'allocations')
+    with pytest.raises(FileNotFoundError):
+        retain(tmp_path, prune=True)
+    assert len(list(tmp_path.glob('checkpoint-*/pytorch_model.bin'))) == 6
+    sources = [dict(epoch=r['epoch'], step=r['step'], path=f"checkpoint-{r['step']}/pytorch_model.bin",
+                    sha256=sha256(tmp_path/f"checkpoint-{r['step']}/pytorch_model.bin")) for r in records_fixture()]
+    record = dict(config_sha256='fixture-config', source_weights=sources, selected_steps=[20])
+    write_json(tmp_path/'allocations/validation_complete.json', record)
+    # Unit-test the retention integration after the independent allocation
+    # verifier; corrupt export handling is exercised in the export tests.
+    monkeypatch.setattr(allocation, 'verify_validation', lambda run: record)
+    result = retain(tmp_path, prune=True)
+    assert result['additional_realizations']['selected_steps'] == [20]
+    assert result['additional_realizations']['protected_steps'] == [10,20,30,40,50,60]
+    assert len(list(tmp_path.glob('checkpoint-*/pytorch_model.bin'))) == 6
+    assert not list(tmp_path.glob('checkpoint-*/optimizer.pt'))
+    assert retain(tmp_path, prune=True) == result

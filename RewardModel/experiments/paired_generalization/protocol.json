@@ -33,7 +33,9 @@
       "question": "How large is the spread over seeds, over a bootstrap of indivisible split units, and over alternative Split B realizations?",
       "rationale": "Split realizations built to identical criteria differed in difficulty while preserving method rankings ([Petti & Eddy 2022](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8929697/fullTextXML)). A sparse learning-rate grid produced a standard deviation 6\u20137 times the seed-to-seed value ([Xin et al. 2022](https://arxiv.org/abs/2209.11379)).",
       "interpretation": "A realization spread near the 0.21 gap means the gap itself is poorly estimated. Comparisons within one realization, such as model against baseline, stay trustworthy either way.",
-      "status": "pending"
+      "status": "partial",
+      "answer": "Whole-unit intervals are available for the initial B checkpoint and completed cheap baselines, conditional on one fitted seed and allocation. Original splitter seeds 42/43/44 yield identical assignments. Seeded equal-size tie ordering produces two additional dependent validation/test reallocations with unchanged training support; 86592/94118 held-out rows move. Per-allocation validation checkpoint/LR selection and multi-seed performance spread remain pending. These allocations do not measure training-support or split-geometry variation.",
+      "evidence": "tier1/metrics/best_test.json; tier2/*/{A,B}/test/metrics.json; tier1/split_realizations/complete.json"
     },
     {
       "id": "Q05",
