@@ -60,6 +60,18 @@ identity is not claimed. Scaffold components preserve assays; target coverage,
 scaffold disjointness, and pair disjointness are checked before training. The
 original median label transformation is preserved for this baseline.
 
+For Q22, `observation_process.py` audits the recorded observation provenance
+and curation on CPU. It verifies the original source observations against the
+recovered activity IDs, medians and counts, and verifies those IDs against the
+read-only ChEMBL37 database. Its comparison cohort is every archived activity
+record in assays represented by the curated data. It tabulates missing/censored
+records, recorded quality exclusions, and source/document/assay-test annotations.
+Raw activity records and median-aggregated observations retain separate
+denominators. Missing pChEMBL values are never labelled negative. The archive
+and curation code do not identify original laboratory inclusion probabilities,
+unpublished measurements or the activity prevalence of generated molecules.
+Results are saved in `tier1/observation_process/`; no training data are changed.
+
 Execution order: prepare data; validate four-GPU training/evaluation/checkpoint
 loading with a two-step smoke run; complete the 15-epoch baseline; then perform
 the specification's Tier 1 audits, Tier 2 baselines, Tier 3 controlled retraining,
