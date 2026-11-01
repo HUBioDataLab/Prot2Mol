@@ -101,6 +101,39 @@ protocol remain prerequisites to model fitting. Original validation labels were
 already used for base-model selection, so these are conditional probes on the
 existing benchmark, not an independent new test population.
 
+`representation_geometry.py` prepares only fixed identity-based cohorts for
+E54/E55. Each A/B train/validation/test partition has separate observation,
+unique-protein and unique-molecule views, capped at 25,600 each. The latter two
+avoid interpreting repeated entity frequency as representation collapse.
+Representatives and ordering use identities only; no label or prediction is
+read. All checkpoints must use these same rows and pair draws. Outputs are in
+`tier4/geometry_design/`; scientific inference remains behind Tier 3 and must
+first verify checkpoint, token and row provenance on the permitted GPUs.
+
+The numerical helpers implement [Wang–Isola](https://arxiv.org/abs/2005.10242)
+alignment with squared normalized distance and uniformity with t=2. Uniformity
+uses every distinct-row pair when there are at most 262,144, otherwise that
+many uniform unordered draws with replacement, seed 42. This is a descriptive
+Monte Carlo log-mean, without an uncertainty claim. Zero vectors have no sphere
+direction; excluded pairs and coverage are reported instead of jittered.
+
+Effective rank follows the uncentered singular-value entropy in
+[RankMe](https://arxiv.org/abs/2210.02885), using the zero-epsilon limit and an
+explicit rank-zero convention for an all-zero matrix. It is not the older
+diagnostic helper's centered covariance-eigenvalue entropy. Rank is calculated
+on raw pooled encoder vectors and raw contrastive projection outputs; sphere
+metrics normalize those vectors separately. Sample counts and dimensions bound
+rank and must accompany comparisons. The capture hooks target the separate
+contrastive projections, not the token projections feeding cross-attention.
+
+Cross-modal alignment is defined only after projection into the trained common
+space. Unrelated encoder coordinates cannot be compared by padding or by merely
+matching dimensions. Report all sampled observed pairs and, separately, the
+native float32 pChEMBL>6 subset; this latter alignment is label-conditioned,
+whereas uniformity and rank are label-free. Geometry is not a substitute for
+held-out ranking performance. Local numerical/model tests and frozen memberships
+do not count as scientific E54/E55 results.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
