@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–5. These
+native validation and fixed training-probe audits for epochs 1–6. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -356,41 +356,47 @@ and preserve the Trainer's float32 label semantics.
 | 3 | 0.24317 | 0.27084 | 0.46223 | 2.57423 | 2.72154 |
 | 4 | 0.26145 | 0.30188 | 0.46034 | 2.54027 | 2.42469 |
 | 5 | 0.27953 | 0.33753 | 0.44381 | 2.50691 | 2.20079 |
+| 6 | 0.28843 | 0.36608 | 0.44842 | 2.49957 | 2.07677 |
 
-Validation AUROC rises 0.72635→0.81971 across epochs 1→5 and the contrastive
-scale rises 13.5412→17.2867. On the same eligible validation assays,
+Validation AUROC rises 0.72635→0.81954 across epochs 1→6 and the contrastive
+scale rises 13.5412→18.0780. Epochs 5→6 show the first adjacent BCE increase
+(0.44381→0.44842), a small AUROC decrease (0.81971→0.81954), and continued
+ranking-loss and macro-Spearman improvement. This local change does not
+establish sustained deterioration. On the same eligible validation assays,
 NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
-0.67335/0.71781/0.75630 at epoch 5. Epoch-5 BCE-logit and cosine-only macro
-Spearman are 0.22052 and 0.16848. Positive temperature calibration fitted on
-that validation set gives T=1.16176 and reduces log-loss from 0.44381 to 0.44042;
-this is an in-sample
-fit, with no test transfer.
+0.67300/0.72108/0.75938 at epoch 6. Top-1 decreases slightly from epoch 5;
+top-3 and top-5 increase. Epoch-6 BCE-logit and cosine-only macro Spearman are
+0.22879 and 0.16971. Positive temperature calibration fitted on that validation
+set gives T=1.14687 and reduces log-loss from 0.44842 to 0.44573; this is an
+in-sample fit, with no test transfer.
 
-At epoch 5, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.29216/0.25707/0.20422 (5,405/2,402/190 eligible assays).
-Restricting to unseen-scaffold rows within assays instead gives 0.19920 on
+At epoch 6, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.30459/0.25769/0.21738 (5,405/2,402/190 eligible assays).
+Restricting to unseen-scaffold rows within assays instead gives 0.20628 on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.27943 to 0.27428. This
+changes A common-support validation macro from 0.28833 to 0.28151. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→5, validation ranking–BCE agreement changes 0.63066→0.61880
+Across epochs 1→6, validation ranking–BCE agreement changes 0.63066→0.63060
 on the same 7,995 mutually defined eligible assays; the paired whole-assay
-interval for the change is [−0.02235, −0.00195]. Ranking–cosine agreement rises
-0.12360→0.29369 on 7,997 assays, with change interval [0.15653, 0.18295].
+interval for the change is [−0.01053, 0.01020]. Ranking–cosine agreement rises
+0.12360→0.30798 on 7,997 assays, with change interval [0.17109, 0.19804].
 Agreement fluctuates across epochs; the prefix does not show uniform scorer divergence.
 
-These five epochs establish early improvement, not a final optimum or an
-overfitting turning point. Training-probe intervals are descriptive. All
+Both the best validation macro Spearman and minimum aggregate validation loss
+in this six-epoch prefix occur at epoch 6. These are observed-prefix extrema,
+not the final checkpoint choices or an established overfitting turning point.
+Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch05.json`, per-assay
-metric tables and `verification_through_epoch05.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 277,185
+on Atum, including the immutable `trajectory_through_epoch06.json`, per-assay
+metric tables and `verification_through_epoch06.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 332,622
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
 pairs reproduced sampled noise-band/group/scorer counts; direct
-weighted means reproduced all five
+weighted means reproduced all six
 composition-standardized validation scores. All source/artifact hashes passed.
 
 Q11's scalar localization audit covers all 15 initial B validation epochs and
@@ -422,8 +428,8 @@ that split cannot localize the change across different similarity strata.
 Across A epochs 1→4, BCE falls for shared/mixed/unseen-scaffold assays
 (0.52598→0.43690 / 0.51247→0.48377 / 0.54630→0.53779); ranking improves in
 all three from epoch 1. This early prefix does not establish later behavior.
-Q11 remains partial pending the complete matched trajectories and remaining
-contrastive analysis. Source:
+Q11 remains partial pending the complete matched A trajectory and repeated
+comparisons; initial B contrastive localization is reported below. Source:
 `tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json}`.
 All 19 snapshots reproduce native aggregate BCE within 1e-5 and headline rho
 within 1e-14. Independent Bernoulli log-probability calculations verify all
@@ -462,6 +468,53 @@ The 20 reconstructed global losses differ from their native values by at most
 3.85e-7. Direct production-loss calls on 260 real sampled lists agree within
 4.77e-7; all 680,445 list descriptors and source/output hashes were verified.
 No test predictions, model weights or GPUs were used.
+
+The contrastive localization audit attributes loss to each query's original
+assay while keeping the complete candidate pool and all masks unchanged.
+It covers B epochs 1–15 at both the learned scale and fixed scale 13, including
+all 9,280 assays, with 15,407 bounded lists per partition. Zero-active lists
+retain denominator mass; each active query retains its native inverse-square-root
+list-size weight. Strata use full assay size, not bounded-list size. These are
+contributions to the original task, not separate retrieval tasks restricted to
+each stratum.
+
+| B contrastive direction | Epoch 1 | Epoch 5 | Epoch 6 | Epoch 15 | Minimum epoch |
+|---|---:|---:|---:|---:|---:|
+| Protein→molecule, learned scale | 5.73059 | 3.99055 | 3.96577 | 3.79393 | 15 |
+| Molecule→protein, learned scale | 2.81915 | 2.03734 | 2.04029 | 2.04105 | 5 |
+| Protein→molecule, fixed scale 13 | 5.74136 | 4.05543 | 3.99684 | 3.84456 | 15 |
+| Molecule→protein, fixed scale 13 | 2.78834 | 1.85659 | 1.82522 | 1.70923 | 15 |
+
+The learned-scale molecule→protein direction first increases at epochs 5→6
+and ends only 0.00370 above its epoch-5 minimum. Protein→molecule first
+increases at 6→7 but reaches its minimum at 15. Both fixed-scale directions
+first increase at 6→7 and reach their minima at 15. Local increases and
+minimum epochs describe this trajectory; they are not statistical change points.
+
+On the common macro-peak comparison, epochs 6→15, learned-scale
+protein→molecule loss falls by 0.17184 and molecule→protein changes by
++0.00076. The latter rises in the 1-, 3-, 4–10- and 11–25-item bins, while
+falling in the 2- and >25-item bins. Only three-item assays show an increase
+in the sum of both directions (+0.01709). At fixed scale 13 both directions
+fall in every size bin; the three-item total changes by −0.09395. This
+isolates a numerical scale effect on the saved representations, not a benefit
+of fixed-temperature training. The contrastive three-item cohort contains
+541 assays, compared with 329 for eligible macro Spearman; their changes
+must not be treated as measurements of the same cohort.
+
+These are descriptive single-fit comparisons with fixed candidate contexts.
+No confidence intervals or redrawn-pool uncertainty are claimed: resampling
+query units alone would leave the cross-unit candidate context conditional.
+Full A directional and stratum comparisons remain pending. Source:
+`tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json}`.
+All 1,260 sampled production-batch checks agree within 3.82e-6. Independent
+explicit candidate-set calculations check 210 batches / 2,520 query lists;
+all 1,386,630 list-instance descriptors and source/output hashes were verified.
+An initial absolute tolerance on unnormalized float32 list sums missed one
+value by 1.03e-5; float64 reconstruction agrees with float64 production loss
+within 3.56e-15, and the saved float32 discrepancy is at most 8.57e-7 in
+native batch-loss units. The precision diagnosis is retained in verification.
+No training, model inference, GPU use or test predictions were involved.
 
 ## Protein coverage in the B test set
 
