@@ -104,6 +104,8 @@ def fit_trial(xgb, train, validation, selector, params, output):
 
 def main(regime, precompute_trial=None):
     import fcntl
+    if (WORK/'tier2/lambdamart/user_decision.json').exists():
+        raise RuntimeError('User ended the LambdaMART search; use finalize_lambdamart.py for the completed depth-3 fits')
     import xgboost as xgb
     if ROOT != Path("/home/atabey/Prot2Mol") or xgb.__version__ != VERSION:
         raise RuntimeError("Use the authorized Atum project and pinned XGBoost version")

@@ -313,7 +313,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported, LambdaMART still running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
+    "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported. User ended the LambdaMART search and chose completed depth-3 fits; fixed-model test finalization is pending. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
     "controlled_runtime_qualification": "17 cases passed on two actual GPUs (physical 5 and 6): all loss subsets, frozen/partial/LoRA, fixed scale, stop-gradient, list normalization, assay balancing and pairwise variants. Each used three optimizer steps with two accumulated microbatches and synchronized fitted parameters. This is execution evidence on synthetic short inputs, not scientific performance or a full-size four-GPU trainer run. Evidence: controls_gpu_qualification_17b30ae.json on Atum.",
     "sampling_audit": "Complete for both configured first epochs: all local microbatches, plus 512 evenly spaced candidate batches per split. Token/source identities and float32 labels verified before counting. Actual training-known false negatives remain after existing masks; performance impact awaits controlled masking runs.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
@@ -685,10 +685,11 @@
       "tier": "Tier 2",
       "key": "lambdamart",
       "experiment": "Frozen-feature LambdaMART with linear gains, noise-calibrated levels and group normalization",
-      "status": "running",
+      "status": "partial",
       "conditional": false,
-      "completed_scope": "Pinned XGBoost 3.4.1 passed a 49,020-item intact-query CUDA probe. Five settings per split running on GPUs 0 and 2, with linear noise-derived levels, query normalization, full truncation and validation Spearman selection.",
-      "evidence": "RewardModel/outputs/paired_generalization/lambdamart_{A,B}.log on Atum"
+      "completed_scope": "Depth-3 fits completed on both splits. Selected validation macro Spearman A=0.1307700438 at 500 trees, B=0.0484568625 at 270 trees. Both define all eligible validation assay correlations. User fixed this common configuration and ended the larger search; test scoring and final metrics are pending.",
+      "evidence": "tier2/lambdamart/user_decision.json; tier2/lambdamart/{A,B}/trial00/complete.json",
+      "user_override": "User ended further LambdaMART search and selected the already completed depth-3 configuration for the A/B comparison. Four extra fits were terminated with process identity verification. No additional tree training is permitted; fixed-model validation/test finalization remains pending."
     },
     {
       "id": "E32",
