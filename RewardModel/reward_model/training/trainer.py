@@ -1168,6 +1168,10 @@ class RewardModelTrainer(Trainer):
             bce_pos_weight=model_config.bce_pos_weight,
             ranking_temperature=model_config.ranking_temperature,
             ranking_affinity_margin=model_config.ranking_affinity_margin,
+            ranking_objective=model_config.ranking_objective,
+            ranking_normalize_per_group=model_config.ranking_normalize_per_group,
+            ranking_position_weighting=model_config.ranking_position_weighting,
+            ranking_pair_target_temperature=model_config.ranking_pair_target_temperature,
             ranking_min_pchembl_span=active_eval_dataset.ranking_min_pchembl_span
             if hasattr(active_eval_dataset, "ranking_min_pchembl_span")
             else model_config.ranking_min_pchembl_span,

@@ -52,6 +52,11 @@ item in `protocol.json`; this document does not replace or narrow that scope.
   Fixed contrastive scale stays at the original 13. Stop-gradient detaches
   encoder outputs only before the separate contrastive projections; R/B still
   update the encoders and C still updates its projection heads.
+- Set `data.sample_all_assays: true` for every controlled arm. Otherwise the
+  historical sampler switches from all assays to ranking-eligible assays when
+  C is disabled, changing list composition, dataset-item count and update count
+  along with the objective. Preserve the reference's full row coverage and
+  classification-row packing even in arms where B is disabled.
 - Score all trained pathways separately. Comparisons of R versus RB/RC/RBC
   isolate auxiliary-objective effects on the same readout. The entire seven-arm
   grid compares complete scoring systems; a factorial interaction computed
@@ -67,6 +72,36 @@ by actual cached-encoder qualification on the authorized GPU UUIDs before
 starting these new controlled arms. These checks establish execution, not
 scientific performance or sufficient statistical power.
 
+## Ranking controls
+
+The reference is a top-weighted Plackett-Luce selection loss, not a sum of
+pairwise logistic losses. Its three-item-or-larger sampled lists are averaged,
+but larger original assays generate more lists. These distinctions are part
+of the comparison, not interchangeable uses of the word "group".
+
+- Within-list normalization divides the reference's sum by the retained
+  selection-weight sum before averaging lists. A selection is retained only
+  when at least one weaker item lies beyond the affinity margin.
+- Pairwise top and uniform controls both use one logistic term per unordered
+  pair beyond the same affinity margin. Top weights use the higher-label item's
+  tie-averaged reference position weight. Divide by the retained pair-weight
+  sum within each list. Comparing these two isolates pair weighting; comparing
+  either to the reference also changes the loss family.
+- A zero-margin hard-pair control precedes the soft-pair comparison. Soft
+  targets are sigmoid(label difference / T), include near ties and give exact
+  ties probability 0.5. Hard exact ties are omitted.
+- Fix T from each training partition's raw replicate-difference RMS d using
+  T = sqrt(3) d / pi, which matches the variance pi^2 T^2 / 3 of a logistic
+  difference distribution to d^2. This is a noise-calibrated sensitivity model,
+  not a claim that median-aggregated labels have the uncertainty of individual
+  raw measurements. Validation/test measurements do not determine T.
+- Training and full-dataset evaluation reconstruct the same configured ranking
+  objective. The metric eligibility rule remains fixed for comparability.
+
+Original-assay balancing, beyond normalization of each sampled list, remains
+an explicit additional part of the per-group comparison to implement. The
+sampling multiplicity must be corrected before claiming equal assay weight.
+
 Controlled retention must preserve both selection rules, the trajectory
 measurements and the averaging candidates. It must fit the authorized storage
 quota without deleting original data or the first reference's checkpoints.
@@ -76,6 +111,6 @@ Training with both selection metrics will distinguish
 best-within-15 selection from an actual patience-based early-stopping rule.
 
 The static weight grid, leak-in/out design, unit learning-curve fractions,
-ranking variants, co-positive masking audit, averaging rule, and Tier 4
+co-positive masking audit, averaging rule, and Tier 4
 adaptation schedule still require their explicit manifests and qualification.
 Nothing here labels those experiments complete.

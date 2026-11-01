@@ -25,6 +25,7 @@ from ..model.losses import (
     MIN_LISTWISE_LIGANDS,
     ligunity_bidirectional_contrastive_loss,
     ligunity_listwise_loss,
+    pairwise_logistic_ranking_loss,
 )
 
 ASSAY_SPEARMAN_LOG_FILENAME = "eval_assay_spearman.jsonl"
@@ -489,6 +490,10 @@ def compute_joint_evaluation_metrics(
     ranking_temperature: float,
     ranking_affinity_margin: float,
     ranking_min_pchembl_span: float,
+    ranking_objective: str = "ligunity_listwise",
+    ranking_normalize_per_group: bool = False,
+    ranking_position_weighting: str = "top",
+    ranking_pair_target_temperature: float | None = None,
     ranking_max_ligands: int = 16,
     ranking_num_partitions: int = 3,
     ranking_partition_seed: int = 42,
@@ -545,8 +550,15 @@ def compute_joint_evaluation_metrics(
         seed=ranking_partition_seed,
         min_pchembl_span=ranking_min_pchembl_span,
     )
+    if ranking_objective not in {"ligunity_listwise", "pairwise_logistic"}:
+        raise ValueError("Unknown ranking_objective")
+    ranking_loss_function = (ligunity_listwise_loss if ranking_objective == "ligunity_listwise"
+                             else pairwise_logistic_ranking_loss)
+    extra = {} if ranking_objective == "ligunity_listwise" else {
+        "pair_target_temperature": ranking_pair_target_temperature,
+    }
     partition_losses = [
-        ligunity_listwise_loss(
+        ranking_loss_function(
             scores,
             pchembl,
             partition_group_ids,
@@ -555,6 +567,9 @@ def compute_joint_evaluation_metrics(
             # partitioned, matching the training dataset's sampling contract.
             min_pchembl_span=0.0,
             affinity_margin=ranking_affinity_margin,
+            normalize_per_group=ranking_normalize_per_group,
+            position_weighting=ranking_position_weighting,
+            **extra,
         )
         for partition_group_ids in ranking_partitions
     ]

@@ -103,6 +103,10 @@ class RewardModelConfig:
     # and every checkpoint trained that way loadable unchanged.
     cosine_fixed_score_scale: bool = False
     ranking_temperature: float = 1.0
+    ranking_objective: str = "ligunity_listwise"
+    ranking_normalize_per_group: bool = False
+    ranking_position_weighting: str = "top"
+    ranking_pair_target_temperature: Optional[float] = None
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
     ranking_min_pchembl_span: float = 0.5
     bce_pos_weight: float = 1.0
@@ -296,6 +300,18 @@ class RewardModelConfig:
             raise ValueError("ranking_affinity_margin must be finite and >= 0")
         if self.ranking_min_pchembl_span < 0.0:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
+        if self.ranking_objective not in {"ligunity_listwise", "pairwise_logistic"}:
+            raise ValueError("Unknown ranking_objective")
+        if not isinstance(self.ranking_normalize_per_group, bool):
+            raise ValueError("ranking_normalize_per_group must be boolean")
+        if self.ranking_position_weighting not in {"top", "uniform"}:
+            raise ValueError("Unknown ranking_position_weighting")
+        if self.ranking_pair_target_temperature is not None:
+            if (not math.isfinite(float(self.ranking_pair_target_temperature))
+                    or self.ranking_pair_target_temperature <= 0):
+                raise ValueError("ranking_pair_target_temperature must be finite and positive")
+            if self.ranking_objective != "pairwise_logistic" or self.ranking_affinity_margin != 0:
+                raise ValueError("Soft targets require pairwise_logistic and explicit zero affinity margin")
         if not isinstance(self.deduplicate_protein_inputs, bool):
             raise ValueError("deduplicate_protein_inputs must be a boolean")
         if not isinstance(self.deduplicate_molecule_inputs, bool):

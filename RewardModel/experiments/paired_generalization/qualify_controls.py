@@ -44,6 +44,13 @@ def cases():
         ("lora", dict(encoder_lora_rank=2, encoder_lora_alpha=4.)),
         ("fixed_scale", dict(learn_contrastive_scale=False)),
         ("detach", dict(contrastive_detach_encoders=True)),
+        ("listwise_normalized", dict(ranking_normalize_per_group=True)),
+        ("pairwise_top", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True)),
+        ("pairwise_uniform", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True,
+                                  ranking_position_weighting="uniform")),
+        ("pairwise_soft", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True,
+                               ranking_position_weighting="uniform", ranking_affinity_margin=0,
+                               ranking_pair_target_temperature=.6)),
     ])
     return result
 

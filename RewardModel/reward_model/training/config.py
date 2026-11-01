@@ -34,6 +34,9 @@ class RewardTrainingDataConfig:
     evaluation_ranking_partitions: int = 3
     ranking_min_pchembl_span: float = 0.5
     max_classification_only_per_item: int = 16
+    # None preserves historical objective-dependent sampling. Controlled loss
+    # ablations set True so disabling C does not also change batches/steps.
+    sample_all_assays: Optional[bool] = None
     # Datasets whose labels were harmonised across assays intentionally
     # break the row-wise binary_label == (pchembl >= threshold) identity.
     enforce_binary_label_threshold: bool = True
@@ -66,6 +69,8 @@ class RewardTrainingDataConfig:
             raise ValueError("ranking_min_pchembl_span must be >= 0")
         if self.max_classification_only_per_item < 0:
             raise ValueError("max_classification_only_per_item must be >= 0")
+        if self.sample_all_assays is not None and not isinstance(self.sample_all_assays, bool):
+            raise ValueError("sample_all_assays must be boolean or None")
 
 
 @dataclass(eq=True)

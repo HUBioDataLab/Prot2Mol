@@ -270,6 +270,7 @@ def train_reward_model_from_config(
         max_classification_only_per_item=config.data.max_classification_only_per_item,
         include_all_assays_for_contrastive=(
             config.model.contrastive_loss_weight > 0.0
+            if config.data.sample_all_assays is None else config.data.sample_all_assays
         ),
         item_count_multiple=item_count_multiple,
     )

@@ -14,6 +14,7 @@ from .fusion import RewardMLPHead, TokenFusion, masked_pool, normalize_mask
 from .losses import (
     ligunity_bidirectional_contrastive_loss,
     ligunity_listwise_loss,
+    pairwise_logistic_ranking_loss,
 )
 from .outputs import RewardModelOutput
 
@@ -445,7 +446,12 @@ class RewardModel(nn.Module):
         pchembl_values: torch.Tensor,
         ranking_group_ids: torch.Tensor,
     ) -> torch.Tensor:
-        return ligunity_listwise_loss(
+        loss_function = (ligunity_listwise_loss if self._config.ranking_objective == "ligunity_listwise"
+                         else pairwise_logistic_ranking_loss)
+        extra = {} if self._config.ranking_objective == "ligunity_listwise" else {
+            "pair_target_temperature": self._config.ranking_pair_target_temperature,
+        }
+        return loss_function(
             ranking_score,
             pchembl_values,
             ranking_group_ids,
@@ -462,6 +468,9 @@ class RewardModel(nn.Module):
             # random sublist would silently discard valid assay opportunities.
             min_pchembl_span=0.0,
             affinity_margin=self._config.ranking_affinity_margin,
+            normalize_per_group=self._config.ranking_normalize_per_group,
+            position_weighting=self._config.ranking_position_weighting,
+            **extra,
         )
 
     def _compute_contrastive_loss(

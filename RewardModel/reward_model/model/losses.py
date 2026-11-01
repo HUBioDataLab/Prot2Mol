@@ -251,6 +251,8 @@ def ligunity_listwise_loss(
     min_pchembl_span: float = 0.5,
     min_list_size: int = MIN_LISTWISE_LIGANDS,
     affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN,
+    normalize_per_group: bool = False,
+    position_weighting: str = "top",
 ) -> torch.Tensor:
     """Compute LigUnity's weighted Plackett-Luce ranking objective.
 
@@ -274,6 +276,8 @@ def ligunity_listwise_loss(
         raise ValueError("min_list_size must be >= 2")
     if affinity_margin < 0.0 or not math.isfinite(float(affinity_margin)):
         raise ValueError("affinity_margin must be finite and >= 0")
+    if not isinstance(normalize_per_group, bool) or position_weighting not in {"top", "uniform"}:
+        raise ValueError("Invalid ranking normalization/position weighting")
 
     scores, targets, group_ids = _validate_listwise_inputs(
         ranking_scores,
@@ -325,6 +329,7 @@ def ligunity_listwise_loss(
         )
         first_position = 1
         group_loss = group_scores.sum() * 0.0
+        group_weight = group_scores.new_zeros(())
         tie_start = 0
         for tie_count_tensor in tie_counts:
             tie_count = int(tie_count_tensor.item())
@@ -340,17 +345,103 @@ def ligunity_listwise_loss(
                 list_size=list_size,
                 device=group_scores.device,
                 dtype=group_scores.dtype,
-            )
+            ) if position_weighting == "top" else group_scores.new_ones(())
             if weaker_scores.numel() > 0:
                 weaker_logsumexp = torch.logsumexp(weaker_scores, dim=0)
                 selection_losses = (
                     torch.logaddexp(tie_scores, weaker_logsumexp) - tie_scores
                 )
                 group_loss = group_loss + position_weight * selection_losses.sum()
+                group_weight = group_weight + position_weight * tie_count
             first_position += tie_count
             tie_start = tie_end
+        if normalize_per_group:
+            group_loss = group_loss / group_weight.clamp_min(torch.finfo(group_loss.dtype).tiny)
         list_losses.append(group_loss)
 
     if not list_losses:
         return scores.sum() * 0.0
     return torch.stack(list_losses).mean()
+
+
+def pairwise_logistic_ranking_loss(
+    ranking_scores: torch.Tensor,
+    pchembl_values: torch.Tensor,
+    ranking_group_ids: torch.Tensor,
+    *,
+    temperature: float = 1.0,
+    min_pchembl_span: float = 0.5,
+    min_list_size: int = MIN_LISTWISE_LIGANDS,
+    affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN,
+    normalize_per_group: bool = True,
+    position_weighting: str = "uniform",
+    pair_target_temperature: float | None = None,
+) -> torch.Tensor:
+    """Explicit pairwise control for weighting and replicate-noise targets.
+
+    Each unordered eligible pair is counted once. Hard targets omit label gaps
+    <= affinity_margin. Soft targets sigmoid(label_gap / T) include every pair,
+    including exact ties with target 0.5; they require an explicit zero margin.
+    Top weights use the tie-averaged LigUnity position weight of the higher-label
+    item. A normalized group is divided by its retained pair-weight sum, then
+    groups are averaged. No pairs from different assays are compared.
+
+    The pairwise top/uniform pair isolates weighting within one loss family;
+    replacing the listwise reference changes the denominator and is reported
+    separately. T is supplied from training-only replicate statistics.
+    """
+    for name, value, positive in (("temperature", temperature, True),
+                                  ("min_pchembl_span", min_pchembl_span, False),
+                                  ("affinity_margin", affinity_margin, False)):
+        if not math.isfinite(float(value)) or value < 0 or (positive and value == 0):
+            raise ValueError(f"Invalid {name}")
+    if min_list_size < 2:
+        raise ValueError("min_list_size must be >= 2")
+    if not isinstance(normalize_per_group, bool) or position_weighting not in {"top", "uniform"}:
+        raise ValueError("Invalid ranking normalization/position weighting")
+    if pair_target_temperature is not None:
+        if not math.isfinite(float(pair_target_temperature)) or pair_target_temperature <= 0:
+            raise ValueError("pair_target_temperature must be finite and positive")
+        if affinity_margin != 0:
+            raise ValueError("Soft pair targets require explicit affinity_margin=0 to retain near ties")
+    scores, targets, group_ids = _validate_listwise_inputs(ranking_scores, pchembl_values, ranking_group_ids)
+    dtype = torch.float32 if scores.dtype in (torch.float16, torch.bfloat16) else scores.dtype
+    scores, targets = scores.to(dtype), targets.to(dtype)
+    losses = []
+    for group in torch.unique(group_ids[group_ids >= 0], sorted=True):
+        mask = group_ids == group
+        gs, gy = scores[mask] / temperature, targets[mask]
+        size = gs.numel()
+        if size < min_list_size or (gy.max() - gy.min()).item() < min_pchembl_span:
+            continue
+        left, right = torch.triu_indices(size, size, offset=1, device=scores.device)
+        gaps = gy[left] - gy[right]
+        if pair_target_temperature is None:
+            eligible = gaps.abs() > affinity_margin
+            left, right, gaps = left[eligible], right[eligible], gaps[eligible]
+            probabilities = (gaps > 0).to(dtype)
+        else:
+            probabilities = torch.sigmoid(gaps / pair_target_temperature)
+        if left.numel() == 0:
+            losses.append(gs.sum() * 0.)
+            continue
+        weights = torch.ones_like(gaps)
+        if position_weighting == "top":
+            order = torch.argsort(gy, descending=True, stable=True)
+            ordered_y = gy[order]
+            _, counts = torch.unique_consecutive(ordered_y, return_counts=True)
+            item_weights = torch.empty_like(gy)
+            start = 0
+            for count_tensor in counts:
+                count = int(count_tensor.item())
+                item_weights[order[start:start+count]] = _tie_averaged_position_weight(
+                    first_position=start+1, tie_count=count, list_size=size,
+                    device=scores.device, dtype=dtype)
+                start += count
+            weights = item_weights[torch.where(gaps >= 0, left, right)]
+        pair_losses = F.binary_cross_entropy_with_logits(gs[left] - gs[right], probabilities, reduction="none")
+        group_loss = (weights * pair_losses).sum()
+        if normalize_per_group:
+            group_loss = group_loss / weights.sum()
+        losses.append(group_loss)
+    return torch.stack(losses).mean() if losses else scores.sum() * 0.

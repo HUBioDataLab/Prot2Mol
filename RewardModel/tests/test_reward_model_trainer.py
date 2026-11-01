@@ -2053,7 +2053,8 @@ def test_prepare_pair_datasets_from_config_summarizes_without_materializing_pair
     assert summary["test_ranking_lists"] == 0
 
 
-def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_and_test(tmp_path, monkeypatch):
+@pytest.mark.parametrize('sample_all_assays', [None, True, False])
+def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_and_test(tmp_path, monkeypatch, sample_all_assays):
     split_paths = get_tokenized_split_dataset_paths(str(tmp_path / "tokenized"))
 
     train_examples = Dataset.from_list(
@@ -2248,12 +2249,18 @@ def test_train_reward_model_from_config_trains_on_train_and_final_evaluates_val_
     )
     monkeypatch.setattr("reward_model.training.entry.create_training_arguments", lambda config: object())
 
+    if sample_all_assays is not None:
+        import yaml
+        settings = yaml.safe_load(config_path.read_text())
+        settings['data']['sample_all_assays'] = sample_all_assays
+        config_path.write_text(yaml.safe_dump(settings))
     summary = train_reward_model_from_config(
         str(config_path),
         init_from_checkpoint=str(warm_start),
     )
 
     assert captured["train_called"] is True
+    assert captured['train_dataset'].include_all_assays_for_contrastive is bool(sample_all_assays)
     assert len(captured["evaluate_calls"]) == 2
     assert captured["evaluate_calls"][0] == (None, "eval")
     test_eval_dataset, test_prefix = captured["evaluate_calls"][1]
