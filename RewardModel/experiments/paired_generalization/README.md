@@ -83,6 +83,24 @@ Runtime artifacts and logs live in `RewardModel/outputs/paired_generalization`.
 Scientific experiments are not complete merely because preparation or the
 distributed smoke check passes.
 
+`adaptation_design.py` prepares only group memberships and feasibility counts
+for Tier 4 E49–E52, on CPU. It splits original validation units by an
+identity-only hash into disjoint adaptation/validation sets and preserves all
+original test groups. Across-unit budgets are nested whole-assay prefixes at
+k=1/2/4/8/16/64. Within each validation/test unit, a fixed half of its assays
+is reserved for support and the remaining assays for queries; unused support
+assays never enter evaluation when k changes. Feasible and rank-evaluable unit
+counts are reported for every k. A's one-assay units cannot support this
+within-unit contrast; no assay is split to manufacture one. Each fitted result
+must eventually be compared with k=0 on the identical query cohort.
+
+Outputs under `tier4/adaptation_design/` are not training-ready token/label
+views or scientific performance. Subset-local BCE labels must be reconstructed
+when those views are built. Tier 3 completion and a frozen adaptation fitting
+protocol remain prerequisites to model fitting. Original validation labels were
+already used for base-model selection, so these are conditional probes on the
+existing benchmark, not an independent new test population.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
