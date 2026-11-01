@@ -83,6 +83,8 @@ def main():
     relation=json.loads(relation_path.read_text())
     if sha256(ROOT/'Paired input ranking generalization.md') != primary['spec_sha256']:
         raise ValueError('Governing MD changed')
+    if relation['source_sha256'][str(primary_path)] != sha256(primary_path):
+        raise ValueError('Similarity relation belongs to a different split plan')
     sources={str(primary_path):sha256(primary_path),str(relation_path):sha256(relation_path)}
     frames={}
     for regime in ('A','B'):
