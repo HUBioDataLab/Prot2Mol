@@ -29,6 +29,31 @@ User-approved execution constraints:
 - Download raw ChEMBL 37 into the project while training runs, for replicate
   analyses. Do not infer original replicates from median values/counts.
 
+For E08/E09, `similarity_composition.py prepare` freezes an identity/label-only
+design before prediction scores are read. Maximum similarity is the actual
+binary scaffold relation over all training molecules, irrespective of protein.
+The report preserves full assays in all-shared, all-unseen and mixed categories,
+and separately recomputes within-stratum metrics with eligibility reapplied.
+These two views have different cohorts; neither supplies graded chemical distance.
+
+Composition cells use the MD's eligible group-size bins (3, 4–10, 11–25, >25),
+positive-fraction bins (zero, (0,.25], (.25,.5], (.5,.75], (.75,1), one), and mean
+pChEMBL bins (<5, [5,6), [6,7), [7,8), >=8). For each partition, each eligible
+A group receives its B cell's mass divided by the A cell count. Cells absent in
+A are reported as unsupported; B comparisons then use the same common support.
+No clipping, score-dependent binning or tuning is performed. The report includes
+descriptor balance, effective group count and weighted defined-Spearman coverage.
+This is descriptive held-out-label standardization, not a deployable estimator
+or causal attribution of the A/B gap; residual differences within bins remain.
+
+`similarity_composition.py depth3` applies the frozen design to the already
+selected depth-3 predictions, with no additional fitting or inference. Bootstrap
+intervals use whole assays on A and whole components on B, including units with
+no eligible stratum. The paired change from unweighted to weighted A uses the
+same A draws. These intervals condition on empirical composition weights and
+one fitted model; they do not measure weight-estimation, training-seed or split
+uncertainty. Matched neural results still require their own saved predictions.
+
 The source is the available 1,957,400-row project-local `all.parquet`. Its hash is
 recorded. The original run's data hashes are unavailable, so rebuilt split
 identity is not claimed. Scaffold components preserve assays; target coverage,
