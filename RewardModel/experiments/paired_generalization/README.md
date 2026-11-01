@@ -103,6 +103,19 @@ does not itself establish training completion, final checkpoint selection,
 test performance or multi-seed conclusions. Directional contrastive losses,
 fixed-temperature inference and geometry still need the protected epoch weights.
 
+`verify_native_analysis.py --directory <analysis-directory> --previous-epoch N`
+independently verifies the next observed prefix and writes immutable
+`trajectory_through_epochNN.json` and `verification_through_epochNN.json`.
+Omit `--previous-epoch` for a first verification. The optional predecessor must
+already contain checks for both partitions of every earlier epoch; its snapshot
+records must be identical, and every old prediction/table checksum is checked
+again before numerical checks are inherited. New snapshots use average-rank
+dot products for every assay/scorer, explicit pair enumeration in one bounded
+assay per available size bin, and direct composition-weighted means. This
+verifier does not independently reconstruct bootstrap intervals, temperature
+fits or all NDCG values. It shares the analysis lock, reads no test predictions
+or model weights, and requires a CPU-only Atum process.
+
 `stratified_trajectory.py --a-trajectory <immutable-A-trajectory.json>` answers
 the scalar part of Q11 on CPU. It uses saved validation scores for all fifteen
 initial B epochs and an independently verified A prefix. Fixed whole-assay
