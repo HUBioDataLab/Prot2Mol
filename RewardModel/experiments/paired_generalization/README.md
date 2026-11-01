@@ -178,6 +178,34 @@ batch identities, candidate pools, step sizes, token/checkpoint provenance,
 GPU numerical resolution and the Tier 3 gate still require qualification before
 scientific probes. No E56/E57 result follows from these preparation checks.
 
+`reference_handoff.py` provides one bounded unattended handoff for the live A
+reference. Prepare it while the registered control driver, training launcher
+and checkpoint protector are all live, then invoke `run` once. The coordinator
+uses CPU only and records each process's PID, start ticks, command, owner and
+working directory, plus the host boot identity. It waits for those exact
+processes to finish; missing or reused PIDs never trigger a training restart.
+It pins the specification, primary plan, job/configuration, runtime packages and
+Python source files, and stops if they change. Report-only commits are allowed.
+
+After all 15 protected weights and the original marker restoration verify, it
+checks training completion. If only managed postprocessing was interrupted by
+the retention hold, the existing retention verifier must pass every rank,
+horizon, prediction and weight check before completing that postprocessing.
+It then runs the protected A contrastive audit on GPUs0,2,5,6 and verifies the
+30-export receipt. Only afterward does it start one fresh next job selected by
+the existing frozen-grid driver. Its completion means that the next training
+launcher was observed live, not that this fit or the study is complete.
+
+Child commands/logs/PIDs and coordinator status live under
+`controlled/reference_handoff/`. A nonzero child exit, partial audit, existing
+next-run directory, missing completion evidence or changed provenance stops
+the handoff for inspection; it never retries a failed or partial fit. The
+coordinator cannot be reinvoked blindly after an interrupted invocation.
+Its children have independent process sessions and recorded handles, so inspect
+those handles after any coordinator interruption before launching other work.
+The coordinator's CPU-only environment is explicitly removed from GPU children;
+the next scientific training run uses online W&B with no inherited run ID.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
