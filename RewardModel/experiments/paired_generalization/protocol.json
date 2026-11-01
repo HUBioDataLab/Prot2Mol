@@ -259,10 +259,21 @@
   "execution_status": {
     "verified_date": "2026-11-01",
     "chembl37_download": "checksum_verified_and_extracted",
-    "initial_tier1_batch": "running; checkpoint exports followed automatically by metrics, unit bootstrap and calibration",
+    "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
     "remaining_tiers": "not_started",
-    "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired."
+    "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
+    "raw_measurement_reconstruction": {
+      "verified_source_rows": 1957400,
+      "matched_raw_measurements": 2032748,
+      "count_mismatches": 0,
+      "median_mismatches": 0,
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/replicates/reconstruction.json on Atum"
+    },
+    "new_training_label_policy": "Partition-local pair medians, recommended and stated as the default while an optional preference question remains unanswered; completed scaffold baseline is unchanged.",
+    "replicate_reliability": "running",
+    "contrastive_direction_audit": "running",
+    "random_split_preparation": "running; same model and training configuration, isolated labels; no new training started"
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
@@ -280,24 +291,30 @@
       "tier": "Tier 1",
       "key": "macro_spearman",
       "experiment": "Re-score saved predictions with per-group averaged Spearman",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E02",
       "tier": "Tier 1",
       "key": "pooled_within_group_concordance",
       "experiment": "Compute concordant-minus-discordant concordance over within-group pairs",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E03",
       "tier": "Tier 1",
       "key": "kendall_tau_b",
       "experiment": "Compute tie-adjusted Kendall tau-b",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E04",
@@ -312,8 +329,10 @@
       "tier": "Tier 1",
       "key": "ordering_accuracy_by_size",
       "experiment": "Report pairwise ordering accuracy in the specified group-size bins",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E06",
@@ -378,24 +397,30 @@
       "tier": "Tier 1",
       "key": "bce_auc_vs_logloss",
       "experiment": "Compare BCE discrimination with log-loss over checkpoints",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E14",
       "tier": "Tier 1",
       "key": "bce_temperature_calibration",
       "experiment": "Fit temperature using validation only and evaluate calibration",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E15",
       "tier": "Tier 1",
       "key": "contrastive_logit_scale",
       "experiment": "Track learned contrastive scale over checkpoints",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E16",
@@ -410,8 +435,10 @@
       "tier": "Tier 1",
       "key": "best_checkpoint_comparison",
       "experiment": "Locate best validation macro-Spearman and best-loss checkpoints",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E18",
@@ -434,16 +461,20 @@
       "tier": "Tier 1",
       "key": "unit_bootstrap",
       "experiment": "Compute uncertainty by resampling indivisible split units",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E21",
       "tier": "Tier 1",
       "key": "top_weighted_metrics",
       "experiment": "Compare top-weighted metrics with the headline metric as requested by the metric questions",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E22",
@@ -530,8 +561,10 @@
       "tier": "Tier 2",
       "key": "factorized_scoring",
       "experiment": "Score using current contrastive similarity alone",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E33",
@@ -698,8 +731,10 @@
       "tier": "Tier 4",
       "key": "pathway_scoring",
       "experiment": "Score each pathway separately on both splits",
-      "status": "pending",
-      "conditional": false
+      "status": "partial",
+      "conditional": false,
+      "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum"
     },
     {
       "id": "E54",
