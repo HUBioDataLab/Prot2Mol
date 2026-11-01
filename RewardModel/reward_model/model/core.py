@@ -107,6 +107,16 @@ class RewardModel(nn.Module):
         self._config.molecule_hidden_size = self._config.molecule_hidden_size or molecule_bundle.hidden_size
         self._config.validate()
 
+        if self._config.protein_input_mode == "constant":
+            ids = torch.tensor(self._config.protein_constant_token_ids,dtype=torch.long).unsqueeze(0)
+            if hasattr(self.protein_encoder,"get_input_embeddings"):
+                embeddings = self.protein_encoder.get_input_embeddings()
+                if embeddings is not None and int(ids.max()) >= embeddings.num_embeddings:
+                    raise ValueError("Constant protein token lies outside the encoder vocabulary")
+            # Config persists the IDs. No new parameter or state-dict key changes
+            # initialization, parameter count, or checkpoint compatibility.
+            self.register_buffer("_constant_protein_ids",ids,persistent=False)
+
         projection_class = (
             NonlinearProjection
             if self._config.projection_type == "nonlinear"
@@ -310,7 +320,16 @@ class RewardModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        input_ids,attention_mask = self._protein_inputs(input_ids,attention_mask)
         return encode_tokens(self.protein_encoder, input_ids=input_ids, attention_mask=attention_mask)
+
+    def _protein_inputs(self,input_ids,attention_mask):
+        if self._config.protein_input_mode == "sequence":
+            return input_ids,attention_mask
+        if input_ids.ndim != 2:
+            raise ValueError("Protein inputs must be a batch of token sequences")
+        ids = self._constant_protein_ids.to(device=input_ids.device).expand(input_ids.shape[0],-1)
+        return ids,torch.ones_like(ids)
 
     def encode_molecule(
         self,
@@ -822,6 +841,9 @@ class RewardModel(nn.Module):
         return_token_embeddings: bool = False,
         return_dict: bool = True,
     ) -> RewardModelOutput | tuple[torch.Tensor, ...]:
+        # Replace before deduplication: original sequence length, mask and
+        # duplication patterns must not affect a molecule-only forward pass.
+        protein_input_ids,protein_attention_mask = self._protein_inputs(protein_input_ids,protein_attention_mask)
         protein_tokens = self._deduplicated_encode(
             self.encode_protein,
             protein_input_ids,

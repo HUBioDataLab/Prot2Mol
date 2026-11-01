@@ -101,6 +101,13 @@ def controlled_cases(noise_rms):
     return result
 
 
+def leak_cases():
+    # ESM2 encodes the fixed single-residue input G as CLS/G/EOS. The real
+    # qualification below checks these IDs against the loaded tokenizer.
+    return [('full_pair',{},.01),('molecule_only',dict(protein_input_mode='constant',
+                                                     protein_constant_token_ids=[0,6,2]),.01)]
+
+
 def make_batch(model, device, real):
     if real:
         proteins = ["MKTAYIAKQRQISFVK"]*3 + ["GAVLIPFWSTCMNQDE"]*3 + ["ACDEFGHIKLMNPQRS"]*3
@@ -134,7 +141,9 @@ def main():
     parser.add_argument("--config", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument('--control-grid', action='store_true')
+    grid = parser.add_mutually_exclusive_group()
+    grid.add_argument('--control-grid', action='store_true')
+    grid.add_argument('--leak-grid', action='store_true')
     parser.add_argument('--training-noise-rms', type=float)
     args = parser.parse_args()
     world = int(os.environ.get("WORLD_SIZE", "1"))
@@ -151,12 +160,18 @@ def main():
     torch.set_num_threads(2)
     torch.distributed.init_process_group("nccl" if gpu else "gloo", timeout=timedelta(minutes=5))
     records = []
-    configurations = controlled_cases(args.training_noise_rms) if args.control_grid else [(name, changes, .01) for name, changes in cases()]
+    configurations = (controlled_cases(args.training_noise_rms) if args.control_grid else
+                      leak_cases() if args.leak_grid else [(name, changes, .01) for name, changes in cases()])
     # The rank-64 adapter cannot fit the original 12/16-wide smoke encoders.
     # Keep one common, sufficiently wide tiny architecture for this whole grid.
     tiny_widths = (72, 80) if args.control_grid else (12, 16)
     for name, changes, weight_decay in configurations:
         model = make_model(args.config, changes, tiny_widths=tiny_widths).to(device).train()
+        if args.leak_grid and args.config and model.config.protein_input_mode == 'constant':
+            encoded = model.protein_tokenizer(['G'],add_special_tokens=True,padding=False,
+                                              truncation=False,return_tensors='pt')['input_ids'][0].tolist()
+            if encoded != list(model.config.protein_constant_token_ids):
+                raise ValueError('Constant protein tokenization differs from the registered G input')
         batch = make_batch(model, device, bool(args.config))
         ddp = DistributedDataParallel(model, device_ids=[local_rank] if gpu else None, find_unused_parameters=True)
         optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1e-4, weight_decay=weight_decay)
@@ -207,6 +222,7 @@ def main():
             world_size=world, device=str(device), torch_version=torch.__version__,
             real_config=str(args.config) if args.config else None,
             control_grid=args.control_grid, training_noise_rms=args.training_noise_rms,
+            leak_grid=args.leak_grid,
             tiny_encoder_widths=list(tiny_widths) if args.config is None else None,
             visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES")), indent=2) + "\n")
     torch.distributed.barrier()

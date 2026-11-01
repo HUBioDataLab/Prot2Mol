@@ -7,6 +7,7 @@ matching. Only matched donors enter leak-in; unused donors remain unused.
 from __future__ import annotations
 
 from collections import Counter
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -103,13 +104,15 @@ def composition(frame):
         pchembl_mean=float(frame.pchembl_value.mean()),pchembl_std=float(frame.pchembl_value.std()))
 
 
-def construct(frames, regime):
+def construct(frames, regime, *, allow_b_assay_exchanges=False):
     train,val,original_test = (frames[role].copy() for role in ('train','val','test'))
     for left,right in [('train','val'),('train','test'),('val','test')]:
         if set(frames[left].assay_id)&set(frames[right].assay_id):
             raise ValueError('Original assay partitions overlap')
     original_relatives = int(pd.concat([train,val]).scaffold.isin(original_test.scaffold.unique()).sum())
     if regime == 'A':
+        if allow_b_assay_exchanges:
+            raise ValueError('The whole-assay exception proposal applies only to B')
         related = train.scaffold.isin(original_test.scaffold.unique())
         any_related = train.assay_id[related].unique()
         out = relabel(train[~train.assay_id.isin(any_related)])
@@ -125,8 +128,12 @@ def construct(frames, regime):
     elif regime == 'B':
         donors,test = reserve_b_donors(original_test)
         out = relabel(train)
-        unit_assays = train[['component','assay_id']].drop_duplicates().groupby('component').size()
-        replacements = out[out.component.isin(unit_assays[unit_assays==1].index)].copy()
+        if allow_b_assay_exchanges:
+            repeated = out.duplicated(['target_chembl_id','compound_id'],keep=False)
+            replacements = out[~out.assay_id.isin(out.assay_id[repeated].unique())].copy()
+        else:
+            unit_assays = train[['component','assay_id']].drop_duplicates().groupby('component').size()
+            replacements = out[out.component.isin(unit_assays[unit_assays==1].index)].copy()
         reservation = dict(policy='One hash-selected donor per original multi-assay B test component; unused donors never returned to test',
             reserved_donor_assays=int(donors.assay_id.nunique()),reserved_donor_rows=len(donors),
             original_test_assays=int(original_test.assay_id.nunique()),fixed_test_assays=int(test.assay_id.nunique()))
@@ -159,6 +166,13 @@ def construct(frames, regime):
     exposure['relative_in_leak_in'] = exposure.scaffold.isin(inside.scaffold.unique())
     exposure['molecule_in_leak_in'] = exposure.compound_id.isin(inside.compound_id.unique())
     exposure['training_assays_for_target'] = exposure.target_chembl_id.map(out_profile.assays).fillna(0).astype(int)
+    partial_components = 0
+    if regime == 'B':
+        original_counts = train.groupby('component').size()
+        retained_counts = common.groupby('component').size().reindex(original_counts.index,fill_value=0)
+        partial_components = int(((retained_counts>0)&(retained_counts<original_counts)).sum())
+        if partial_components and not allow_b_assay_exchanges:
+            raise ValueError('An original B training component was fragmented')
     result = dict(regime=regime,seed=SEED,original_full_test_relative_rows_outside_test=original_relatives,
         fixed_test_rows=len(test),fixed_test_assays=int(test.assay_id.nunique()),reservation=reservation,
         replacement_candidate_assays=int(replacements.assay_id.nunique()),donor_candidate_assays=int(donors.assay_id.nunique()),
@@ -170,18 +184,20 @@ def construct(frames, regime):
         cold_protein_test_rows=int((exposure.training_assays_for_target==0).sum()),
         fixed_test_binary_labels_changed=int((test.binary_label.to_numpy()!=original_test.set_index('source_row_index').loc[test.source_row_index,'binary_label'].to_numpy()).sum()),
         usable_leak_contrast=bool(len(matches) and exposure.relative_in_leak_in.any()),
-        interpretation='Data construction only, no model outcomes. Identical test groups in all four cells; shared validation. Exactly matched protein/size/positive/replicate/eligibility descriptors. Whole A assays and whole original B training components retained/removed. B leak-in intentionally places a reserved whole donor assay from a test component in training; component isolation is the manipulated variable. Test exposure may be sparse and limits power. Unused donor assays are excluded in both arms.')
+        requires_user_decision=allow_b_assay_exchanges,
+        partial_original_training_components=partial_components,
+        interpretation='Data construction only, no model outcomes. Identical test groups in all four cells; shared validation. Exactly matched protein/size/positive/replicate/eligibility descriptors. Whole A assays retained/removed. B uses whole original training components unless the explicit whole-assay exception proposal is selected. B leak-in intentionally places a reserved whole donor assay from a test component in training; component isolation is the manipulated variable. Test exposure may be sparse and limits power. Unused donor assays are excluded in both arms.')
     return result,dict(leak_out=out,leak_in=inside,test=test,donors=donors,matches=matches,exposure=exposure)
 
 
-def main():
+def main(assay_exchange_proposal=False):
     if __package__:
         from .prepare_random import archive_directory
     else:
         from prepare_random import archive_directory
     if ROOT != Path('/home/atabey/Prot2Mol'):
         raise RuntimeError('Use authorized Atum project')
-    directory = WORK/'leak_design'
+    directory = WORK/('leak_design_assay_proposal' if assay_exchange_proposal else 'leak_design')
     if directory.exists():
         raise RuntimeError('Existing construction must be inspected before replacing it')
     archive_directory(directory)
@@ -194,7 +210,7 @@ def main():
     if scaffolds.index.has_duplicates or units.index.has_duplicates:
         raise ValueError('Ambiguous molecular or unit mapping')
     results,artifacts = {},{}
-    for regime in ('A','B'):
+    for regime in (('B',) if assay_exchange_proposal else ('A','B')):
         frames = {}
         for role in ('train','val','test'):
             path = Path(plan['bases'][regime]['data'][f'{role}_parquet_path'])
@@ -208,7 +224,7 @@ def main():
                 raise ValueError('Source observation lacks its split relation/unit')
             frames[role] = frame
         print(f'Constructing matched E40 data: {regime}',flush=True)
-        results[regime],tables = construct(frames,regime)
+        results[regime],tables = construct(frames,regime,allow_b_assay_exchanges=assay_exchange_proposal)
         for name,table in tables.items():
             path = directory/f'{regime}_{name}.parquet'
             table.to_parquet(path,index=False)
@@ -218,8 +234,12 @@ def main():
         primary_plan_sha256=sha256(plan_path),source_data_sha256=plan['source_data_sha256'],
         molecule_scaffolds_sha256=sha256(map_path),assay_units_sha256=sha256(unit_path),
         artifacts_sha256=artifacts,code_sha256=sha256(Path(__file__)),
+        requires_user_decision=assay_exchange_proposal,
         remaining='Review realized exposure and matching before freezing model configs; tokenize/view qualification, all four-cell multi-seed fitting and performance comparisons remain pending'))
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--assay-exchange-proposal',action='store_true',
+                        help='Prepare a B whole-assay exception proposal only; requires user choice before training')
+    main(parser.parse_args().assay_exchange_proposal)

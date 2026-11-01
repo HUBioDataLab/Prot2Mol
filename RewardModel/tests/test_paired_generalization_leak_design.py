@@ -84,3 +84,16 @@ def test_donor_independence_uses_pair_identities_and_keeps_whole_assays():
     assert selected.groupby('assay_id').size().eq(3).all()
     altered = pair_independent_assays(frame.assign(pchembl_value=0,binary_label=0))
     assert selected.assay_id.tolist() == altered.assay_id.tolist()
+
+
+def test_b_partial_component_proposal_is_explicit_and_preserves_matching():
+    frames = inputs('B')
+    frames['train']['component'] = 100
+    strict,_ = construct(frames,'B')
+    assert strict['matched_assay_exchanges'] == 0
+    proposal,tables = construct(frames,'B',allow_b_assay_exchanges=True)
+    assert proposal['matched_assay_exchanges'] == 1
+    assert proposal['requires_user_decision']
+    assert proposal['partial_original_training_components'] == 1
+    assert proposal['training']['leak_out'] == proposal['training']['leak_in']
+    assert not set(tables['test'].assay_id)&set(tables['leak_in'].assay_id)

@@ -47,6 +47,10 @@ class RewardModelConfig:
     protein_hidden_size: Optional[int] = None
     molecule_hidden_size: Optional[int] = None
     protein_max_length: int = 1024
+    # E40 molecule-only control: all examples receive one identical protein
+    # token sequence before deduplication/encoding, removing identity and length.
+    protein_input_mode: str = "sequence"
+    protein_constant_token_ids: Optional[Sequence[int]] = None
     molecule_max_length: int = 512
     fusion_hidden_dim: int = 512
     projection_type: str = "linear"
@@ -131,6 +135,17 @@ class RewardModelConfig:
             raise ValueError("protein_model_name_or_path must be provided")
         if not self.molecule_model_name_or_path:
             raise ValueError("molecule_model_name_or_path must be provided")
+        if self.protein_input_mode not in ("sequence", "constant"):
+            raise ValueError("protein_input_mode must be sequence or constant")
+        if self.protein_input_mode == "constant":
+            ids = self.protein_constant_token_ids
+            if not ids or len(ids) > self.protein_max_length or any(
+                not isinstance(value,int) or isinstance(value,bool) or value < 0 for value in ids
+            ):
+                raise ValueError("Constant protein input requires a nonempty sequence of nonnegative token IDs within protein_max_length")
+            self.protein_constant_token_ids = tuple(ids)
+        elif self.protein_constant_token_ids is not None:
+            raise ValueError("Constant token IDs require protein_input_mode=constant")
         if (
             self.molecule_input_representation
             not in _VALID_MOLECULE_INPUT_REPRESENTATIONS
