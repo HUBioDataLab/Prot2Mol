@@ -86,8 +86,17 @@ def verify():
 def main(stage):
     if ROOT != Path('/home/atabey/Prot2Mol'):
         raise RuntimeError('Run production analysis only in authorized Atum project')
-    if stage == 'verify':
+    if stage in ('verify', 'finish'):
         verify()
+        if stage == 'finish':
+            if __package__:
+                from .trajectory_summary import main as summarize
+                from .target_coverage import main as coverage
+            else:
+                from trajectory_summary import main as summarize
+                from target_coverage import main as coverage
+            summarize()
+            coverage()
     elif stage == 'metrics':
         if __package__:
             from .analyze_predictions import analyze_all
@@ -110,5 +119,5 @@ def main(stage):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--stage', choices=['metrics', 'noise', 'agreement', 'verify'], required=True)
+    parser.add_argument('--stage', choices=['metrics', 'noise', 'agreement', 'verify', 'finish'], required=True)
     main(parser.parse_args().stage)
