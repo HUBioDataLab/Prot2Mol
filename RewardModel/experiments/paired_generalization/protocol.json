@@ -240,7 +240,30 @@
       "status": "pending"
     }
   ],
-  "baseline_status": "preparing",
+  "baseline_status": "complete",
+  "baseline_result": {
+    "run_id": "4d1vkheo",
+    "wandb_url": "https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/4d1vkheo",
+    "epochs": 15,
+    "optimizer_steps": 13155,
+    "best_epoch": 6,
+    "best_checkpoint": "checkpoint-5262",
+    "validation_macro_spearman": 0.1846001459709722,
+    "test_macro_spearman": 0.1768796098004701,
+    "epoch15_validation_macro_spearman": 0.17561471394702927,
+    "lowest_validation_loss_epoch": 15,
+    "retained_epoch_checkpoints": 15,
+    "evidence": "RewardModel/outputs/paired_generalization/baseline_status.json and baseline_scaffold_seed42_15ep/experiment_summary.json on Atum",
+    "interpretation_limit": "One seed and one rebuilt scaffold split; no claim of improvement over the historical run or completion of the experiment study"
+  },
+  "execution_status": {
+    "verified_date": "2026-11-01",
+    "chembl37_download": "checksum_verified_and_extracted",
+    "initial_tier1_batch": "running; checkpoint exports followed automatically by metrics, unit bootstrap and calibration",
+    "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
+    "remaining_tiers": "not_started",
+    "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired."
+  },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
     0,
@@ -297,7 +320,8 @@
       "tier": "Tier 1",
       "key": "six_partition_composition",
       "experiment": "Audit size, eligibility, positive rate, scores, variance, replicates, and protein coverage across all six partitions",
-      "status": "pending",
+      "status": "complete",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/data/composition.json and groups_*.parquet on Atum",
       "conditional": false
     },
     {
@@ -305,7 +329,8 @@
       "tier": "Tier 1",
       "key": "component_sizes",
       "experiment": "Tabulate indivisible component sizes and assignment rules",
-      "status": "pending",
+      "status": "complete",
+      "evidence": "RewardModel/outputs/paired_generalization/tier1/data/components_*.parquet and composition.json on Atum; assignment rules in reward_model/training/scaffold_component_split.py",
       "conditional": false
     },
     {
