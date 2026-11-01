@@ -36,8 +36,8 @@
       "status": "partial",
       "answer": "Whole-unit intervals are available for the initial B checkpoint and completed cheap baselines, conditional on one fitted seed and allocation. Original splitter seeds 42/43/44 yield identical assignments. Seeded equal-size tie ordering produces two additional dependent validation/test reallocations with unchanged training support; 86592/94118 held-out rows move. Per-allocation validation checkpoint/LR selection and multi-seed performance spread remain pending. These allocations do not measure training-support or split-geometry variation.",
       "evidence": "tier1/metrics_float32/best_test.json; tier2/*/{A,B}/test/metrics.json; tier1/split_realizations/complete.json",
-      "native_A_prefix_update": "A epochs 1-9 have whole-assay intervals, conditional on one fitted trajectory; this does not add independent seeds or split realizations.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "A epochs1-10 have whole-assay intervals, conditional on one fitted trajectory; this does not add independent seeds or split realizations.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q05",
@@ -47,8 +47,8 @@
       "status": "partial",
       "answer": "Spearman has no explicit noise band beyond exact ties, unlike the ranking margin. On the fixed B selected test predictions, ordering accuracy is 0.5892 with no band, 0.6305 outside log10(3), and 0.6581 outside the training replicate-RMS band; these use different denominators, not improved predictions. On the same 3969 eligible validation assays, NDCG@1/@3 peak at epoch11, whereas NDCG@5 and macro Spearman peak at epoch6. By epoch15 all three NDCGs are below their epoch6 values (changes -0.00589/-0.00116/-0.00431). The later top-ranking maximum is descriptive, not significant evidence of objective conflict. All-nonconstant-group NDCG instead peaks at epoch8 for top1/3, so mismatched cohort definitions can alter the conclusion. Matched A and controlled comparisons remain pending.",
       "evidence": "tier1/metrics_float32/; tier1/noise_bands_float32/; tier1/baseline_trajectory_summary_v2.json; tier1/label_precision_complete.json",
-      "native_A_prefix_update": "A epochs 1-9 native snapshots have noise-band and group-size metrics. On the same 7997 eligible validation assays, NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch1 to 0.69425/0.73474/0.77065 at epoch9. All three increase from epoch8. Full-horizon peaks remain unknown.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "A epochs1-10 native snapshots have noise-band and group-size metrics. On the same7997 eligible validation assays, NDCG@1/@3/@5 rises from0.59835/0.66331/0.71098 at epoch1 to0.70080/0.74015/0.77514 at epoch10. All three increase from epoch9. Full-horizon peaks remain unknown.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q06",
@@ -58,8 +58,8 @@
       "status": "partial",
       "answer": "In the fresh B run, BCE validation loss reaches its minimum at epoch2 (0.44531), ranking loss at epoch5 (2.79392), and contrastive/aggregate loss at epoch15 (5.83497/6.68790). By epoch15 BCE is 0.48300 and ranking loss 2.92871, while AUROC improves from 0.73865 at epoch2 to 0.77202. Thus auxiliary classification discrimination can improve while its log-loss worsens, and decreasing dominant contrastive loss hides worsening ranking loss. Learned-scale molecule-to-protein contrastive loss reaches its minimum at5 (2.03734) and ends at2.04105; protein-to-molecule reaches its minimum at15 (3.79393). Both fixed13 directions have their minima at15. Matched A remains pending. First adjacent increases occur at BCE2->3, ranking3->4, learned molecule-to-protein5->6 and protein-to-molecule/contrastive total6->7; these local fluctuations are not statistical change points.",
       "evidence": "baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/contrastive/trajectory.json; tier1/baseline_trajectory_summary_v2.json",
-      "native_A_prefix_update": "Across A epochs 1-9, validation ranking loss falls 2.66708->2.45581 and contrastive loss 4.86771->1.80663. BCE first increases at5->6 (0.44381->0.44842), then falls at7/8/9 to 0.44339/0.44007/0.43174; that uptick did not persist. Epoch9 AUROC is0.83503. Validation-only temperature fitting gives T=1.20822 and log-loss0.43174->0.42640; no test transfer. Final turning points and directional contrastive inference remain pending.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Across A epochs1-10, validation ranking loss falls2.66708->2.44086 and contrastive loss4.86771->1.76385. BCE first increases at5->6 (0.44381->0.44842), then falls at7/8/9/10 to0.44339/0.44007/0.43174/0.43004; that uptick did not persist. Epoch10 AUROC is0.84038. Validation-only temperature fitting gives T=1.17187 and log-loss0.43004->0.42640; no test transfer. Final turning points and directional contrastive inference remain pending.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
       "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum"
     },
@@ -71,8 +71,8 @@
       "status": "partial",
       "answer": "The fresh B run selects on validation macro Spearman: epoch6, 0.18460015. Minimum aggregate validation loss occurs at epoch15 (6.68790), whose macro Spearman is lower, 0.17561471. These rules therefore choose different checkpoints. In this run the macro optimum is earlier, not later, than the loss optimum. Matched A and multi-seed selection-rule comparisons remain pending.",
       "evidence": "baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; baseline_status.json; tier1/baseline_trajectory_summary_v2.json",
-      "native_A_prefix_update": "Within observed A epochs1-9, best validation macro Spearman and minimum aggregate validation loss both occur at epoch9 (macro0.31908245, loss2.52851677). These are prefix extrema, not final checkpoint selections. Full15-epoch and multi-seed selection comparisons remain pending.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Within observed A epochs1-10, best validation macro Spearman and minimum aggregate validation loss both occur at epoch10 (macro0.32603864, loss2.48157454). These are prefix extrema, not final checkpoint selections. Full15-epoch and multi-seed selection comparisons remain pending.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q08",
@@ -82,8 +82,8 @@
       "status": "partial",
       "answer": "For the fixed 2048-assay B training probe, eligible macro Spearman rises from 0.18336 at epoch1 to 0.53189 at epoch15. Validation rises from 0.11006 to its peak 0.18460 at epoch6, then ends at 0.17561. The widening gap supports training-specific fitting in this run, with later training improvements transferring poorly. This is a descriptive training probe and one seed, not a full-training metric or a completed matched A/B comparison.",
       "evidence": "tier1/scorer_agreement_float32/complete.json; baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/baseline_trajectory_summary_v2.json",
-      "native_A_prefix_update": "A eligible training-probe macro rises0.16214->0.42791 and validation rises0.16488->0.31908 across epochs1-9. Full-horizon behavior remains unknown; the original B uniform-assay and current eligible-assay probes use different designs.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "A eligible training-probe macro rises0.16214->0.45533 and validation rises0.16488->0.32604 across epochs1-10. Full-horizon behavior remains unknown; the original B uniform-assay and current eligible-assay probes use different designs.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q09",
@@ -100,8 +100,8 @@
       "status": "partial",
       "answer": "The learned logit scale rises 13.5999 -> 18.4685 -> 22.5461 at epochs1/6/15. Each split uses one unchanged candidate-pool hash across epochs, and baseline validation already fixes its candidate pool. B validation contrastive loss declines 8.54974 -> 6.00606 -> 5.83497; rescoring identical representations at scale13 gives 8.52970 -> 5.82207 -> 5.55379. Sharpening increases validation loss relative to fixed-scale rescoring, but the fresh run has no sustained aggregate contrastive-loss rise. Fixed-temperature retraining and matched A remain pending; rescoring alone does not establish a training benefit.",
       "evidence": "tier1/contrastive/trajectory.json; tier1/contrastive/epoch{01,06,15}_val.json; tier1/baseline_trajectory_summary_v2.json",
-      "native_A_prefix_update": "A native scale rises13.5412->20.0674 across epochs1-9 while aggregate validation contrastive loss falls. Directional/fixed-temperature inference awaits the completed protected trajectory and authorized GPUs.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "A native scale rises13.5412->20.5928 across epochs1-10 while aggregate validation contrastive loss falls. Directional/fixed-temperature inference awaits the completed protected trajectory and authorized GPUs.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
       "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum"
     },
@@ -134,8 +134,8 @@
       "status": "partial",
       "answer": "Binary scaffold support is fully measured on both held-out partitions. In A test, 19.29% of rows and 21.33% of unique molecules have unseen scaffolds; B is entirely unseen. Fixed depth-3 A test Spearman is 0.1342 on shared-scaffold rows within assays and 0.0669 on unseen-scaffold rows after reapplying eligibility; B is 0.0607. Complete all-unseen A assays instead score 0.1067 (233 eligible assays), showing the cohort distinction matters. Matched neural strata and seed/realization comparisons remain pending.",
       "evidence": "tier1/similarity_composition/design/complete.json; tier1/similarity_composition/lambdamart_depth3/complete.json; tier1/similarity_composition/verification.json",
-      "native_A_prefix_update": "At A epoch9, complete shared/mixed/unseen-scaffold validation assays score0.34288/0.27256/0.23027. All three point estimates rise from epoch8, whereas unseen-scaffold rows within assays score0.19871 versus0.20309 at8 on a different cohort. These local changes do not establish a turning point. Composition standardization changes common-support validation macro0.31895->0.31075. Full-horizon, selected-test and repeated comparisons remain pending.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "At A epoch10, complete shared/mixed/unseen-scaffold validation assays score0.35312/0.27280/0.22869. Shared/mixed point estimates rise from epoch9; all-unseen falls from0.23027. Unseen-scaffold rows within assays score0.19525 versus0.19871 at9 on a different cohort. These local changes do not establish a turning point. Composition standardization changes common-support validation macro0.32572->0.31794. Full-horizon, selected-test and repeated comparisons remain pending.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q14",
@@ -294,8 +294,8 @@
       "status": "partial",
       "completed_scope": "All 15 B validation/training-probe epochs plus selected test. Validation ranking-BCE agreement falls 0.6798 to 0.6017 while ranking-cosine rises 0.0743 to 0.2341. This is not general scorer divergence or proof of gradient conflict. Matched A trajectory remains pending. Trainer-float32-label rescoring is complete and preserves these validation agreement values; all 93 export/scorer native-metric parity comparisons passed.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/scorer_agreement_float32/complete.json on Atum; tier1/label_precision_complete.json",
-      "native_A_prefix_update": "A epochs1->9 ranking-BCE validation agreement changes0.63066->0.62552 on7995 mutually defined eligible assays; the paired change interval[-0.01542,0.00523] includes zero. Ranking-cosine rises0.12360->0.29715 on7997, interval[0.16005,0.18726]. The ranking-BCE endpoint intersection differs from the earlier epoch1/8 cohort because constant-score assays differ by epoch; all three scorers have defined rho on all7997 eligible assays at9. Agreement fluctuations do not establish full-training behavior or gradient alignment.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "A epochs1->10 ranking-BCE validation agreement changes0.63066->0.63719 on7995 mutually defined eligible assays; the paired change interval[-0.00380,0.01729] includes zero. Ranking-cosine rises0.12360->0.29261 on7997, interval[0.15502,0.18188]. The ranking-BCE endpoint intersection differs from the earlier epoch1/8 cohort because constant-score assays differ by epoch; all three scorers have defined rho on all7997 eligible assays at10. Cosine-label macro falls0.17385->0.16717 at9->10 while ranking improves. Agreement fluctuations do not establish full-training behavior or gradient alignment.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q32",
@@ -305,8 +305,8 @@
       "status": "partial",
       "answer": "Protein-only frozen-feature BCE validation AUROC is 0.6687445 on A and 0.6452095 on B. The identity/scaffold lookup degenerates to protein priors on B and achieves validation AUROC 0.6914818 with constant within-assay scores. The matched deep-model A comparison remains pending; AUC ratios do not causally attribute model signal.",
       "evidence": "tier2/linear/{A,B}/protein_only_bce/complete.json; tier2/nearest_scaffold_lookup/B/complete.json",
-      "native_A_prefix_update": "A epoch9 neural validation AUROC is0.83503; the completed protein-only baseline is0.66874. This early checkpoint comparison cannot replace validation-selected final-model results or causally attribute an AUC fraction.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "A epoch10 neural validation AUROC is0.84038; the completed protein-only baseline is0.66874. This early checkpoint comparison cannot replace validation-selected final-model results or causally attribute an AUC fraction.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "Q33",
@@ -376,10 +376,10 @@
       "lambdamart_depth3"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "Full-data A seed42 base-LR15-epoch fit, W&B xffenit7. Driver PID836409, training launcher PID840738 and checkpoint protector PID884646 verified live at Unix1793565841.51; finite optimizer logs through epoch9.315. Physical GPUs0,2,5,6; batch12 x4 devices x4 accumulation. Native epochs1-9 independently verified; training completion absent.",
+    "current_controlled_launch": "Full-data A seed42 base-LR15-epoch fit, W&B xffenit7. Driver PID836409, training launcher PID840738 and checkpoint protector PID884646 verified live at Unix1793567396.74; finite optimizer logs through epoch10.41 read at Unix1793567408.80. Physical GPUs0,2,5,6; batch12 x4 devices x4 accumulation. Native epochs1-10 independently verified; training completion absent.",
     "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending.",
     "similarity_composition": "Frozen binary-scaffold strata and composition weights complete for A/B validation/test. Saved depth-3 predictions scored with no fitting. All source/artifact hashes and independent weighted sums verified. Design SHA256 8a01219268444ad8efc0df58f404687a33cf0703c189429b8c03729db46e93c8; analysis SHA256 a3672186999223211bf9ba3151367cf634e09ad76e2fff7acbc918b6a2952b5d. E08/E09 and Q13 remain partial pending matched neural and required repeated comparisons.",
-    "matched_A_trajectory_protection": "At Unix1793565841.51 protector PID884646 was live with epochs1-9 protected and retention hold active. All15 weights must verify before restoring the original marker; if cleanup meets the hold first, finish postprocessing after protection without retraining.",
+    "matched_A_trajectory_protection": "At Unix1793567396.74 protector PID884646 was live with epochs1-10 protected and retention hold active. All15 weights must verify before restoring the original marker; if cleanup meets the hold first, finish postprocessing after protection without retraining.",
     "native_A_analysis": {
       "job_id": "full__A__seed42__lr1p0",
       "epochs_analyzed": [
@@ -391,7 +391,8 @@
         6.0,
         7.0,
         8.0,
-        9.0
+        9.0,
+        10.0
       ],
       "validation_macro_spearman": [
         0.16488244861936158,
@@ -402,7 +403,8 @@
         0.2884304088240611,
         0.3022522362359804,
         0.31323758442831584,
-        0.3190824483387202
+        0.3190824483387202,
+        0.32603864444320013
       ],
       "fixed_training_probe_macro_spearman": [
         0.16213877025587634,
@@ -413,25 +415,26 @@
         0.36608196153969436,
         0.389635615882752,
         0.40509008126544876,
-        0.4279105780766056
+        0.4279105780766056,
+        0.4553250363804419
       ],
       "validation_rows": 195618,
       "validation_eligible_assays": 7997,
       "training_probe_rows": 39740,
       "training_probe_assays": 2048,
       "test_predictions_read": false,
-      "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "scope": "Native scalar metric, noise-band, agreement, calibration, scaffold-stratum and composition-weighted analyses of the observed A prefix. Full horizon, selected test, repeated runs and directional/geometry inference remain pending.",
       "verification": {
-        "trajectory_sha256": "00c651945b534b39daa2aab8f194dc11d052fe7bcc90d46b50a5cc3ceb72643b",
-        "verification_sha256": "7cdc344ec5c1c0cc0b9d133f3a49fb92f9e6fd87d273fa9b9d5551acfff0e0c0",
-        "per_assay_scorer_correlations_checked": 498933,
-        "brute_force_noise_band_checks": 534,
+        "trajectory_sha256": "e4a3c3c8942d5df4e966338b1766ed7ad8b4099c36a121fa264c244afcf7bd7e",
+        "verification_sha256": "235905fc3538b64e374c8fa700063de75c3dc20f8b3a57b4194d28d809c59c55",
+        "per_assay_scorer_correlations_checked": 554370,
+        "brute_force_noise_band_checks": 594,
         "source_artifact_hashes_verified": true,
         "verifier_sha256": "948e2d9dd71667fae8b34df264f05433343190de46d22fcd0741e53b4472a188",
         "scope": "Independent correlation, sampled pair-count and composition-weighted point estimates. Bootstrap intervals, temperature fitting and NDCG are not independently reconstructed here. No token buffers, model weights or test predictions are read."
       },
-      "analysis_process_status": "Analysis PID1052707 and independent verifier PID1055392 finished and were absent by Unix1793565675.32, with immutable epochs1-9 and checksums verified. Earlier numerical checks were inherited only after exact prefix and source/output checks. Additional completed epochs require another incremental invocation."
+      "analysis_process_status": "Analysis PID1081483 and independent verifier PID1083708 finished and were absent by Unix1793567396.74, with immutable epochs1-10 and checksums verified. Earlier numerical checks were inherited only after exact prefix and source/output checks. Additional completed epochs require another incremental invocation."
     },
     "reference_A_contrastive_execution": "reference_contrastive.py is implemented and deployed. Twenty-one focused local checks pass, including actual tiny-model native/export loss parity, unchanged weights, corruption detection, fixed-policy restrictions and all15 protected epochs. Atum preflight_f2787b5 refused the unfinished A training before GPU inference or test access; qualified training-source hashes remain unchanged. After A training/retention finish, run its30 validation/training-probe exports on GPUs0,2,5,6 before the next controlled fit. Scientific directional/fixed-temperature results remain pending.",
     "reference_A_contrastive_preflight_evidence": "RewardModel/outputs/paired_generalization/reference_contrastive_preflight_f2787b5.json on Atum",
@@ -951,6 +954,73 @@
       "view_memberships": 331191,
       "scope": "CPU source/identity/float32 continuous-label alignment across all six caches, source/cohort hashes and cache metadata registration. No scientific model loading or inference; full token-payload hashes were not revalidated in this check.",
       "remaining": "Scientific launcher with verified Tier3 completion, chosen checkpoints and full token payload provenance; shared-GPU-lock scheduling; actual permitted-GPU qualification and geometry measurements."
+    },
+    "objective_probe_preparation": {
+      "status": "cold_memberships_independently_verified_and_cpu_worker_qualified_no_scientific_results",
+      "experiment_ids": [
+        "E56",
+        "E57"
+      ],
+      "code_commit": "add5162",
+      "code_sha256": {
+        "objective_probe_design.py": "a72632db69742d532388192d514ecced3a4d4895b7b1a500dccf23401e0d7935",
+        "objective_probes.py": "f15b4d1d79206b520d8e410bbea7b6abe950edcd03a5eb81f29a1a867b3bcc1b"
+      },
+      "evidence": "tier4/objective_probe_design/{complete.json,verification.json}; tier4/objective_probes/qualification_cpu_add5162.json on Atum",
+      "complete_sha256": "21cd7257b6f7fa5545d57af74219cdecaf4b2520aa7a2cff0ee447488690ac6e",
+      "verification_sha256": "98175bcff2573e54d45c28f45fee58dfb3c05e8c2ce035aa2e6d1fdf0b4f3093",
+      "cpu_qualification_sha256": "68cd9f15c2e6dfd26b963775dff0f3d8fec382bd2047cbe8640dcbacddd6b6ca",
+      "regimes": {
+        "A": {
+          "ranking_eligible_assays": 190,
+          "regime": "A",
+          "selected_assays": 598,
+          "selected_molecules": 5805,
+          "selected_rows": 6012,
+          "selected_source_row_fraction": 0.030733368094960585,
+          "selected_units": 598,
+          "selection": "Own held-out validation units whose every molecule lacks an exact scaffold match in own training; no label/prediction-dependent selection.",
+          "source_validation_rows": 195618,
+          "source_validation_units": 16431,
+          "strict_active_rows": 4298
+        },
+        "B": {
+          "ranking_eligible_assays": 3969,
+          "regime": "B",
+          "selected_assays": 9280,
+          "selected_molecules": 80690,
+          "selected_rows": 136957,
+          "selected_source_row_fraction": 1.0,
+          "selected_units": 4032,
+          "selection": "Own held-out validation units whose every molecule lacks an exact scaffold match in own training; no label/prediction-dependent selection.",
+          "source_validation_rows": 136957,
+          "source_validation_units": 4032,
+          "strict_active_rows": 107113
+        }
+      },
+      "cross_split_warning": {
+        "B_validation_observations_in_A_training": 107929,
+        "B_validation_rows": 136957,
+        "interpretation": "B validation is not assumed held out from A training. Own-regime cold validation preserves the intended held-out meaning; A cold units are a selected subset, not a full-A metric."
+      },
+      "cross_split_B_validation_fraction": 0.7880502639514592,
+      "verification": "Raw per-unit scaffold set intersection, complete assay preservation, direct float32-promoted label feasibility, full unit inventory and exact observation-identity set overlap; original A similarity-stratum memberships also match.",
+      "cpu_qualification": {
+        "local_tests_passed": 11,
+        "Atum_synthetic_cases": [
+          "full",
+          "frozen",
+          "detach_C"
+        ],
+        "scope": "Three tiny synthetic model configurations on Atum runtime: full, frozen encoders, detached contrastive encoders. Functional counterfactual forwards only; loaded state and RNG unchanged. No scientific gradient/transfer result."
+      },
+      "gradient_boundary_limit": "Existing Trainer diagnostics differentiate at normalized contrastive outputs. Ranking is disconnected at this branch in mlp_contrastive; these logs cannot answer Q33 about actual shared parameter-block gradients. This is topology, not scientific evidence of gradient conflict.",
+      "probe_definition": "Weighted objective gradients on actual disjoint parameter blocks; temporary per-category SGD steps on encoders/interaction/shared union, private parameters fixed, separate cold validation loss before/after, unchanged loaded state and RNG. Undefined cosines/ratios remain undefined.",
+      "remaining": "Freeze training/validation batch identities, candidate pools and step sizes; qualify source/token/checkpoint provenance and permitted-GPU numerical resolution after Tier3. This does not measure any gradient cosine or lookahead transfer.",
+      "model_fitting": false,
+      "scientific_model_inference": false,
+      "scientific_gradient_measurements": false,
+      "test_data_read": false
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -975,8 +1045,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E02",
@@ -989,8 +1059,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E03",
@@ -1003,8 +1073,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E04",
@@ -1017,8 +1087,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/noise_bands on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E05",
@@ -1031,8 +1101,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E06",
@@ -1062,8 +1132,8 @@
       "conditional": false,
       "completed_scope": "Binary maximum training-scaffold support prepared for A/B validation/test without scores; fixed depth-3 baseline analyzed by intact-assay support class and by within-assay row strata, with eligibility reapplied and whole-unit uncertainty. Matched neural predictions and seed/realization comparisons remain pending.",
       "evidence": "tier1/similarity_composition/design/complete.json; tier1/similarity_composition/lambdamart_depth3/complete.json; tier1/similarity_composition/verification.json",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "stratified_trajectory_update": "Q11 scalar audit completed on initial B epochs1-15 and matched A epochs1-4: fixed whole-assay size and scaffold strata, BCE/AUROC/macro Spearman and descriptive paired unit intervals. Native listwise localization is complete for initial B1-15/A1-5, and contrastive localization for initial B1-15. Full A and repeated comparisons remain pending.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json} on Atum",
       "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
@@ -1078,8 +1148,8 @@
       "conditional": false,
       "completed_scope": "Score-independent size/positive-fraction/mean-pChEMBL cells cover 99.80% of B eligible test groups. Fixed depth-3 A common-support macro falls from 0.1281 to 0.1154 after weighting; B common-support macro is 0.0613. Fixed-weight paired A-unit change interval is [-0.01551,-0.00969]. Residual within-bin size/span imbalance and one-fit uncertainty are explicit. Neural and multi-seed comparisons remain pending.",
       "evidence": "tier1/similarity_composition/design/complete.json; tier1/similarity_composition/lambdamart_depth3/complete.json; tier1/similarity_composition/verification.json",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E10",
@@ -1110,8 +1180,8 @@
       "conditional": false,
       "completed_scope": "All 15 Split B checkpoints decomposed by objective and contrastive direction; matched Split A checkpoints pending.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/contrastive on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "stratified_trajectory_update": "Q11 scalar audit completed on initial B epochs1-15 and matched A epochs1-4: fixed whole-assay size and scaffold strata, BCE/AUROC/macro Spearman and descriptive paired unit intervals. Native listwise localization is complete for initial B1-15/A1-5, and contrastive localization for initial B1-15. Full A and repeated comparisons remain pending.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json} on Atum",
       "native_ranking_localization_update": "Reference native listwise-loss localization complete on initial B epochs1-15 and A epochs1-5, preserving original lists and zero-loss denominator mass. All20 native losses reproduced within3.85e-7;260 real list calls agree within4.77e-7. Complete A contrastive and repeated-model comparisons remain pending.",
@@ -1128,8 +1198,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "stratified_trajectory_update": "Q11 scalar audit completed on initial B epochs1-15 and matched A epochs1-4: fixed whole-assay size and scaffold strata, BCE/AUROC/macro Spearman and descriptive paired unit intervals. Native listwise localization is complete for initial B1-15/A1-5, and contrastive localization for initial B1-15. Full A and repeated comparisons remain pending.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json} on Atum"
     },
@@ -1142,8 +1212,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E15",
@@ -1154,8 +1224,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "contrastive_localization_update": "Initial B epochs1-15 contrastive loss localized by original query assay with every candidate and mask fixed, both learned scale and fixed13. Learned molecule-to-protein loss has minimum at5 and protein-to-molecule at15; fixed13 minima are both15. From6->15 learned total falls0.17109 overall but rises0.01709 for three-item assays; fixed13 total falls in every size bin (three-item -0.09395). Contrastive size3 includes541 assays versus329 ranking-eligible assays. This is descriptive attribution, not stratum-only retrieval, independent-seed uncertainty or proof that fixed-temperature training helps. Matched A remains pending.",
       "contrastive_localization_evidence": "tier1/contrastive_localization/B/e129980b1592cd85/{complete.json,verification.json} on Atum"
     },
@@ -1180,8 +1250,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E18",
@@ -1214,8 +1284,8 @@
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. Matched A remains pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E21",
@@ -1226,8 +1296,8 @@
       "conditional": false,
       "completed_scope": "Initial B trajectory complete with both all-nonconstant and matched-headline-eligible NDCG cohorts. On matched eligible assays NDCG@1/@3 peak at11, versus Spearman/NDCG@5 at6; all NDCGs are lower at15 than6. Matched A and controlled comparisons pending.",
       "evidence": "tier1/baseline_trajectory_summary_v2.json; tier1/metrics_float32/",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum",
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum",
       "stratified_trajectory_update": "Q11 scalar audit completed on initial B epochs1-15 and matched A epochs1-4: fixed whole-assay size and scaffold strata, BCE/AUROC/macro Spearman and descriptive paired unit intervals. Native listwise localization is complete for initial B1-15/A1-5, and contrastive localization for initial B1-15. Full A and repeated comparisons remain pending.",
       "stratified_trajectory_evidence": "tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json} on Atum"
     },
@@ -1358,8 +1428,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E33",
@@ -1549,8 +1619,8 @@
       "conditional": false,
       "completed_scope": "Scaffold split, seed 42, all 15 epochs plus selected test checkpoint; Split A and multi-seed comparisons remain pending where required. Within-assay scorer-pair correlations and matched endpoint component bootstraps are now available for the B trajectory (Q31).",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/metrics on Atum",
-      "native_A_prefix_update": "Epochs1-9 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
-      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch09.json on Atum"
+      "native_A_prefix_update": "Epochs1-10 validation and fixed training probe analyzed and independently verified from native snapshots. Partial evidence only: no A test result or completed trajectory; directional contrastive and geometry inference are separate.",
+      "native_A_prefix_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch10.json on Atum"
     },
     {
       "id": "E54",
@@ -1578,7 +1648,9 @@
       "key": "gradient_cosines",
       "experiment": "Measure per-block objective gradient cosines",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Fixed batches/step sizes, source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
+      "preparation_evidence": "tier4/objective_probe_design/{complete.json,verification.json}; tier4/objective_probes/qualification_cpu_add5162.json on Atum"
     },
     {
       "id": "E57",
@@ -1586,7 +1658,9 @@
       "key": "lookahead_transference",
       "experiment": "Measure TAG-style lookahead transfer on cold validation batches",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Fixed batches/step sizes, source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
+      "preparation_evidence": "tier4/objective_probe_design/{complete.json,verification.json}; tier4/objective_probes/qualification_cpu_add5162.json on Atum"
     },
     {
       "id": "E58",

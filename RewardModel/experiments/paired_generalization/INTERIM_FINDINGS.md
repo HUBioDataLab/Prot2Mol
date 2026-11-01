@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–9. These
+native validation and fixed training-probe audits for epochs 1–10. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -360,56 +360,59 @@ and preserve the Trainer's float32 label semantics.
 | 7 | 0.30225 | 0.38964 | 0.44339 | 2.47470 | 1.96870 |
 | 8 | 0.31324 | 0.40509 | 0.44007 | 2.46072 | 1.87887 |
 | 9 | 0.31908 | 0.42791 | 0.43174 | 2.45581 | 1.80663 |
+| 10 | 0.32604 | 0.45533 | 0.43004 | 2.44086 | 1.76385 |
 
-Validation AUROC rises 0.72635→0.83503 across epochs 1→9 and the contrastive
-scale rises 13.5412→20.0674. Epochs 5→6 show the first adjacent BCE increase
+Validation AUROC rises 0.72635→0.84038 across epochs 1→10 and the contrastive
+scale rises 13.5412→20.5928. Epochs 5→6 show the first adjacent BCE increase
 (0.44381→0.44842), a small AUROC decrease (0.81971→0.81954), and continued
 ranking-loss and macro-Spearman improvement. BCE falls to 0.44339 at epoch 7,
-below the epoch-5 value, then to 0.44007/0.43174 at epochs 8/9; that increase did
-not persist.
+below the epoch-5 value, then to 0.44007/0.43174/0.43004 at epochs 8/9/10;
+that increase did not persist.
 On the same eligible validation assays,
 NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
-0.69425/0.73474/0.77065 at epoch 9. All three increase from epoch 8.
-Epoch-9 BCE-logit and cosine-only macro Spearman are 0.24998 and 0.17385.
-All three scorers have defined rho on all 7,997 eligible assays at epoch 9;
+0.70080/0.74015/0.77514 at epoch 10. All three increase from epoch 9.
+Epoch-10 BCE-logit and cosine-only macro Spearman are 0.25864 and 0.16717;
+the latter falls from 0.17385 at epoch 9 while the ranking readout improves.
+All three scorers have defined rho on all 7,997 eligible assays at epoch 10;
 constant predictions at earlier epochs are not jittered or assigned artificial
 correlations. Positive temperature calibration fitted on that validation set
-gives T=1.20822 and reduces log-loss from 0.43174 to 0.42640; this is an
+gives T=1.17187 and reduces log-loss from 0.43004 to 0.42640; this is an
 in-sample fit, with no test transfer.
 
-At epoch 9, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.34288/0.27256/0.23027 (5,405/2,402/190 eligible assays).
-All three point estimates rise from epoch 8. Restricting to unseen-scaffold
-rows within assays instead gives 0.19871, down from 0.20309 at epoch 8, on
+At epoch 10, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.35312/0.27280/0.22869 (5,405/2,402/190 eligible assays).
+Shared and mixed point estimates rise from epoch 9, while the all-unseen score
+falls slightly from 0.23027. Restricting to unseen-scaffold
+rows within assays instead gives 0.19525, down from 0.19871 at epoch 9, on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.31895 to 0.31075. These local
+changes A common-support validation macro from 0.32572 to 0.31794. These local
 changes do not establish a turning point. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→9, validation ranking–BCE agreement changes 0.63066→0.62552
+Across epochs 1→10, validation ranking–BCE agreement changes 0.63066→0.63719
 on the same 7,995 mutually defined eligible assays; the paired whole-assay
-interval for the change is [−0.01542, 0.00523], including zero. This intersection
+interval for the change is [−0.00380, 0.01729], including zero. This intersection
 differs from the earlier epoch-1/8 comparison because constant-score assays
-differ by epoch. Ranking–cosine agreement rises 0.12360→0.29715 on 7,997 assays,
-with change interval [0.16005, 0.18726].
+differ by epoch. Ranking–cosine agreement rises 0.12360→0.29261 on 7,997 assays,
+with change interval [0.15502, 0.18188].
 Agreement fluctuates across epochs; the prefix does not show uniform scorer divergence.
 
 Both the best validation macro Spearman and minimum aggregate validation loss
-in this nine-epoch prefix occur at epoch 9. These are observed-prefix extrema,
+in this ten-epoch prefix occur at epoch 10. These are observed-prefix extrema,
 not the final checkpoint choices or an established overfitting turning point.
 Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch09.json`, per-assay
-metric tables and `verification_through_epoch09.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 498,933
+on Atum, including the immutable `trajectory_through_epoch10.json`, per-assay
+metric tables and `verification_through_epoch10.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 554,370
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
 pairs reproduced sampled noise-band/group/scorer counts; direct
-weighted means reproduced all nine
+weighted means reproduced all ten
 composition-standardized validation scores. All source/artifact hashes passed.
-The reusable `verify_native_analysis.py` performed the epoch-7/8/9 checks and
+The reusable `verify_native_analysis.py` performed the epoch-7/8/9/10 checks and
 rechecked the prior prefix's sources and table bytes before inheriting its
 numerical evidence. Its independent scope covers correlations, sampled pair
 counts and composition-weighted point estimates; it does not independently
@@ -828,6 +831,48 @@ These are membership, mapping and numerical checks only. No scientific geometry 
 representation-collapse conclusion or improvement is established. Checkpoint,
 token and row provenance, permitted-GPU inference qualification and the actual
 measurements remain pending behind Tier3. E54/E55 remain **pending**.
+
+## Gradient and cold-validation probe preparation — scientific results pending
+
+E56/E57 now have a numerical worker and independently verified cold-validation
+memberships. Each model uses its own split's validation units with no exact
+training-scaffold match. A retains 6,012 rows across 598 whole assays, including
+190 ranking-eligible assays (3.07% of A validation rows); B retains all 136,957
+validation rows across 9,280 assays / 4,032 components, including 3,969 eligible
+assays. Membership selection uses identities and scaffolds; labels only describe
+feasibility. A's selected cold cohort does not represent the full A validation
+distribution or generator deployment.
+
+An exact identity check finds 107,929 B-validation observations (78.81%) in A
+training. These are different split realizations; this is not leakage within
+either model's own train/validation split. It does mean that global B validation
+cannot serve as a held-out probe for the A model. Independent raw scaffold-set,
+whole-unit, identity and float32-label checks reproduced both prepared cohorts
+and the cross-split overlap. No test data or model predictions were used.
+
+The worker measures R/B/C gradients on actual parameter blocks. The existing
+Trainer diagnostic instead measures gradients at normalized contrastive outputs;
+the ranking branch does not depend on those outputs in `mlp_contrastive`, so
+those boundary logs cannot answer Q33 about shared encoder gradients. Frozen,
+disconnected and zero-gradient cases remain distinct, with undefined cosines
+reported as undefined. This structural observation is not evidence of harmful
+gradient conflict in a trained model.
+
+Lookahead applies a temporary weighted-SGD step to encoders, interaction layers,
+or their union, and measures the loss change on a separate cold validation
+batch while keeping private heads fixed. It does not replay AdamW or retrain the
+checkpoint. Eleven local numerical/design tests passed, including a case where
+training loss improves while validation loss worsens. Atum CPU qualification
+also passed on three tiny synthetic configurations (full, frozen encoders and
+detached contrastive encoders), with checkpoint state and RNG unchanged. These
+are implementation checks, not scientific gradient or transfer measurements.
+
+E56/E57 and Q33 remain **pending**. Scientific execution still needs the Tier 3
+results, fixed batch/candidate identities and step sizes, checkpoint/token
+provenance, and numerical qualification on the permitted GPUs. Sources:
+`tier4/objective_probe_design/{complete.json,verification.json}` and
+`tier4/objective_probes/qualification_cpu_add5162.json` on Atum; copied evidence
+and current local source hashes match.
 
 Deployment is unseen generated molecules. That does not establish whether their
 scaffolds are unseen. The report must distinguish unseen identity from unseen
