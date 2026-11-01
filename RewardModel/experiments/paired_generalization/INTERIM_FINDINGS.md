@@ -67,6 +67,8 @@ coverage reported explicitly.
 | Independent per-protein ridge | 0.2419 | 99.83% | 0.0726 | 99.52% |
 | Two-step ridge | 0.1034 | 100% | 0.0488 | 100% |
 | Identity-based linear matrix filter | 0.4207 | 93.32% | undefined | 0% |
+| Paired Kronecker ridge | 0.1690 | 100% | 0.0631 | 100% |
+| Protein-shuffled Kronecker ridge | 0.0662 | 100% | 0.0596 | 100% |
 
 The molecule-only and independent-task models each test five regularization
 values per split. Two-step ridge tests the 25 combinations of the two sides'
@@ -98,6 +100,16 @@ AUROC 0.6915/0.7060 while carrying no within-assay order. Classification can
 therefore reward target base rates. Comparing these AUCs does not identify a
 fraction of the full model's signal attributable to those priors; Q32 still
 needs the matched deep-model comparison on A.
+
+Kronecker ridge fits the exact augmented linear product kernel on observed
+pairs, using a matrix-free solve with verified relative residual below 2e-7.
+It uses no completed interaction matrix or random-feature approximation. The
+shuffled model is retrained after independently permuting protein assignments
+across whole assays within each partition. Group-level protein frequencies,
+molecule inputs and labels are preserved. Both versions use the same five-value
+regularization grid and select on their own validation macro Spearman. The
+comparison covers one permutation per partition, not permutation uncertainty.
+Sources: `tier2/kronecker_ridge/`, `tier2/protein_shuffled_kronecker/`.
 
 ## Distribution shift
 

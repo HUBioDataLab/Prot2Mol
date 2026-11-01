@@ -137,7 +137,7 @@ def main(regime):
     parameters = rank_parameters(int(sizes.max()))
     layout = {"rows": len(training), "groups": len(sizes), "largest_query": int(sizes.max()),
               "queries_above_10000": int((sizes > 10000).sum()), "max_relevance_level": int(levels.max()),
-              "zero_range_queries": int(pd.DataFrame({"group_id": training.group_id, "level": levels}).groupby("group_id").level.nunique().eq(1).sum())}
+              "zero_range_queries": int(pd.DataFrame({"group_id": training.group_id, "level": levels}).groupby("group_id")["level"].nunique().eq(1).sum())}
     write_json(output / "fit_contract.json", {**provenance, "base_parameters": parameters, "training_query_layout": layout})
     print(f"LambdaMART {regime}: building quantile matrices; {layout}", flush=True)
     data = pair_features(training, maps, entities)

@@ -271,7 +271,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Six Tier 2 baseline types complete on A/B; protein-shuffled, Kronecker ridge, bilinear completion and LambdaMART remain. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
+    "remaining_tiers": "Eight Tier 2 baseline types complete on both splits; bilinear completion and LambdaMART running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
@@ -294,7 +294,9 @@
       "nearest_neighbor",
       "independent_task_ridge",
       "two_step_kernel_ridge",
-      "linear_matrix_filter"
+      "linear_matrix_filter",
+      "kronecker_kernel_ridge",
+      "protein_shuffled"
     ]
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -527,8 +529,10 @@
       "tier": "Tier 2",
       "key": "protein_shuffled",
       "experiment": "Train and evaluate a protein-shuffled model; distinguish this from inference-only shuffling",
-      "status": "pending",
-      "conditional": false
+      "status": "complete",
+      "conditional": false,
+      "completed_scope": "Retrained the matched Kronecker model with whole-assay protein assignments shuffled independently within each partition, preserving group-level protein frequencies. Same five-setting budget and frozen feature map. Test rho A 0.0661675, B 0.0596169. One permutation per partition; full defined eligible coverage.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier2/protein_shuffled_kronecker/{A,B}/complete.json on Atum"
     },
     {
       "id": "E24",
@@ -584,25 +588,31 @@
       "id": "E29",
       "tier": "Tier 2",
       "key": "kronecker_kernel_ridge",
-      "experiment": "Frozen-feature Kronecker kernel ridge baseline with scalable approximation",
-      "status": "pending",
-      "conditional": false
+      "experiment": "Frozen-feature observed-pair Kronecker ridge using a scalable exact finite-feature solver",
+      "status": "complete",
+      "conditional": false,
+      "completed_scope": "Exact augmented linear product kernel, five validation-selected regularization values per split. Test rho A 0.1690372, B 0.0631349, full defined eligible coverage; true solver residuals verified below 2e-7.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier2/kronecker_ridge/{A,B}/complete.json on Atum"
     },
     {
       "id": "E30",
       "tier": "Tier 2",
       "key": "bilinear_inductive_completion",
       "experiment": "Bilinear inductive matrix-completion baseline",
-      "status": "pending",
-      "conditional": false
+      "status": "running",
+      "conditional": false,
+      "completed_scope": "Observed-only regularized low-rank bilinear implementation validated against explicit observation gradients and sparse noiseless recovery; nine rank/regularization settings per split executing on GPUs 5 and 6.",
+      "evidence": "RewardModel/outputs/paired_generalization/bilinear_{A,B}.log on Atum"
     },
     {
       "id": "E31",
       "tier": "Tier 2",
       "key": "lambdamart",
       "experiment": "Frozen-feature LambdaMART with linear gains, noise-calibrated levels and group normalization",
-      "status": "pending",
-      "conditional": false
+      "status": "running",
+      "conditional": false,
+      "completed_scope": "Pinned XGBoost 3.4.1 passed a 49,020-item intact-query CUDA probe. Five settings per split running on GPUs 0 and 2, with linear noise-derived levels, query normalization, full truncation and validation Spearman selection.",
+      "evidence": "RewardModel/outputs/paired_generalization/lambdamart_{A,B}.log on Atum"
     },
     {
       "id": "E32",
