@@ -833,7 +833,8 @@ validation sets; original test groups remain unchanged. A has 8,215/8,216/16,431
 assays in these three roles. B has 4,722/4,558/9,578 assays across
 2,016/2,016/4,034 components. Across-unit adaptation uses nested whole-assay
 prefixes at k=1/2/4/8/16/64, shared between the heads-only and heads-plus-interaction
-settings. Token/label views and a fitting protocol still need qualification.
+settings. Token/label views are prepared; the fitting protocol and production
+training runtime still need qualification.
 The selected A prefixes at k=1/2/4 and B prefixes at k=1/2 contain no
 ranking-eligible assay. Those budgets provide no direct ranking supervision;
 an absence of ranking improvement there cannot establish a head-capacity limit.
@@ -862,20 +863,29 @@ from adaptation gains and compare k=0 on each identical query cohort.
 No model was fit, no prediction was read, and no scientific experiment is marked
 complete by this preparation. Base-model selection already used the original
 validation units, so these are conditional probes on the existing benchmark.
-Subset-local BCE labels must be reconstructed before fitting. All source hashes,
+Subset-local BCE labels are reconstructed for each support/query view. All source hashes,
 51,720 held-out assay memberships, 30,697 within-unit records and every budget
 count were independently verified. Source:
 `tier4/adaptation_design/{complete.json,verification.json}` on Atum.
 
-Compact token/label-view preparation is implemented and pushed separately on
-`codex/paired-adaptation-views`, commit `98bb8b5`. Its 28 local CPU checks cover
+Compact token/label-view preparation was integrated from
+`codex/paired-adaptation-views`, commit `98bb8b5`, and deployed by Git pull.
+Its 28 local CPU checks cover
 the existing design/views plus new disk-cache alignment, raw-precision pair
 medians, support/query label isolation, shared token buffers, native dataset
 consumers, tampering and both-regime preparation. Each within-unit task remains
 a separate fit with fixed queries, a k=0 baseline and explicit common-cohort
-comparison. The branch has not been deployed or run against production data:
-Atum's 95 pinned Python files remain unchanged for the active handoff. This
-preparation adds no adaptation performance result; E49–E52 remain pending.
+comparison. Production preparation completed for both splits: eight A views and
+6,837 B views share the existing token caches and use 6,074,198 bytes of packed
+index/label files. The loader rechecked every vector against raw observations
+and the frozen memberships. Subset-local labels differ from source labels in
+three A views and 450 B views; these overlapping views are not unique-row counts.
+All recorded manifest/vector hashes passed. No fitting or inference occurred,
+and the 48 source files pinned by the concurrent GPU audit stayed unchanged.
+This adds no adaptation performance result; E49–E52 remain pending until the
+Tier 3 and training-protocol/runtime gates are satisfied. Evidence:
+`tier4/adaptation_views/complete.json`, its A/B `views.json` manifests, and
+`tier4/adaptation_views_launch_49904db.{json,log}` on Atum.
 
 ## Representation geometry preparation — inference pending
 

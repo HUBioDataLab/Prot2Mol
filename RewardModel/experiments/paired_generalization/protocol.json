@@ -1114,16 +1114,150 @@
       "remaining_scope": "E53 both-split pathway comparison and Tier3 loss-only multi-seed training remain unfinished. No training, inference, selection change or new experimental arm."
     },
     "adaptation_view_preparation": {
-      "status": "locally_tested_and_pushed_not_deployed",
+      "status": "production_data_prepared_fitting_pending",
       "branch": "codex/paired-adaptation-views",
       "code_commit": "98bb8b5faff0da795c450606fff2ecf07e55ecbc",
       "cpu_tests_passed": 28,
       "scope": "Frozen whole-assay selections, separate within-unit tasks, fixed query/k0 views and common-cohort identities; raw-precision subset-local pair-median labels; verified disk cache provenance and zero-copy token views. Both-regime synthetic preparation and native dataset consumers tested.",
-      "production_data_prepared": false,
+      "production_data_prepared": true,
       "production_runtime_qualified": false,
       "model_fitting": false,
       "model_inference": false,
-      "deployment_constraint": "Active handoff pins95 main-checkout Python sources; isolated branch remains unmerged and unpulled on Atum until safe. Tier3 completion and separate adaptation training/runtime protocol still required."
+      "deployment_constraint": "Deployed by Git pull while preserving all48 sources pinned by the live contrastive audit. Scientific fitting still requires Tier3 completion and a frozen adaptation training/selection protocol plus production runtime qualification.",
+      "deployed_commit": "49904db1b3f7da7e44ad9c8f0ffb71d11b7e134a",
+      "production_complete_sha256": "844c4c27ffd72036bcfd79c8102c4fb0b1b4ad3390607d1141d9eb1d47c85af6",
+      "production_summary": {
+        "A": {
+          "manifest_sha256": "4f195587d288fd195816479c8003f5f1927b1bf3fa7711b35e7a8e1375f9c83b",
+          "views": 8,
+          "tasks": 7,
+          "task_kinds": {
+            "across": 7,
+            "within": 0
+          },
+          "within_cohort_sizes": {
+            "test": {
+              "1": 0,
+              "16": 0,
+              "2": 0,
+              "4": 0,
+              "64": 0,
+              "8": 0
+            },
+            "validation": {
+              "1": 0,
+              "16": 0,
+              "2": 0,
+              "4": 0,
+              "64": 0,
+              "8": 0
+            }
+          },
+          "within_rank_evaluable_sizes": {
+            "test": {
+              "1": 0,
+              "16": 0,
+              "2": 0,
+              "4": 0,
+              "64": 0,
+              "8": 0
+            },
+            "validation": {
+              "1": 0,
+              "16": 0,
+              "2": 0,
+              "4": 0,
+              "64": 0,
+              "8": 0
+            }
+          },
+          "within_validation_selection_possible": {
+            "1": false,
+            "16": false,
+            "2": false,
+            "4": false,
+            "64": false,
+            "8": false
+          },
+          "across_available": {
+            "1": true,
+            "16": true,
+            "2": true,
+            "4": true,
+            "64": true,
+            "8": true
+          },
+          "views_with_changed_binary_labels": 3,
+          "packed_file_bytes": 2647705,
+          "code_sha256": "dbc452e02c88dd44b5230116167fc6b6461bf80dbd607565092524494922af8c"
+        },
+        "B": {
+          "manifest_sha256": "e4b759b778d837d8d3bbda4bfb83bd7a1c0adfb80bf65a86b634db57be96174a",
+          "views": 6837,
+          "tasks": 6836,
+          "task_kinds": {
+            "across": 7,
+            "within": 6829
+          },
+          "within_cohort_sizes": {
+            "test": {
+              "1": 1854,
+              "16": 6,
+              "2": 620,
+              "4": 167,
+              "64": 1,
+              "8": 33
+            },
+            "validation": {
+              "1": 942,
+              "16": 1,
+              "2": 319,
+              "4": 78,
+              "64": 0,
+              "8": 12
+            }
+          },
+          "within_rank_evaluable_sizes": {
+            "test": {
+              "1": 1023,
+              "16": 5,
+              "2": 421,
+              "4": 126,
+              "64": 0,
+              "8": 26
+            },
+            "validation": {
+              "1": 515,
+              "16": 1,
+              "2": 220,
+              "4": 61,
+              "64": 0,
+              "8": 11
+            }
+          },
+          "within_validation_selection_possible": {
+            "1": true,
+            "16": true,
+            "2": true,
+            "4": true,
+            "64": false,
+            "8": true
+          },
+          "across_available": {
+            "1": true,
+            "16": true,
+            "2": true,
+            "4": true,
+            "64": true,
+            "8": true
+          },
+          "views_with_changed_binary_labels": 450,
+          "packed_file_bytes": 3426493,
+          "code_sha256": "dbc452e02c88dd44b5230116167fc6b6461bf80dbd607565092524494922af8c"
+        }
+      },
+      "evidence": "tier4/adaptation_views/complete.json; tier4/adaptation_views/{A,B}/views.json; tier4/adaptation_views_launch_49904db.{json,log} on Atum",
+      "production_process": "PID1229135 completed both regimes and was absent at Unix1793576350.95. Manifest/vector hashes reverified at Unix1793576422.82."
     },
     "reference_checkpoint_audit_completion": {
       "experiments": [
