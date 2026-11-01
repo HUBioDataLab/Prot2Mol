@@ -736,6 +736,48 @@ the checkpoint. It is not an independent calibration experiment.
 Source: `tier1/shift/bbse_B.json`;
 method: [BBSE](https://proceedings.mlr.press/v80/lipton18a.html).
 
+## Staged adaptation data design — fitting pending
+
+E49–E52 now have verified assay memberships, not adaptation performance.
+An identity-only hash divides original validation units into adaptation and
+validation sets; original test groups remain unchanged. A has 8,215/8,216/16,431
+assays in these three roles. B has 4,722/4,558/9,578 assays across
+2,016/2,016/4,034 components. Across-unit adaptation uses nested whole-assay
+prefixes at k=1/2/4/8/16/64, shared between the heads-only and heads-plus-interaction
+settings. Token/label views and a fitting protocol still need qualification.
+The selected A prefixes at k=1/2/4 and B prefixes at k=1/2 contain no
+ranking-eligible assay. Those budgets provide no direct ranking supervision;
+an absence of ranking improvement there cannot establish a head-capacity limit.
+
+Within-unit probes reserve a fixed support half and query half of each unit's
+assays. Query assays do not change with k. A's indivisible unit is one assay,
+so disjoint within-unit support/query assays are impossible under its existing
+definition. B's available cohort shrinks sharply with k:
+
+| Support assays k | Rank-evaluable validation units | Rank-evaluable test units |
+|---|---:|---:|
+| 1 | 515 | 1,023 |
+| 2 | 220 | 421 |
+| 4 | 61 | 126 |
+| 8 | 11 | 26 |
+| 16 | 1 | 5 |
+| 64 | 0 | 0 |
+
+Here rank-evaluable means at least one query assay passes the fixed headline
+eligibility rule. At k=16, validation supplies only one eligible query assay;
+at k=64, no validation unit has enough support, and the one sufficiently large
+test unit has no eligible query assay. That budget cannot select/evaluate a
+ranking adaptation model. Future results must distinguish changing unit cohorts
+from adaptation gains and compare k=0 on each identical query cohort.
+
+No model was fit, no prediction was read, and no scientific experiment is marked
+complete by this preparation. Base-model selection already used the original
+validation units, so these are conditional probes on the existing benchmark.
+Subset-local BCE labels must be reconstructed before fitting. All source hashes,
+51,720 held-out assay memberships, 30,697 within-unit records and every budget
+count were independently verified. Source:
+`tier4/adaptation_design/{complete.json,verification.json}` on Atum.
+
 Deployment is unseen generated molecules. That does not establish whether their
 scaffolds are unseen. The report must distinguish unseen identity from unseen
 scaffold, rather than presume either split alone matches the generator.

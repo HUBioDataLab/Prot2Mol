@@ -558,6 +558,186 @@
       "scope": "Loss attribution by original query assay, holding every negative candidate fixed. Native 1/sqrt(list size) query weights and denominator mass from zero-active lists are preserved. No stratum-only candidate evaluation. Endpoint changes are descriptive; no seed uncertainty or confidence intervals are claimed. Candidate contexts couple units, so a simple query-unit bootstrap would not measure redrawn-pool uncertainty. Fixed-scale rescoring does not establish a benefit of fixed-temperature training.",
       "precision_verification": "Initial absolute tolerance1e-5 on raw float32 sums was exceeded by one sampled sum. Explicit float64 candidate-set reconstruction matches float64 production loss within3.56e-15; saved float32 sums satisfy atol2e-6/rtol5e-7 and native batch-unit errors stay below1e-5. Initial discrepancy and diagnosis retained in verification.json.",
       "validation": "Seven focused local tests passed; all source/output hashes verified. No training, model inference, GPUs or test predictions."
+    },
+    "adaptation_membership_design": {
+      "status": "group_memberships_verified_fitting_pending",
+      "evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
+      "complete_sha256": "e570fb03e6317ab62c48c1ecd763832685012196ea6ee6d2f58339fd17ea289b",
+      "verification_sha256": "0312f9a290dfc6bbc868d840793c4651ff35633eea09e207ebd0ff3753a6d854",
+      "process": "PID1025654 finished with complete artifacts and was absent at Unix1793563797.50. Launch adaptation_design_launch_db523f8.json.",
+      "assignment_seed": 42,
+      "k_values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        64
+      ],
+      "probe_partitions": {
+        "A": {
+          "adaptation": {
+            "groups": 8215,
+            "ranking_eligible_groups": 3946,
+            "rows": 95091,
+            "units": 8215
+          },
+          "test": {
+            "groups": 16431,
+            "ranking_eligible_groups": 8278,
+            "rows": 192687,
+            "units": 16431
+          },
+          "validation": {
+            "groups": 8216,
+            "ranking_eligible_groups": 4051,
+            "rows": 100527,
+            "units": 8216
+          }
+        },
+        "B": {
+          "adaptation": {
+            "groups": 4722,
+            "ranking_eligible_groups": 2013,
+            "rows": 73823,
+            "units": 2016
+          },
+          "test": {
+            "groups": 9578,
+            "ranking_eligible_groups": 3972,
+            "rows": 136956,
+            "units": 4034
+          },
+          "validation": {
+            "groups": 4558,
+            "ranking_eligible_groups": 1956,
+            "rows": 63134,
+            "units": 2016
+          }
+        }
+      },
+      "within_B_feasibility": {
+        "1": {
+          "test": {
+            "query_groups": 3984,
+            "query_ranking_eligible_groups": 1742,
+            "query_rows": 60958,
+            "rank_evaluable_units": 1023,
+            "units": 1854
+          },
+          "test_rank_evaluation_possible": true,
+          "validation": {
+            "query_groups": 1876,
+            "query_ranking_eligible_groups": 853,
+            "query_rows": 26986,
+            "rank_evaluable_units": 515,
+            "units": 942
+          },
+          "validation_selection_possible": true
+        },
+        "16": {
+          "test": {
+            "query_groups": 229,
+            "query_ranking_eligible_groups": 17,
+            "query_rows": 468,
+            "rank_evaluable_units": 5,
+            "units": 6
+          },
+          "test_rank_evaluation_possible": true,
+          "validation": {
+            "query_groups": 17,
+            "query_ranking_eligible_groups": 1,
+            "query_rows": 41,
+            "rank_evaluable_units": 1,
+            "units": 1
+          },
+          "validation_selection_possible": true
+        },
+        "2": {
+          "test": {
+            "query_groups": 2397,
+            "query_ranking_eligible_groups": 993,
+            "query_rows": 36658,
+            "rank_evaluable_units": 421,
+            "units": 620
+          },
+          "test_rank_evaluation_possible": true,
+          "validation": {
+            "query_groups": 1092,
+            "query_ranking_eligible_groups": 500,
+            "query_rows": 16439,
+            "rank_evaluable_units": 220,
+            "units": 319
+          },
+          "validation_selection_possible": true
+        },
+        "4": {
+          "test": {
+            "query_groups": 1227,
+            "query_ranking_eligible_groups": 423,
+            "query_rows": 13426,
+            "rank_evaluable_units": 126,
+            "units": 167
+          },
+          "test_rank_evaluation_possible": true,
+          "validation": {
+            "query_groups": 477,
+            "query_ranking_eligible_groups": 203,
+            "query_rows": 8291,
+            "rank_evaluable_units": 61,
+            "units": 78
+          },
+          "validation_selection_possible": true
+        },
+        "64": {
+          "test": {
+            "query_groups": 97,
+            "query_ranking_eligible_groups": 0,
+            "query_rows": 185,
+            "rank_evaluable_units": 0,
+            "units": 1
+          },
+          "test_rank_evaluation_possible": false,
+          "validation": {
+            "query_groups": 0,
+            "query_ranking_eligible_groups": 0,
+            "query_rows": 0,
+            "rank_evaluable_units": 0,
+            "units": 0
+          },
+          "validation_selection_possible": false
+        },
+        "8": {
+          "test": {
+            "query_groups": 533,
+            "query_ranking_eligible_groups": 119,
+            "query_rows": 2881,
+            "rank_evaluable_units": 26,
+            "units": 33
+          },
+          "test_rank_evaluation_possible": true,
+          "validation": {
+            "query_groups": 126,
+            "query_ranking_eligible_groups": 42,
+            "query_rows": 1036,
+            "rank_evaluable_units": 11,
+            "units": 12
+          },
+          "validation_selection_possible": true
+        }
+      },
+      "limits": [
+        "An A unit contains exactly one assay; disjoint support/query assays within a unit are impossible.",
+        "B k16 has one rank-evaluable validation unit with one eligible query assay; k64 has no selectable/evaluable ranking cohort.",
+        "Across-unit A k1/2/4 and B k1/2 have no ranking-eligible adaptation assay in this identity-selected draw. No direct ranking-supervision gain can be inferred there.",
+        "Original validation units were used for base-model checkpoint/LR selection. These are conditional adaptation probes on the existing benchmark, not a new independent test population."
+      ],
+      "label_policy": "Future training views must recompute BCE pair medians separately within each selected adaptation subset and fixed evaluation set. Never reuse original validation labels pooled across the new adaptation/validation split; continuous labels remain unchanged.",
+      "fitting_gate": "Only group-membership preparation. Complete Tier 3 comparisons and a separately frozen adaptation training/selection protocol, token/label view qualification and runtime qualification before any fitting.",
+      "validation": "Six local tests pass. Independent raw-source verification covers all328624 source assay records across A/B,51720 held-out memberships,30697 within-unit records and every budget count. All source/output hashes verified.",
+      "model_fitting": false,
+      "model_inference": false,
+      "test_predictions_read": false
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -1113,7 +1293,9 @@
       "key": "head_adaptation_across_units",
       "experiment": "Adapt heads on adaptation units and evaluate disjoint validation/test units",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E50",
@@ -1121,7 +1303,9 @@
       "key": "interaction_adaptation_across_units",
       "experiment": "Repeat adaptation including cross-attention",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E51",
@@ -1129,7 +1313,9 @@
       "key": "within_unit_adaptation",
       "experiment": "Adapt and evaluate on disjoint groups of the same unit",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E52",
@@ -1137,7 +1323,9 @@
       "key": "adaptation_learning_curves",
       "experiment": "Vary k across all three adaptation settings",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum"
     },
     {
       "id": "E53",
