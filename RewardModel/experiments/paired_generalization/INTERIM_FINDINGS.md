@@ -392,6 +392,43 @@ pairs reproduced 216 sampled noise-band/group/scorer combinations; direct
 weighted means reproduced all four
 composition-standardized validation scores. All source/artifact hashes passed.
 
+Q11's scalar localization audit covers all 15 initial B validation epochs and
+the verified A epochs 1–4. B's BCE rises by 0.03768 from its overall minimum at
+epoch 2 to epoch 15, with a positive point change in every fixed size bin.
+Ranking changes below instead compare the macro-Spearman peak at epoch 6 with
+epoch 15, on the same eligible assays at both endpoints.
+
+| Assay size | B validation rows | BCE change, 2→15 | Eligible assays, 6→15 | Macro rho change, 6→15 |
+|---|---:|---:|---:|---:|
+| 1 | 3,769 | +0.04321 | 0 | undefined |
+| 2 | 1,988 | +0.00754 | 0 | undefined |
+| 3 | 1,623 | +0.02937 | 329 | −0.08247 |
+| 4–10 | 9,812 | +0.02029 | 1,330 | −0.00158 |
+| 11–25 | 21,365 | +0.04284 | 1,222 | +0.00120 |
+| >25 | 98,400 | +0.03883 | 1,088 | −0.00725 |
+
+Three-item assays account arithmetically for 76.1% of the observed net macro
+decline, despite representing 8.3% of eligible assays. The overall decline is
+−0.00899 with paired component interval [−0.02078, 0.00302]; the three-item
+change interval is [−0.15882, −0.00549]. These descriptive intervals condition
+on one fit and the observed endpoint choices, exclude selection/seed uncertainty,
+and are not adjusted for multiple strata. They do not establish a reproducible
+localized failure. The BCE increase is broader: >25-item assays contribute
+74.0% of its net increase and contain 71.8% of rows.
+
+B has only unseen-scaffold groups under the predefined binary relation, so
+that split cannot localize the change across different similarity strata.
+Across A epochs 1→4, BCE falls for shared/mixed/unseen-scaffold assays
+(0.52598→0.43690 / 0.51247→0.48377 / 0.54630→0.53779); ranking improves in
+all three from epoch 1. This early prefix does not establish later behavior.
+Q11 remains partial pending the complete matched trajectories and localization
+of native listwise and contrastive losses. Source:
+`tier1/stratified_trajectories/8ab0305fa3ae2c8f/{complete.json,verification.json}`.
+All 19 snapshots reproduce native aggregate BCE within 1e-5 and headline rho
+within 1e-14. Independent Bernoulli log-probability calculations verify all
+stratum BCE values; 204,924 group correlations agree with the previously
+verified metric tables, including undefined cases. No test predictions were read.
+
 ## Protein coverage in the B test set
 
 All 1,723 test proteins have training observations. The number of distinct
