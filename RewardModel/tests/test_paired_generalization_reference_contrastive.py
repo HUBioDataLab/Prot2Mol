@@ -9,9 +9,49 @@ from transformers import TrainingArguments
 
 from experiments.paired_generalization import reference_contrastive as audit
 from experiments.paired_generalization.qualify_controls import make_model
+from reward_model.model import LoadedEncoder, load_reward_model, save_reward_model
 from reward_model.training.data import RewardAssayListCollator, RewardEvaluationDataset
 from reward_model.training.trainer import RewardModelTrainer
 from test_paired_generalization_checkpoint_evaluation import examples_fixture, config_fixture
+
+
+def test_saved_checkpoint_accepts_only_encoder_resolved_widths_without_changing_config_or_weights(tmp_path):
+    model = make_model(None,{})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    before = launch.to_dict()
+    save_reward_model(model, str(tmp_path))
+    restored = load_reward_model(str(tmp_path), device=torch.device('cpu'),
+        protein_bundle=LoadedEncoder('tiny/protein', None, model.protein_encoder, 12),
+        molecule_bundle=LoadedEncoder('tiny/molecule', None, model.molecule_encoder, 16))
+    # Exercise real JSON serialization and the model loader's canonical config.
+    assert isinstance(launch.ranking_head_hidden_dims, tuple)
+    assert json.loads((tmp_path/'config.json').read_text())['ranking_head_hidden_dims'] == [8]
+    assert restored.config.ranking_head_hidden_dims == launch.ranking_head_hidden_dims
+    weights = audit.parameter_digest(restored)
+    audit.verify_loaded_config(restored, launch)
+    assert launch.to_dict() == before
+    assert audit.parameter_digest(restored) == weights
+    audit.verify_loaded_config(restored, replace(launch, protein_hidden_size=12, molecule_hidden_size=16))
+
+
+@pytest.mark.parametrize('change', [
+    {'protein_hidden_size':15}, {'molecule_hidden_size':20},
+    {'dropout':.05}, {'contrastive_loss_weight':.5},
+    {'ranking_head_hidden_dims':[9]}, {'molecule_model_name_or_path':'other/model'},
+])
+def test_loaded_config_rejects_explicit_width_architecture_or_objective_changes(change):
+    model = make_model(None,{})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    with pytest.raises(ValueError, match='differs from its launch'):
+        audit.verify_loaded_config(model, replace(launch, **change))
+
+
+def test_saved_width_must_agree_with_the_actual_loaded_encoder():
+    model = make_model(None,{})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    model.config.protein_hidden_size = 15
+    with pytest.raises(ValueError, match='loaded encoder'):
+        audit.verify_loaded_config(model, launch)
 
 
 def snapshot(tmp_path, prefix='eval'):

@@ -59,6 +59,27 @@ def check_policy(config):
         raise ValueError('Contrastive audit requires the fixed matched A reference policy')
 
 
+def verify_loaded_config(model, launch_config):
+    """Allow encoder-resolved widths, while rejecting every semantic change.
+
+    RewardModel fills missing widths from its loaded encoder bundles before
+    checkpoint serialization. This does not change the launched architecture or
+    objectives; explicit widths and every other configuration field stay exact.
+    """
+    actual = model.config.to_dict()
+    expected = launch_config.to_dict()
+    for side in ('protein', 'molecule'):
+        key = side+'_hidden_size'
+        observed = getattr(model, side+'_encoder').config.hidden_size
+        if actual[key] != observed:
+            raise ValueError(f'Saved {key} differs from its loaded encoder')
+        if expected[key] is None:
+            expected[key] = observed
+    differing = sorted(key for key in actual.keys() | expected.keys() if actual.get(key) != expected.get(key))
+    if differing:
+        raise ValueError(f'Protected model configuration differs from its launch: {differing}')
+
+
 def build_plan(directory):
     from importlib.metadata import version
     from reward_model.training.config import load_reward_training_config
@@ -236,8 +257,7 @@ def worker(path, index, workers):
                 raise RuntimeError('Partial reference inference requires inspection')
             if model is None:
                 model = load_reward_model(checkpoint['path'],device=torch.device('cpu'))
-                if model.config.to_dict() != config.model.to_dict():
-                    raise ValueError('Protected model configuration differs from its launch')
+                verify_loaded_config(model, config.model)
                 model.to('cuda')
             evaluate_checkpoint(model,datasets[split],config,Path(native['path']),output,source)
         del model
