@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–8. These
+native validation and fixed training-probe audits for epochs 1–9. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -359,55 +359,57 @@ and preserve the Trainer's float32 label semantics.
 | 6 | 0.28843 | 0.36608 | 0.44842 | 2.49957 | 2.07677 |
 | 7 | 0.30225 | 0.38964 | 0.44339 | 2.47470 | 1.96870 |
 | 8 | 0.31324 | 0.40509 | 0.44007 | 2.46072 | 1.87887 |
+| 9 | 0.31908 | 0.42791 | 0.43174 | 2.45581 | 1.80663 |
 
-Validation AUROC rises 0.72635→0.82858 across epochs 1→8 and the contrastive
-scale rises 13.5412→19.4653. Epochs 5→6 show the first adjacent BCE increase
+Validation AUROC rises 0.72635→0.83503 across epochs 1→9 and the contrastive
+scale rises 13.5412→20.0674. Epochs 5→6 show the first adjacent BCE increase
 (0.44381→0.44842), a small AUROC decrease (0.81971→0.81954), and continued
 ranking-loss and macro-Spearman improvement. BCE falls to 0.44339 at epoch 7,
-below the epoch-5 value, and to 0.44007 at epoch 8; that increase did not persist.
+below the epoch-5 value, then to 0.44007/0.43174 at epochs 8/9; that increase did
+not persist.
 On the same eligible validation assays,
 NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
-0.69152/0.73288/0.76865 at epoch 8. All three increase from epoch 7.
-Epoch-8 BCE-logit and cosine-only macro Spearman are 0.24875 and 0.16870.
-BCE-logit rho is defined on 7,995/7,997 eligible assays, versus all 7,997 for
-the ranking and cosine scores; constant predictions are not jittered or assigned
-an artificial correlation. Positive temperature calibration fitted on that
-validation set gives T=1.24811 and reduces log-loss from 0.44007 to 0.43260; this is an
+0.69425/0.73474/0.77065 at epoch 9. All three increase from epoch 8.
+Epoch-9 BCE-logit and cosine-only macro Spearman are 0.24998 and 0.17385.
+All three scorers have defined rho on all 7,997 eligible assays at epoch 9;
+constant predictions at earlier epochs are not jittered or assigned artificial
+correlations. Positive temperature calibration fitted on that validation set
+gives T=1.20822 and reduces log-loss from 0.43174 to 0.42640; this is an
 in-sample fit, with no test transfer.
 
-At epoch 8, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.33598/0.26890/0.22668 (5,405/2,402/190 eligible assays).
-The unseen-scaffold point estimate falls from 0.21738 at epoch 6 to 0.20665
-at epoch 7, then rises to 0.22668; these local changes do not establish a turning point.
-Restricting to unseen-scaffold rows within assays instead gives 0.20309 on
+At epoch 9, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.34288/0.27256/0.23027 (5,405/2,402/190 eligible assays).
+All three point estimates rise from epoch 8. Restricting to unseen-scaffold
+rows within assays instead gives 0.19871, down from 0.20309 at epoch 8, on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.31291 to 0.30539. This
+changes A common-support validation macro from 0.31895 to 0.31075. These local
+changes do not establish a turning point. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→8, validation ranking–BCE agreement changes 0.63056→0.64300
-on the same 7,993 mutually defined eligible assays; the paired whole-assay
-interval for the change is [0.00248, 0.02288]. This intersection differs from
-the earlier epoch-1/7 comparison because constant-score assays differ by epoch.
-Ranking–cosine agreement rises 0.12360→0.29648 on 7,997 assays, with change
-interval [0.15964, 0.18622].
+Across epochs 1→9, validation ranking–BCE agreement changes 0.63066→0.62552
+on the same 7,995 mutually defined eligible assays; the paired whole-assay
+interval for the change is [−0.01542, 0.00523], including zero. This intersection
+differs from the earlier epoch-1/8 comparison because constant-score assays
+differ by epoch. Ranking–cosine agreement rises 0.12360→0.29715 on 7,997 assays,
+with change interval [0.16005, 0.18726].
 Agreement fluctuates across epochs; the prefix does not show uniform scorer divergence.
 
 Both the best validation macro Spearman and minimum aggregate validation loss
-in this eight-epoch prefix occur at epoch 8. These are observed-prefix extrema,
+in this nine-epoch prefix occur at epoch 9. These are observed-prefix extrema,
 not the final checkpoint choices or an established overfitting turning point.
 Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch08.json`, per-assay
-metric tables and `verification_through_epoch08.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 443,496
+on Atum, including the immutable `trajectory_through_epoch09.json`, per-assay
+metric tables and `verification_through_epoch09.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 498,933
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
 pairs reproduced sampled noise-band/group/scorer counts; direct
-weighted means reproduced all eight
+weighted means reproduced all nine
 composition-standardized validation scores. All source/artifact hashes passed.
-The reusable `verify_native_analysis.py` performed the epoch-7/8 checks and
+The reusable `verify_native_analysis.py` performed the epoch-7/8/9 checks and
 rechecked the prior prefix's sources and table bytes before inheriting its
 numerical evidence. Its independent scope covers correlations, sampled pair
 counts and composition-weighted point estimates; it does not independently
@@ -802,9 +804,11 @@ checks reconstructed every selection from raw identities: 331,191 memberships
 across 18 cohorts, with all source/output hashes verified. Source:
 `tier4/geometry_design/{complete.json,verification.json}` on Atum.
 
-Nine CPU tests qualify singular-value effective rank, normalized alignment and
-uniformity, zero-vector coverage, and capture of the actual model's pooled
-contrastive projection boundaries without changing weights. The rank definition
+Nineteen CPU tests qualify singular-value effective rank, normalized alignment
+and uniformity, zero-vector coverage, capture of the actual model's pooled
+contrastive projection boundaries without changing weights, and identity-based
+export alignment despite reordered caches. Wrong labels/identities, changed
+artifacts and the wrong cosine pathway are rejected. The rank definition
 is uncentered singular-value entropy, as in
 [RankMe](https://arxiv.org/abs/2210.02885); the existing older diagnostic's centered
 covariance entropy is a different statistic. The
@@ -812,7 +816,15 @@ covariance entropy is a different statistic. The
 vectors. Cross-modal alignment applies only in the trained common projection
 space; unrelated encoder coordinates are not made comparable by padding.
 
-These are membership and numerical checks only. No scientific geometry value,
+The production mapping passed separately on all six token caches: 311,343
+distinct observations supply the 331,191 view memberships. All selected native
+float32 continuous labels and raw/cache observation identities match. The
+current cache positions happen to equal raw positions; the worker does not
+depend on that coincidence. This CPU check verifies source data, cohort files
+and cache registration metadata, but does not rehash the full token payloads
+or load a model. Source: `tier4/geometry_cache_alignment/complete.json` on Atum.
+
+These are membership, mapping and numerical checks only. No scientific geometry value,
 representation-collapse conclusion or improvement is established. Checkpoint,
 token and row provenance, permitted-GPU inference qualification and the actual
 measurements remain pending behind Tier3. E54/E55 remain **pending**.
