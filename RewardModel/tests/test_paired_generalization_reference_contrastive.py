@@ -73,13 +73,18 @@ def snapshot(tmp_path, prefix='eval'):
 
 
 @pytest.mark.parametrize('prefix',['eval','train_eval'])
-def test_actual_model_export_reproduces_native_loss_without_training(tmp_path,monkeypatch,prefix):
+@pytest.mark.parametrize('unresolved_widths',[False,True])
+def test_actual_model_export_reproduces_native_loss_without_training(tmp_path,monkeypatch,prefix,unresolved_widths):
     model,examples,config,native = snapshot(tmp_path,prefix)
+    if unresolved_widths:
+        config = replace(config,model=replace(config.model,protein_hidden_size=None,molecule_hidden_size=None))
+    original_config = config.model.to_dict()
     def refuse(*args,**kwargs):raise AssertionError('No training or optimizer is allowed')
     monkeypatch.setattr(RewardModelTrainer,'train',refuse)
     monkeypatch.setattr(RewardModelTrainer,'create_optimizer',refuse)
     weights = {name:value.clone() for name,value in model.state_dict().items()}
     result = audit.evaluate_checkpoint(model,examples,config,native,tmp_path/'audit',{'fixture':True},cpu=True)
+    assert config.model.to_dict() == original_config
     assert result['parameters_unchanged'] and result['cpu_qualification']
     assert abs(result['analysis']['export_minus_native_contrastive_loss']) < 1e-5
     assert result['analysis']['export_macro_spearman'] == pytest.approx(result['analysis']['native_macro_spearman'])
@@ -95,6 +100,17 @@ def test_actual_model_export_reproduces_native_loss_without_training(tmp_path,mo
     (tmp_path/'audit/protein.npy').write_bytes(b'changed')
     with pytest.raises(ValueError,match='artifact changed'):
         audit.verify_export(tmp_path/'audit',{'fixture':True},cpu=True)
+
+
+@pytest.mark.parametrize('change',[{'protein_hidden_size':15},{'dropout':.05}])
+def test_export_rejects_config_changes_before_inference(tmp_path,monkeypatch,change):
+    model,examples,config,native = snapshot(tmp_path)
+    config = replace(config,model=replace(config.model,**change))
+    def refuse(*args,**kwargs):raise AssertionError('Inference must not start')
+    monkeypatch.setattr(audit,'score_dataset',refuse)
+    with pytest.raises(ValueError,match='differs from its launch'):
+        audit.evaluate_checkpoint(model,examples,config,native,tmp_path/'changed',{},cpu=True)
+    assert not (tmp_path/'changed').exists()
 
 
 def test_test_partition_and_changed_probe_are_refused_before_inference(tmp_path,monkeypatch):

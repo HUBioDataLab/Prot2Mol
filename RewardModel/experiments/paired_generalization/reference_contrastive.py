@@ -194,8 +194,7 @@ def verify_export(output, source, *, cpu=False):
 
 def evaluate_checkpoint(model, dataset, config, native_path, output, source, *, cpu=False):
     check_policy(config)
-    if model.config.to_dict() != config.model.to_dict():
-        raise ValueError('Inference model does not match its registered configuration')
+    verify_loaded_config(model, config.model)
     native = read(native_path)
     if native['phase'] != 'trajectory' or native['metric_prefix'] not in ('eval','train_eval'):
         raise ValueError('Reference inference accepts only native validation/training trajectories')
