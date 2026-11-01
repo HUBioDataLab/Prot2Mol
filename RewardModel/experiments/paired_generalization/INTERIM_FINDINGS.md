@@ -13,6 +13,28 @@ method comparison. Source: `baseline_status.json`, checkpoint trainer states.
 
 ## Measurement and composition
 
+The selection metric `eval_macro_spearman` is an unweighted mean of per-assay
+correlations. `eval_spearman` is instead an alias for the observation-count
+weighted mean; neither is a correlation pooled over observations. Groups need
+at least three observations and pChEMBL span≥0.5. Thus two-item assays do not
+enter this headline metric. Constant label groups are excluded; tied ranks are
+averaged; constant predictions give undefined correlations and reduce coverage.
+Source: `reward_model/training/evaluation.py`.
+
+| Test composition | A | B |
+|---|---:|---:|
+| Assays | 16,431 | 9,578 |
+| Median / mean assay size | 3 / 11.73 | 2 / 14.30 |
+| Eligible assays | 8,278 (50.38%) | 3,972 (41.47%) |
+| Mean within-assay pChEMBL variance | 0.3046 | 0.1809 |
+| Exactly tied label pairs | 6.20% | 5.65% |
+| Rows with multiple raw measurements | 3.22% | 3.91% |
+
+B has a smaller median assay but a larger mean due to its tail. The differences
+in eligibility, variance and near-ties preclude interpreting the raw split gap
+as a pure similarity effect. The planned reweighting comparison remains pending.
+Source: `tier1/data/composition.json`.
+
 All 1,957,400 curated observations were reconstructed from 2,032,748 retained raw
 measurements with zero count or median mismatches. On the replicated subsets:
 
@@ -110,6 +132,11 @@ molecule inputs and labels are preserved. Both versions use the same five-value
 regularization grid and select on their own validation macro Spearman. The
 comparison covers one permutation per partition, not permutation uncertainty.
 Sources: `tier2/kronecker_ridge/`, `tier2/protein_shuffled_kronecker/`.
+The paired-minus-shuffled test difference is 0.1029 on A (paired whole-assay
+bootstrap interval [0.0920, 0.1138]) and 0.0035 on B (whole-component interval
+[−0.0157, 0.0221]). This kernel baseline shows a clear A advantage for correct
+protein assignments; the B contrast is inconclusive. These intervals condition
+on the fitted models and permutations. Source: `tier2/protein_shuffle_comparison.json`.
 
 ## Distribution shift
 

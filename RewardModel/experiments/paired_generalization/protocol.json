@@ -6,21 +6,27 @@
       "question": "Is the reported Spearman computed per group and averaged, weighted by group size or pair count, or pooled across all observations?",
       "rationale": "Pooling mixes within-group order with cross-group score offsets, which a translation-invariant ranking loss never pins down ([Yan et al. 2022](https://research.google/pubs/scale-calibration-of-deep-ranking-models/)). A per-group average gives a two-item group, which carries one bit, the same weight as a 25-item group with 300 pairs (inference).",
       "interpretation": "**Pooled:** part of both numbers measures the cross-group calibration of a head that was never trained for it. Evaluate the BCE logit or an anchored score instead. **Per-group average:** the value is driven by groups of two or three, so compare it with a pair-weighted concordance before reading anything into the plateau.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "The required selection metric eval_macro_spearman is the unweighted mean of eligible, defined per-assay Spearman correlations. eval_spearman aliases the observation-count-weighted mean; neither pools scores across observations and neither weights by pair count. Historical illustrative 0.41/0.20 numbers in the spec are not assumed to be matched macro results.",
+      "evidence": "RewardModel/reward_model/training/evaluation.py::_compute_groupwise_spearman_with_records; baseline training config metric_for_best_model"
     },
     {
       "id": "Q02",
       "question": "Which groups enter the metric? How are size-one groups, constant groups and ties created by median aggregation handled? Does the eligible fraction differ between splits?",
       "rationale": "Spearman is undefined for constant groups. The median of an even number of replicates can create exact ties. An eligibility rule that differs from the training rule scores pairs the loss ignored.",
       "interpretation": "If the eligible fraction or tie rate differs between the two test partitions, part of the gap is compositional rather than a failure to generalize.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "The actual headline requires n>=3 and pChEMBL span>=0.5, excludes constant labels, and uses average ranks for exact ties. Size-one and size-two assays are excluded. Constant predictions produce undefined rho, excluded with defined coverage recorded. A test has 8278/16431 eligible assays (50.38%); B has 3972/9578 (41.47%).",
+      "evidence": "RewardModel/reward_model/training/evaluation.py; tier1/data/composition.json; tier2/*/{A,B}/test/metrics.json"
     },
     {
       "id": "Q03",
       "question": "Do the two test partitions differ in group-size distribution, within-group score variance, near-tie rate or replicate count?",
       "rationale": "Each of these bounds the attainable per-group correlation, independently of the model (inference).",
       "interpretation": "If Split B's groups are smaller, flatter or noisier, reweighting Split A's per-group results to Split B's mix should reproduce part of the drop without any retraining.",
-      "status": "pending"
+      "status": "answered",
+      "answer": "Yes. A/B test assay-size medians are 3/2, but means are 11.73/14.30; mean within-assay variance is 0.30457/0.18086; exact tied-pair fractions are 6.20%/5.65%; replicated-row fractions are 3.22%/3.91%. Training-RMS near-tie fractions are 60.80%/61.89%. These describe composition, not a causal share of the split gap; model-score reweighting remains pending.",
+      "evidence": "tier1/data/composition.json; tier1/noise_bands/composition*.json"
     },
     {
       "id": "Q04",
@@ -532,7 +538,24 @@
       "status": "complete",
       "conditional": false,
       "completed_scope": "Retrained the matched Kronecker model with whole-assay protein assignments shuffled independently within each partition, preserving group-level protein frequencies. Same five-setting budget and frozen feature map. Test rho A 0.0661675, B 0.0596169. One permutation per partition; full defined eligible coverage.",
-      "evidence": "RewardModel/outputs/paired_generalization/tier2/protein_shuffled_kronecker/{A,B}/complete.json on Atum"
+      "evidence": "RewardModel/outputs/paired_generalization/tier2/protein_shuffled_kronecker/{A,B}/complete.json on Atum",
+      "paired_test_difference": {
+        "A": {
+          "mean": 0.10286973734461326,
+          "unit_bootstrap_95": [
+            0.09202310680799536,
+            0.11378645639068723
+          ]
+        },
+        "B": {
+          "mean": 0.003518071424383899,
+          "unit_bootstrap_95": [
+            -0.0156887537563416,
+            0.022084308038353304
+          ]
+        },
+        "evidence": "tier2/protein_shuffle_comparison.json; intervals conditional on one fitted model and one permutation per split"
+      }
     },
     {
       "id": "E24",
@@ -601,8 +624,8 @@
       "experiment": "Bilinear inductive matrix-completion baseline",
       "status": "running",
       "conditional": false,
-      "completed_scope": "Observed-only regularized low-rank bilinear implementation validated against explicit observation gradients and sparse noiseless recovery; nine rank/regularization settings per split executing on GPUs 5 and 6.",
-      "evidence": "RewardModel/outputs/paired_generalization/bilinear_{A,B}.log on Atum"
+      "completed_scope": "Nine initial 300-iteration fits per split completed, but low-regularization gradients and training objectives had not converged. Extending all nine settings on both splits to the same 3000-iteration budget; initial fits retained. Exact selected coefficient matrix is saved to preserve near-tied validation rankings.",
+      "evidence": "tier2/bilinear_completion/{A,B}/complete.json (initial diagnostics); tier2/bilinear_completion_3000iter/{A,B}/fit_progress.json (extended fits) on Atum"
     },
     {
       "id": "E31",

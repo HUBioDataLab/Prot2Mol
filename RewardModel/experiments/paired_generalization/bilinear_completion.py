@@ -28,6 +28,7 @@ else:
     from kronecker_ridge import ObservedKronecker, load_feature_maps
 
 RANKS, STRENGTHS = [8, 32, 128], [1e-6, 1e-4, .01]
+MAX_ITERATIONS = 3000
 
 
 def factor_objective(problem, left, right, strength):
@@ -39,7 +40,7 @@ def factor_objective(problem, left, right, strength):
     return value, gradient @ right + strength * left, gradient.T @ left + strength * right
 
 
-def fit_factors(problem, rank, strength, *, max_iterations=300, tolerance=1e-7, progress=None):
+def fit_factors(problem, rank, strength, *, max_iterations=MAX_ITERATIONS, tolerance=1e-7, progress=None):
     if strength <= 0 or not 0 < rank <= min(problem.cross.shape):
         raise ValueError("Positive rank and regularization required")
     u, singular, vh = torch.linalg.svd(problem.cross, full_matrices=False)
@@ -48,7 +49,7 @@ def fit_factors(problem, rank, strength, *, max_iterations=300, tolerance=1e-7, 
     right = torch.nn.Parameter(vh[:rank].T * root)
     optimizer = torch.optim.LBFGS([left, right], lr=1., max_iter=max_iterations,
         max_eval=2 * max_iterations, tolerance_grad=tolerance, tolerance_change=1e-12,
-        history_size=20, line_search_fn="strong_wolfe")
+        history_size=50, line_search_fn="strong_wolfe")
     calls, started = 0, time.monotonic()
 
     @torch.no_grad()
@@ -91,14 +92,16 @@ def main(regime):
     if os.environ.get("CUDA_VISIBLE_DEVICES") not in allowed or torch.cuda.device_count() != 1:
         raise RuntimeError("Select exactly one authorized GPU UUID")
     torch.set_num_threads(4)
-    output = WORK / "tier2/bilinear_completion" / regime
+    # Preserve the initial 300-iteration diagnostic fits. Their gradients and
+    # still-improving training objectives motivated this equal-budget extension.
+    output = WORK / f"tier2/bilinear_completion_{MAX_ITERATIONS}iter" / regime
     output.mkdir(parents=True, exist_ok=True)
     lock = (output / "fit.lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     frames, hashes = load_partitions(regime)
     maps, indices, manifest, scalers = load_feature_maps(regime, frames, hashes)
     provenance = {"regime": regime, "data_sha256": hashes, "feature_provenance": manifest,
-                  "ranks": RANKS, "regularization_grid": STRENGTHS, "max_iterations": 300}
+                  "ranks": RANKS, "regularization_grid": STRENGTHS, "max_iterations": MAX_ITERATIONS}
     if (output / "complete.json").exists():
         previous = json.loads((output / "complete.json").read_text())
         if any(previous[key] != value for key, value in provenance.items()):
@@ -122,9 +125,11 @@ def main(regime):
                     write_json(output / "fit_progress.json", {"rank": rank, "lambda": strength, **state})
                     print(f"Bilinear {regime} rank={rank} lambda={strength:g}: evaluations={state['function_evaluations']} objective={state['centered_objective_without_label_constant']:.6f}", flush=True)
                 left, right, intercept, fit = fit_factors(problem, rank, strength, progress=progress)
-                scores = problem.predict(left @ right.T, intercept, indices["protein"]["val"], indices["molecule"]["val"])
+                coefficient = left @ right.T
+                scores = problem.predict(coefficient, intercept, indices["protein"]["val"], indices["molecule"]["val"])
                 metric = selector(scores)
-                np.savez(trial_dir / "model.npz", left=left.cpu().numpy(), right=right.cpu().numpy(), intercept=intercept,
+                np.savez(trial_dir / "model.npz", left=left.cpu().numpy(), right=right.cpu().numpy(),
+                         coefficient=coefficient.cpu().numpy(), intercept=intercept,
                          **{f"{side}_{key}": value for side, stats in scalers.items() for key, value in stats.items()})
                 trial = {"rank": rank, "lambda": strength, **metric, "fit": fit, "model_sha256": sha256(trial_dir / "model.npz")}
                 write_json(trial_dir / "complete.json", trial)
@@ -139,16 +144,21 @@ def main(regime):
     import shutil
     shutil.copyfile(output / f"rank{best['rank']}_lambda{best['lambda']:g}/model.npz", output / "model.npz")
     model = np.load(output / "model.npz")
-    coefficient = torch.as_tensor(model["left"] @ model["right"].T, device="cuda")
+    # Preserve the exact matrix used for selection. CPU versus GPU factor
+    # multiplication can perturb near-tied rankings despite identical factors.
+    coefficient = torch.as_tensor(model["coefficient"], device="cuda")
     metrics = {}
     for part in ("val", "test"):
         scores = problem.predict(coefficient, float(model["intercept"]), indices["protein"][part], indices["molecule"][part])
+        if part == "val" and abs(selector(scores)["macro_spearman"] - best["macro_spearman"]) > 1e-12:
+            raise RuntimeError("Saved bilinear model did not reproduce validation selection")
         metrics[part] = evaluate_predictions(frames[part].assign(ranking_score=scores, classification_score=scores), regime, output / part)
     write_json(output / "complete.json", {**provenance, "trials": trials, "selected": best, "metrics": metrics,
         "model_sha256": sha256(output / "model.npz"),
         "model": "x.T A B.T y + unpenalized global intercept, same scaled standardized augmented linear features as Kronecker ridge",
         "objective": "mean squared error on measured observations / 2 + lambda * (||A||_F^2 + ||B||_F^2) / 2; no unobserved labels",
-        "optimizer": "full-batch L-BFGS with strong-Wolfe line search, 300 iterations / 600 evaluations maximum per setting, history 20; deterministic SVD of training feature-label cross-moment initialization",
+        "optimizer": "full-batch L-BFGS with strong-Wolfe line search, 3000 iterations / 6000 evaluations maximum per setting, history 50; deterministic SVD of training feature-label cross-moment initialization",
+        "budget_extension_reason": "Initial 300-iteration fits retained under tier2/bilinear_completion; low-regularization training objectives and gradients had not converged. All nine settings on both splits receive the same extended budget, chosen from training diagnostics.",
         "selection": "nine rank/regularization settings per split; validation eligible macro Spearman only; test after selection",
         "interpretation": "Regularized inductive-completion model-family baseline, not a reproduction of exact-recovery guarantees or the source paper's alternating-minimization algorithm",
         "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()})
