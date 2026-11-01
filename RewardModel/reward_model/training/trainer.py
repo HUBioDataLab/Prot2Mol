@@ -858,6 +858,9 @@ class RewardModelTrainer(Trainer):
         if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
             model_inputs["pchembl_values"] = inputs["pchembl_values"]
             model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
+            for key in ("ranking_group_weights", "ranking_batch_item_count"):
+                if key in inputs:
+                    model_inputs[key] = inputs[key]
             if "contrastive_group_ids" in inputs:
                 model_inputs["contrastive_group_ids"] = inputs[
                     "contrastive_group_ids"
@@ -1170,6 +1173,7 @@ class RewardModelTrainer(Trainer):
             ranking_affinity_margin=model_config.ranking_affinity_margin,
             ranking_objective=model_config.ranking_objective,
             ranking_normalize_per_group=model_config.ranking_normalize_per_group,
+            ranking_balance_assays=model_config.ranking_balance_assays,
             ranking_position_weighting=model_config.ranking_position_weighting,
             ranking_pair_target_temperature=model_config.ranking_pair_target_temperature,
             ranking_min_pchembl_span=active_eval_dataset.ranking_min_pchembl_span

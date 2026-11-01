@@ -445,12 +445,18 @@ class RewardModel(nn.Module):
         ranking_score: torch.Tensor,
         pchembl_values: torch.Tensor,
         ranking_group_ids: torch.Tensor,
+        ranking_group_weights: Optional[torch.Tensor] = None,
+        ranking_batch_item_count: Optional[int] = None,
     ) -> torch.Tensor:
         loss_function = (ligunity_listwise_loss if self._config.ranking_objective == "ligunity_listwise"
                          else pairwise_logistic_ranking_loss)
         extra = {} if self._config.ranking_objective == "ligunity_listwise" else {
             "pair_target_temperature": self._config.ranking_pair_target_temperature,
         }
+        if self._config.ranking_balance_assays:
+            if ranking_group_weights is None or ranking_batch_item_count is None:
+                raise ValueError("Assay-balanced training requires source-assay weights and batch item count")
+            extra.update(group_weights=ranking_group_weights, reduction_denominator=ranking_batch_item_count)
         return loss_function(
             ranking_score,
             pchembl_values,
@@ -796,6 +802,8 @@ class RewardModel(nn.Module):
         activity_labels: Optional[torch.Tensor] = None,
         pchembl_values: Optional[torch.Tensor] = None,
         ranking_group_ids: Optional[torch.Tensor] = None,
+        ranking_group_weights: Optional[torch.Tensor] = None,
+        ranking_batch_item_count: Optional[int] = None,
         contrastive_group_ids: Optional[torch.Tensor] = None,
         contrastive_target_ids: Optional[torch.Tensor] = None,
         contrastive_molecule_ids: Optional[torch.Tensor] = None,
@@ -1020,6 +1028,8 @@ class RewardModel(nn.Module):
                     ranking_score,
                     pchembl_values,
                     ranking_group_ids,
+                    ranking_group_weights,
+                    ranking_batch_item_count,
                 )
         elif positive_indices is not None or negative_indices is not None:
             if positive_indices is None or negative_indices is None:

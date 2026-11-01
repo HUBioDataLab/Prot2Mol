@@ -277,7 +277,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Eight Tier 2 baseline types complete on both splits; bilinear completion and LambdaMART running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
+    "remaining_tiers": "Nine Tier 2 baseline types complete on both splits; bilinear optimization limits reported, LambdaMART still running. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
@@ -622,10 +622,10 @@
       "tier": "Tier 2",
       "key": "bilinear_inductive_completion",
       "experiment": "Bilinear inductive matrix-completion baseline",
-      "status": "running",
+      "status": "complete",
       "conditional": false,
-      "completed_scope": "Nine initial 300-iteration fits per split completed, but low-regularization gradients and training objectives had not converged. Extending all nine settings on both splits to the same 3000-iteration budget; initial fits retained. Exact selected coefficient matrix is saved to preserve near-tied validation rankings.",
-      "evidence": "tier2/bilinear_completion/{A,B}/complete.json (initial diagnostics); tier2/bilinear_completion_3000iter/{A,B}/fit_progress.json (extended fits) on Atum"
+      "completed_scope": "Nine equal-budget 3000-iteration fits per split completed; validation selected rank128/lambda1e-6 on A and rank8/lambda1e-6 on B. Test macro rho 0.2125581/0.0778611, full defined eligible coverage. Selected fits reached the iteration cap with gradients above tolerance; finite-budget results do not establish optimality. Initial fits retained; exact selected matrices, hashes and validation reproduction verified.",
+      "evidence": "RewardModel/outputs/paired_generalization/tier2/bilinear_completion_3000iter/{A,B}/complete.json on Atum"
     },
     {
       "id": "E31",

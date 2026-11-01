@@ -45,6 +45,7 @@ def cases():
         ("fixed_scale", dict(learn_contrastive_scale=False)),
         ("detach", dict(contrastive_detach_encoders=True)),
         ("listwise_normalized", dict(ranking_normalize_per_group=True)),
+        ("assay_balanced", dict(ranking_normalize_per_group=True, ranking_balance_assays=True)),
         ("pairwise_top", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True)),
         ("pairwise_uniform", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True,
                                   ranking_position_weighting="uniform")),
@@ -96,7 +97,11 @@ def make_batch(model, device, real):
         pchembl_values=values, activity_labels=(values > 6).float(),
         ranking_group_ids=owners, contrastive_group_ids=owners,
         contrastive_target_ids=owners, contrastive_molecule_ids=torch.arange(9))
-    return {key: value.to(device) for key, value in batch.items()}
+    batch = {key: value.to(device) for key, value in batch.items()}
+    if model.config.ranking_balance_assays:
+        batch.update(ranking_group_weights=torch.tensor([.5]*6 + [2.]*3, device=device),
+                     ranking_batch_item_count=3)
+    return batch
 
 
 def main():

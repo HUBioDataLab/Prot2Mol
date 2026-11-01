@@ -242,6 +242,25 @@ def _tie_averaged_position_weight(
     return weights.mean()
 
 
+def _ranking_group_weights(scores, group_weights, reduction_denominator):
+    if group_weights is None:
+        if reduction_denominator is not None:
+            raise ValueError("A custom reduction denominator requires group weights")
+        return None
+    weights = group_weights.reshape(-1).to(device=scores.device, dtype=scores.dtype)
+    if weights.shape != scores.shape or not torch.isfinite(weights).all() or (weights < 0).any():
+        raise ValueError("group_weights must be finite nonnegative values aligned with score rows")
+    if reduction_denominator is None or not math.isfinite(float(reduction_denominator)) or reduction_denominator <= 0:
+        raise ValueError("Weighted ranking requires a positive fixed reduction denominator")
+    return weights
+
+
+def _single_group_weight(weights):
+    if not torch.all(weights == weights[0]):
+        raise ValueError("Every row of one ranking list must have the same group weight")
+    return weights[0]
+
+
 def ligunity_listwise_loss(
     ranking_scores: torch.Tensor,
     pchembl_values: torch.Tensor,
@@ -253,6 +272,8 @@ def ligunity_listwise_loss(
     affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN,
     normalize_per_group: bool = False,
     position_weighting: str = "top",
+    group_weights: torch.Tensor | None = None,
+    reduction_denominator: float | None = None,
 ) -> torch.Tensor:
     """Compute LigUnity's weighted Plackett-Luce ranking objective.
 
@@ -290,8 +311,10 @@ def ligunity_listwise_loss(
         else scores.dtype
     )
     scaled_scores = scores.to(dtype=computation_dtype) / float(temperature)
+    weights = _ranking_group_weights(scaled_scores, group_weights, reduction_denominator)
     targets = targets.to(dtype=computation_dtype)
     list_losses: list[torch.Tensor] = []
+    list_weights: list[torch.Tensor] = []
 
     valid_indices = torch.nonzero(group_ids >= 0, as_tuple=False).flatten()
     if valid_indices.numel() == 0:
@@ -358,9 +381,13 @@ def ligunity_listwise_loss(
         if normalize_per_group:
             group_loss = group_loss / group_weight.clamp_min(torch.finfo(group_loss.dtype).tiny)
         list_losses.append(group_loss)
+        if weights is not None:
+            list_weights.append(_single_group_weight(weights[group_indices]))
 
     if not list_losses:
         return scores.sum() * 0.0
+    if weights is not None:
+        return (torch.stack(list_losses) * torch.stack(list_weights)).sum() / reduction_denominator
     return torch.stack(list_losses).mean()
 
 
@@ -376,6 +403,8 @@ def pairwise_logistic_ranking_loss(
     normalize_per_group: bool = True,
     position_weighting: str = "uniform",
     pair_target_temperature: float | None = None,
+    group_weights: torch.Tensor | None = None,
+    reduction_denominator: float | None = None,
 ) -> torch.Tensor:
     """Explicit pairwise control for weighting and replicate-noise targets.
 
@@ -407,13 +436,23 @@ def pairwise_logistic_ranking_loss(
     scores, targets, group_ids = _validate_listwise_inputs(ranking_scores, pchembl_values, ranking_group_ids)
     dtype = torch.float32 if scores.dtype in (torch.float16, torch.bfloat16) else scores.dtype
     scores, targets = scores.to(dtype), targets.to(dtype)
+    row_weights = _ranking_group_weights(scores, group_weights, reduction_denominator)
     losses = []
-    for group in torch.unique(group_ids[group_ids >= 0], sorted=True):
-        mask = group_ids == group
-        gs, gy = scores[mask] / temperature, targets[mask]
+    list_weights = []
+    valid = torch.nonzero(group_ids >= 0, as_tuple=False).flatten()
+    ordered = valid[torch.argsort(group_ids[valid], stable=True)]
+    _, counts = torch.unique_consecutive(group_ids[ordered], return_counts=True)
+    offset = 0
+    for count_tensor in counts:
+        count = int(count_tensor.item())
+        indices = ordered[offset:offset+count]
+        offset += count
+        gs, gy = scores[indices] / temperature, targets[indices]
         size = gs.numel()
         if size < min_list_size or (gy.max() - gy.min()).item() < min_pchembl_span:
             continue
+        if row_weights is not None:
+            list_weights.append(_single_group_weight(row_weights[indices]))
         left, right = torch.triu_indices(size, size, offset=1, device=scores.device)
         gaps = gy[left] - gy[right]
         if pair_target_temperature is None:
@@ -444,4 +483,8 @@ def pairwise_logistic_ranking_loss(
         if normalize_per_group:
             group_loss = group_loss / weights.sum()
         losses.append(group_loss)
-    return torch.stack(losses).mean() if losses else scores.sum() * 0.
+    if not losses:
+        return scores.sum() * 0.
+    if row_weights is not None:
+        return (torch.stack(losses) * torch.stack(list_weights)).sum() / reduction_denominator
+    return torch.stack(losses).mean()

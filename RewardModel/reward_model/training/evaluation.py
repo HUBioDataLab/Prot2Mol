@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
@@ -474,6 +474,25 @@ def compute_classification_metrics(
     return metrics
 
 
+def assay_balanced_partition_weights(partition_ids, assay_ids):
+    """Weight each complete assay equally despite its number of sublists."""
+    list_to_assay = {}
+    for list_id, assay in zip(partition_ids.tolist(), assay_ids.tolist()):
+        if list_id >= 0:
+            previous = list_to_assay.setdefault(list_id, assay)
+            if previous != assay:
+                raise ValueError("An evaluation ranking list crosses assay boundaries")
+    weights = torch.zeros(len(partition_ids), dtype=torch.float32)
+    if list_to_assay:
+        counts = Counter(list_to_assay.values())
+        lookup = torch.zeros(max(list_to_assay) + 1, dtype=torch.float32)
+        for list_id, assay in list_to_assay.items():
+            lookup[list_id] = 1. / (len(counts) * counts[assay])
+        valid = partition_ids >= 0
+        weights[valid] = lookup[partition_ids[valid]]
+    return weights
+
+
 def compute_joint_evaluation_metrics(
     *,
     activity_logits: torch.Tensor,
@@ -492,6 +511,7 @@ def compute_joint_evaluation_metrics(
     ranking_min_pchembl_span: float,
     ranking_objective: str = "ligunity_listwise",
     ranking_normalize_per_group: bool = False,
+    ranking_balance_assays: bool = False,
     ranking_position_weighting: str = "top",
     ranking_pair_target_temperature: float | None = None,
     ranking_max_ligands: int = 16,
@@ -569,6 +589,9 @@ def compute_joint_evaluation_metrics(
             affinity_margin=ranking_affinity_margin,
             normalize_per_group=ranking_normalize_per_group,
             position_weighting=ranking_position_weighting,
+            group_weights=(assay_balanced_partition_weights(partition_group_ids, group_indices)
+                           if ranking_balance_assays else None),
+            reduction_denominator=1. if ranking_balance_assays else None,
             **extra,
         )
         for partition_group_ids in ranking_partitions

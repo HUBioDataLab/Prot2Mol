@@ -3,11 +3,13 @@ import math
 import pytest
 import torch
 import torch.nn.functional as F
+from datasets import Dataset
 
 from reward_model.model import RewardModelConfig
 from reward_model.model.losses import ligunity_listwise_loss, pairwise_logistic_ranking_loss
 from test_paired_generalization_adaptation import model, batch
-from reward_model.training.evaluation import compute_joint_evaluation_metrics
+from reward_model.training.evaluation import compute_joint_evaluation_metrics, assay_balanced_partition_weights
+from reward_model.training.data import RewardAssayListDataset, RewardAssayListCollator
 
 
 def test_listwise_normalization_is_weighted_mean_of_retained_selection_terms():
@@ -145,3 +147,78 @@ def test_evaluation_recomputes_the_configured_training_objective(objective, norm
         contrastive_loss=output.contrastive_loss, contrastive_loss_weight=1.)
     assert metrics['eval_ranking_loss'] == pytest.approx(float(output.ranking_loss.detach()), abs=1e-6)
     assert metrics['eval_loss'] == pytest.approx(float(output.loss.detach()), abs=1e-6)
+
+
+@pytest.mark.parametrize('objective', [ligunity_listwise_loss, pairwise_logistic_ranking_loss])
+def test_assay_balancing_corrects_sampling_multiplicity_and_survives_batch_partitioning(objective):
+    rows = []
+    for assay, count in [('large', 40), ('small', 3), ('singleton', 1)]:
+        for index in range(count):
+            value = [8., 6., 4.][index % 3]
+            rows.append(dict(group_id='p__'+assay, pchembl_value=value, binary_label=int(value > 6),
+                             protein_input_ids=[3, 4], protein_attention_mask=[1, 1],
+                             molecule_input_ids=[3+index % 10, 4], molecule_attention_mask=[1, 1],
+                             target_chembl_id='p', compound_id=f'{assay}_{index}',
+                             score=(-value if assay == 'large' else value)))
+    examples = Dataset.from_list(rows)
+    settings = dict(include_all_assays_for_contrastive=True, max_classification_only_per_item=16)
+    reference = RewardAssayListDataset(examples, **settings)
+    balanced = RewardAssayListDataset(examples, balance_ranking_assays=True, **settings)
+    assert balanced.epoch_example_indices() == reference.epoch_example_indices()
+    features = [balanced[i] for i in range(len(balanced))]
+    weights_by_assay = {}
+    losses_by_assay = {}
+    for feature in features:
+        offset = 0
+        for assay, size, flag in zip(feature['contrastive_assay_ids'], feature['contrastive_group_sizes'], feature['ranking_group_flags']):
+            part = feature['rows'][offset:offset+size]
+            offset += size
+            if flag:
+                ys = torch.tensor([row['pchembl_value'] for row in part])
+                scores = torch.tensor([row['score'] for row in part])
+                loss = objective(scores, ys, torch.zeros(size, dtype=torch.long), normalize_per_group=True)
+                losses_by_assay.setdefault(assay, []).append(loss)
+        for assay, weight in zip(feature['ranking_assay_ids'], feature['ranking_assay_weights']):
+            weights_by_assay[assay] = weights_by_assay.get(assay, 0) + weight / len(balanced)
+    assert weights_by_assay == pytest.approx({'p__large': .5, 'p__small': .5})
+    expected = torch.stack([torch.stack(values).mean() for values in losses_by_assay.values()]).mean()
+    collator = RewardAssayListCollator()
+    actual = torch.tensor(0.)
+    for start in range(0, len(features), 2):
+        micro = features[start:start+2]
+        batch_data = collator(micro)
+        scores = torch.tensor([row['score'] for feature in micro for row in feature['rows']])
+        loss = objective(scores, batch_data['pchembl_values'], batch_data['ranking_group_ids'],
+                         normalize_per_group=True, group_weights=batch_data['ranking_group_weights'],
+                         reduction_denominator=batch_data['ranking_batch_item_count'])
+        actual += loss * len(micro) / len(features)
+    torch.testing.assert_close(actual, expected)
+
+
+def test_balanced_evaluation_averages_lists_within_original_assays():
+    # Original assay zero supplies two lists; assay one supplies one.
+    lists = torch.tensor([0]*3 + [1]*3 + [2]*3 + [-1])
+    assays = torch.tensor([0]*6 + [1]*3 + [2])
+    scores = torch.tensor([0., 1., 2., 2., 1., 0., 1., 0., 2., 3.])
+    labels = torch.tensor([8., 6., 4.]*3 + [8.])
+    weights = assay_balanced_partition_weights(lists, assays)
+    expected_weights = torch.tensor([.25]*6 + [.5]*3 + [0.])
+    torch.testing.assert_close(weights, expected_weights)
+    by_list = [ligunity_listwise_loss(scores[lists == i], labels[lists == i], torch.zeros(3, dtype=torch.long),
+                                     normalize_per_group=True) for i in range(3)]
+    actual = ligunity_listwise_loss(scores, labels, lists, normalize_per_group=True,
+                                    group_weights=weights, reduction_denominator=1.)
+    torch.testing.assert_close(actual, .25*by_list[0] + .25*by_list[1] + .5*by_list[2])
+
+
+def test_balanced_model_requires_the_sampling_weights_and_uses_them():
+    fitted = model(ranking_balance_assays=True, ranking_normalize_per_group=True).eval()
+    data = batch()
+    with pytest.raises(ValueError, match='source-assay'):
+        fitted(**data)
+    data.update(ranking_group_weights=torch.tensor([.5]*6 + [2.]*3), ranking_batch_item_count=3)
+    output = fitted(**data)
+    expected = ligunity_listwise_loss(output.ranking_score, data['pchembl_values'], data['ranking_group_ids'],
+                                      normalize_per_group=True, group_weights=data['ranking_group_weights'],
+                                      reduction_denominator=3)
+    torch.testing.assert_close(output.ranking_loss, expected)

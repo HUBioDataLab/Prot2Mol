@@ -273,6 +273,7 @@ def train_reward_model_from_config(
             if config.data.sample_all_assays is None else config.data.sample_all_assays
         ),
         item_count_multiple=item_count_multiple,
+        balance_ranking_assays=config.model.ranking_balance_assays,
     )
     eval_dataset = RewardEvaluationDataset(
         val_examples,

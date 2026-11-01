@@ -648,6 +648,7 @@ class RewardAssayListDataset(TorchDataset):
         max_classification_only_per_item: int = 16,
         include_all_assays_for_contrastive: bool = False,
         item_count_multiple: int = 1,
+        balance_ranking_assays: bool = False,
     ):
         if ranking_max_ligands <= 1:
             raise ValueError("ranking_max_ligands must be > 1")
@@ -687,6 +688,7 @@ class RewardAssayListDataset(TorchDataset):
             include_all_assays_for_contrastive
         )
         self.item_count_multiple = int(item_count_multiple)
+        self.balance_ranking_assays = bool(balance_ranking_assays)
         self._group_members, self._pchembl_values = self._build_group_metadata()
         self._eligible_group_ids = {
             group_id
@@ -781,6 +783,10 @@ class RewardAssayListDataset(TorchDataset):
             num_classification_only_examples=num_classification_only,
             num_dataset_items=num_items,
         )
+        self._ranking_assay_weights = {
+            group_id: num_items / (len(self._eligible_group_ids) * group_list_counts[group_id])
+            for group_id in self._eligible_group_ids
+        } if self.balance_ranking_assays else {}
         self._epoch: int | None = None
         self._bundles: list[
             tuple[list[tuple[str, tuple[int, ...], bool]], tuple[int, ...]]
@@ -975,7 +981,7 @@ class RewardAssayListDataset(TorchDataset):
                 ranking_group_sizes.append(len(assay_indices))
                 ranking_assay_ids.append(group_id)
         all_indices.extend(classification_indices)
-        return {
+        result = {
             "rows": self._rows_for_indices(all_indices),
             "example_indices": all_indices,
             "contrastive_group_sizes": contrastive_group_sizes,
@@ -984,6 +990,9 @@ class RewardAssayListDataset(TorchDataset):
             "ranking_group_sizes": ranking_group_sizes,
             "ranking_assay_ids": ranking_assay_ids,
         }
+        if self.balance_ranking_assays:
+            result['ranking_assay_weights'] = [self._ranking_assay_weights[g] for g in ranking_assay_ids]
+        return result
 
     def epoch_example_indices(self) -> list[int]:
         indices: list[int] = []
@@ -1489,6 +1498,10 @@ class RewardAssayListCollator(RewardPairCollator):
         protein_shuffle_presence: list[bool] = []
         next_ranking_group_id = 0
         next_contrastive_group_id = 0
+        balance_assays = any('ranking_assay_weights' in feature for feature in features)
+        if balance_assays and not all('ranking_assay_weights' in feature for feature in features):
+            raise ValueError("Every training item must supply assay weights when balancing assays")
+        ranking_row_weights = []
         for feature in features:
             rows = [dict(row) for row in feature["rows"]]
             has_contrastive_metadata = "contrastive_group_sizes" in feature
@@ -1524,6 +1537,10 @@ class RewardAssayListCollator(RewardPairCollator):
 
             local_ranking_ids: list[int] = []
             local_contrastive_ids: list[int] = []
+            local_weight_position = 0
+            local_weights = feature.get('ranking_assay_weights', [])
+            if balance_assays and len(local_weights) != sum(ranking_flags):
+                raise ValueError("Assay weights must align with ranked lists")
             for group_size, assay_id, ranking_eligible in zip(
                 group_sizes,
                 assay_ids,
@@ -1545,11 +1562,18 @@ class RewardAssayListCollator(RewardPairCollator):
                     )
                     ranking_assay_ids.append(assay_id)
                     next_ranking_group_id += 1
+                    if balance_assays:
+                        ranking_row_weights.extend([float(local_weights[local_weight_position])] * group_size)
+                        local_weight_position += 1
                 else:
                     local_ranking_ids.extend([-1] * group_size)
+                    if balance_assays:
+                        ranking_row_weights.extend([0.] * group_size)
             ungrouped_count = len(rows) - grouped_count
             local_contrastive_ids.extend([-1] * ungrouped_count)
             local_ranking_ids.extend([-1] * ungrouped_count)
+            if balance_assays:
+                ranking_row_weights.extend([0.] * ungrouped_count)
             contrastive_group_ids.extend(local_contrastive_ids)
             ranking_group_ids.extend(local_ranking_ids)
 
@@ -1643,6 +1667,9 @@ class RewardAssayListCollator(RewardPairCollator):
             batch["contrastive_target_ids"] = contrastive_target_ids
         if contrastive_molecule_ids is not None:
             batch["contrastive_molecule_ids"] = contrastive_molecule_ids
+        if balance_assays:
+            batch['ranking_group_weights'] = torch.tensor(ranking_row_weights, dtype=torch.float32)
+            batch['ranking_batch_item_count'] = len(features)
         if all(protein_shuffle_presence):
             shuffled_tokens = self.collate_example_tokens(protein_shuffled_rows)
             batch["protein_shuffled_input_ids"] = shuffled_tokens[

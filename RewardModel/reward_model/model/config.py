@@ -105,6 +105,7 @@ class RewardModelConfig:
     ranking_temperature: float = 1.0
     ranking_objective: str = "ligunity_listwise"
     ranking_normalize_per_group: bool = False
+    ranking_balance_assays: bool = False
     ranking_position_weighting: str = "top"
     ranking_pair_target_temperature: Optional[float] = None
     ranking_affinity_margin: float = DEFAULT_RANKING_AFFINITY_MARGIN
@@ -304,6 +305,8 @@ class RewardModelConfig:
             raise ValueError("Unknown ranking_objective")
         if not isinstance(self.ranking_normalize_per_group, bool):
             raise ValueError("ranking_normalize_per_group must be boolean")
+        if not isinstance(self.ranking_balance_assays, bool):
+            raise ValueError("ranking_balance_assays must be boolean")
         if self.ranking_position_weighting not in {"top", "uniform"}:
             raise ValueError("Unknown ranking_position_weighting")
         if self.ranking_pair_target_temperature is not None:

@@ -91,6 +91,7 @@ coverage reported explicitly.
 | Identity-based linear matrix filter | 0.4207 | 93.32% | undefined | 0% |
 | Paired Kronecker ridge | 0.1690 | 100% | 0.0631 | 100% |
 | Protein-shuffled Kronecker ridge | 0.0662 | 100% | 0.0596 | 100% |
+| Low-rank bilinear inductive completion | 0.2126 | 100% | 0.0779 | 100% |
 
 The molecule-only and independent-task models each test five regularization
 values per split. Two-step ridge tests the 25 combinations of the two sides'
@@ -137,6 +138,26 @@ bootstrap interval [0.0920, 0.1138]) and 0.0035 on B (whole-component interval
 [−0.0157, 0.0221]). This kernel baseline shows a clear A advantage for correct
 protein assignments; the B contrast is inconclusive. These intervals condition
 on the fitted models and permutations. Source: `tier2/protein_shuffle_comparison.json`.
+
+Bilinear completion fits `x.T A B.T y + b` only on measured pairs, using the
+same frozen, standardized feature map as Kronecker ridge. Nine rank/penalty
+settings per split received 3,000 L-BFGS iterations each. Validation selected
+rank 128 on A and rank 8 on B, both at penalty 1e-6. Selected validation scores
+are 0.2190/0.0782; test scores are 0.2126/0.0779, with whole-unit bootstrap
+intervals [0.2035, 0.2212] and [0.0628, 0.0933], conditional on the fitted
+models and split. The saved coefficient matrices reproduce validation
+selection exactly, avoiding near-tie changes from a new
+CPU factor multiplication. Both selected fits reached the iteration limit
+with maximum gradients 1.07e-4 and 7.80e-6, above the 1e-7 target. These are
+finite-budget model-family baselines, not global optima or signal ceilings.
+The initial 300-iteration fits are retained; extending every setting was
+motivated by training-objective/gradient diagnostics. Source:
+`tier2/bilinear_completion_3000iter/{A,B}/complete.json`.
+
+The bilinear manifest's `git_commit` was captured at completion. The baseline
+entrypoint and its project-local dependencies were verified unchanged between
+the launch checkout c920520 and completion checkout 355d147. Future runs
+capture the launch commit and source hashes before fitting.
 
 ## Distribution shift
 

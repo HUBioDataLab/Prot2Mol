@@ -98,9 +98,16 @@ of the comparison, not interchangeable uses of the word "group".
 - Training and full-dataset evaluation reconstruct the same configured ranking
   objective. The metric eligibility rule remains fixed for comparability.
 
-Original-assay balancing, beyond normalization of each sampled list, remains
-an explicit additional part of the per-group comparison to implement. The
-sampling multiplicity must be corrected before claiming equal assay weight.
+Original-assay balancing is a separate setting in the per-group comparison.
+Let N be training dataset items, G eligible original assays and o_g the number
+of sampled lists from assay g in an epoch. Its normalized list loss is weighted
+by N / (G o_g), summed in each microbatch and divided by that microbatch's item
+count. At fixed parameters, the complete epoch's item-weighted mean is exactly
+the macro assay mean of its sampled-list losses. This corrects multiplicity
+without changing sampled rows, batches or optimizer-update count. It does not
+make a sampled subset of pairs equal to every pair in a large assay.
+Validation instead averages its complete-coverage list losses within each
+original eligible assay, then averages assays and fixed partitions.
 
 Controlled retention must preserve both selection rules, the trajectory
 measurements and the averaging candidates. It must fit the authorized storage

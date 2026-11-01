@@ -86,6 +86,9 @@ def fit_factors(problem, rank, strength, *, max_iterations=MAX_ITERATIONS, toler
 
 def main(regime):
     import fcntl
+    launch_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    launch_source_hashes = {name: sha256(Path(__file__).with_name(name)) for name in (
+        "bilinear_completion.py", "baseline_common.py", "kronecker_ridge.py", "frozen_features.py", "metrics.py", "run.py")}
     if ROOT != Path("/home/atabey/Prot2Mol"):
         raise RuntimeError("Runtime restricted to the authorized Atum project")
     allowed = subprocess.check_output(["nvidia-smi", "-i", "0,2,5,6", "--query-gpu=uuid", "--format=csv,noheader"], text=True).splitlines()
@@ -161,7 +164,7 @@ def main(regime):
         "budget_extension_reason": "Initial 300-iteration fits retained under tier2/bilinear_completion; low-regularization training objectives and gradients had not converged. All nine settings on both splits receive the same extended budget, chosen from training diagnostics.",
         "selection": "nine rank/regularization settings per split; validation eligible macro Spearman only; test after selection",
         "interpretation": "Regularized inductive-completion model-family baseline, not a reproduction of exact-recovery guarantees or the source paper's alternating-minimization algorithm",
-        "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()})
+        "git_commit": launch_commit, "launch_source_sha256": launch_source_hashes})
 
 
 if __name__ == "__main__":
