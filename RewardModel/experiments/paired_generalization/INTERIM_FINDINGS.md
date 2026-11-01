@@ -344,7 +344,7 @@ Sources: `baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json`,
 `tier1/contrastive/trajectory.json`, `tier1/scorer_agreement_float32/complete.json`.
 
 The matched A reference (`full__A__seed42__lr1p0`, W&B `xffenit7`) now has
-native validation and fixed training-probe audits for epochs 1–3. These
+native validation and fixed training-probe audits for epochs 1–4. These
 cover 195,618 validation rows / 7,997 eligible assays and a fixed 39,740-row /
 2,048-eligible-assay training probe. They reproduce both native headline metrics
 and preserve the Trainer's float32 label semantics.
@@ -354,40 +354,42 @@ and preserve the Trainer's float32 label semantics.
 | 1 | 0.16488 | 0.16214 | 0.52074 | 2.66708 | 4.86771 |
 | 2 | 0.21244 | 0.22805 | 0.48617 | 2.61290 | 3.32545 |
 | 3 | 0.24317 | 0.27084 | 0.46223 | 2.57423 | 2.72154 |
+| 4 | 0.26145 | 0.30188 | 0.46034 | 2.54027 | 2.42469 |
 
-Validation AUROC rises 0.72635→0.77144→0.79702 and the contrastive scale rises
-13.5412→14.5521→15.5213. On the same eligible validation assays, NDCG@1/@3/@5
-rises from 0.59835/0.66331/0.71098 at epoch 1 to 0.64363/0.69856/0.74012 at
-epoch 3. Epoch-3 BCE-logit and cosine-only macro Spearman are 0.19377 and
-0.15481. Positive temperature calibration fitted on that validation set gives
-T=1.04318 and reduces its log-loss from 0.46223 to 0.46198; this is an in-sample
+Validation AUROC rises 0.72635→0.77144→0.79702→0.80344 and the contrastive scale
+rises 13.5412→14.5521→15.5213→16.4275. On the same eligible validation assays,
+NDCG@1/@3/@5 rises from 0.59835/0.66331/0.71098 at epoch 1 to
+0.65891/0.70869/0.74848 at epoch 4. Epoch-4 BCE-logit and cosine-only macro
+Spearman are 0.21232 and 0.16298. Positive temperature calibration fitted on
+that validation set gives T=1.11777 and reduces log-loss from 0.46034 to 0.45857;
+this is an in-sample
 fit, with no test transfer.
 
-At epoch 3, complete shared-scaffold, mixed and unseen-scaffold validation
-assays score 0.24534/0.24195/0.19703 (5,405/2,402/190 eligible assays).
-Restricting to unseen-scaffold rows within assays instead gives 0.20020 on
+At epoch 4, complete shared-scaffold, mixed and unseen-scaffold validation
+assays score 0.27008/0.24807/0.18514 (5,405/2,402/190 eligible assays).
+Restricting to unseen-scaffold rows within assays instead gives 0.19547 on
 1,608 eligible assays; these cohorts differ. Fixed composition weighting
-changes A common-support validation macro from 0.24348 to 0.23969. This
+changes A common-support validation macro from 0.26158 to 0.25561. This
 adjustment uses the B validation label mix, not B predictions or test scores.
 
-Across epochs 1→3, validation ranking–BCE agreement changes 0.63066→0.62831
+Across epochs 1→4, validation ranking–BCE agreement rises 0.63066→0.66557
 on the same 7,995 mutually defined eligible assays; the paired whole-assay
-interval for the change is [-0.01208, 0.00755]. Ranking–cosine agreement rises
-0.12360→0.26288 on 7,997 assays, with change interval [0.12696, 0.15126].
+interval for the change is [0.02468, 0.04435]. Ranking–cosine agreement rises
+0.12360→0.28508 on 7,997 assays, with change interval [0.14908, 0.17335].
 Thus the observed prefix does not show uniform scorer divergence.
 
-These three epochs establish early improvement, not a final optimum or an
+These four epochs establish early improvement, not a final optimum or an
 overfitting turning point. Training-probe intervals are descriptive. All
 unit intervals condition on this single fitted trajectory; full-horizon,
 post-selection test, seed and matched B comparisons remain pending, as do A
 directional/fixed-temperature contrastive and representation analyses.
 Source: `tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/`
-on Atum, including the immutable `trajectory_through_epoch03.json`, per-assay
-metric tables and `verification_through_epoch03.json`. Independent average-rank
-calculations from the native prediction arrays reproduced all 166,311
+on Atum, including the immutable `trajectory_through_epoch04.json`, per-assay
+metric tables and `verification_through_epoch04.json`. Independent average-rank
+calculations from the native prediction arrays reproduced all 221,748
 per-assay/scorer correlations, including undefined cases, to 1e-14. Brute-force
-pairs reproduced 162 sampled noise-band/group/scorer combinations; direct
-weighted means reproduced all three
+pairs reproduced 216 sampled noise-band/group/scorer combinations; direct
+weighted means reproduced all four
 composition-standardized validation scores. All source/artifact hashes passed.
 
 ## Protein coverage in the B test set
@@ -413,6 +415,42 @@ Intervals condition on one fitted model and split. Source:
 `tier1/target_coverage/complete.json` and per-assay support table.
 
 ## Sampling and contrastive negatives
+
+Q22's recorded observation process is now audited. The source curation retains
+both sides of the activity threshold: exact, numeric pChEMBL measurements from
+single-protein binding assays with confidence score ≥8 and no recorded variant,
+with parent-molecule normalization, quality/structure checks and within-assay
+median aggregation.
+The later activity-balanced resplit copies all source observations and changes
+their partition assignments. The 1,957,400 original curated observations are
+**69.04% positive** at pChEMBL≥6, before the training pair-median label policy.
+
+Within their 164,312 assays, the archive contains 4,161,420 activity records.
+There are 2,034,645 numeric pChEMBL records (69.2176% positive); 2,032,748 of
+these feed the curated observations (69.2218% positive before aggregation).
+Another 2,126,775 records lack numeric pChEMBL, and 1,897 defined records fall
+outside the retained IDs. The broader records include 1,345,088 `kon`/`k_off`
+measurements without pChEMBL and 500,807 ordinary inequality-qualified records.
+These are activity records with potentially multiple endpoints per pair, not
+counts of distinct missing pairs or negative examples.
+
+| Assay provenance | Curated observations | Positive fraction |
+|---|---:|---:|
+| Scientific Literature | 1,138,209 | 67.79% |
+| BindingDB Patent Bioactivity Data | 637,588 | 82.86% |
+| PubChem BioAssays | 116,824 | 4.61% |
+
+Thus source composition is heterogeneous, and the near-70% fraction is already
+present among the archived numeric measurements. The available tables do not
+identify each experiment's sampling frame, per-pair inclusion probability or
+tested-but-unpublished results. Preferential selection of promising pairs is
+not established by these counts; unobserved pairs remain unlabeled. This is a
+qualified answer to Q22, not an estimate of activity prevalence for generated
+molecules or a causal explanation of the A/B performance gap.
+Source: `tier1/observation_process/{complete.json,verification.json}` on Atum.
+All retained activity IDs reconstruct the original medians/counts and match the
+raw database. Independent SQL totals and output/source hashes were verified;
+the 30.48 GB database's content hash and original release hash are recorded.
 
 The configured first epoch contains 12,820 local microbatches on A and 14,020
 on B, with 12 dataset items per device. These are bounded assay lists plus
