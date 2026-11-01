@@ -376,7 +376,7 @@
       "lambdamart_depth3"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "Full-data A seed42 base-LR15-epoch fit, W&B xffenit7. Driver PID836409, training launcher PID840738 and checkpoint protector PID884646 verified live at Unix1793567396.74; finite optimizer logs through epoch10.41 read at Unix1793567408.80. Physical GPUs0,2,5,6; batch12 x4 devices x4 accumulation. Native epochs1-10 independently verified; training completion absent.",
+    "current_controlled_launch": "Full-data A seed42 base-LR15-epoch fit, W&B xffenit7. Driver PID836409, training launcher PID840738 and checkpoint protector PID884646 verified live at Unix1793568246.11; finite optimizer log reached epoch11. Physical GPUs0,2,5,6; batch12 x4 devices x4 accumulation. Native epochs1-10 independently verified; training completion absent. CPU handoff watcher PID1097836 is armed for the remaining A contrastive audit and one next frozen-grid job.",
     "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending.",
     "similarity_composition": "Frozen binary-scaffold strata and composition weights complete for A/B validation/test. Saved depth-3 predictions scored with no fitting. All source/artifact hashes and independent weighted sums verified. Design SHA256 8a01219268444ad8efc0df58f404687a33cf0703c189429b8c03729db46e93c8; analysis SHA256 a3672186999223211bf9ba3151367cf634e09ad76e2fff7acbc918b6a2952b5d. E08/E09 and Q13 remain partial pending matched neural and required repeated comparisons.",
     "matched_A_trajectory_protection": "At Unix1793567396.74 protector PID884646 was live with epochs1-10 protected and retention hold active. All15 weights must verify before restoring the original marker; if cleanup meets the hold first, finish postprocessing after protection without retraining.",
@@ -1021,6 +1021,29 @@
       "scientific_model_inference": false,
       "scientific_gradient_measurements": false,
       "test_data_read": false
+    },
+    "reference_handoff": {
+      "status": "armed_and_observed_waiting_on_original_live_processes",
+      "evidence": "controlled/reference_handoff/{plan.json,outer_launch.json,invocation.json,status.json} on Atum",
+      "code_commit": "858bb48",
+      "plan_sha256": "1ffa147be8f0c20028f228fd0310359e508c3829cc0379610250d5d75d7b3d97",
+      "watcher_pid": 1097836,
+      "started_unix": 1793568216.5899198,
+      "verified_live_unix": 1793568246.1080835,
+      "original_pids": {
+        "driver": 836409,
+        "protector": 884646,
+        "training": 840738
+      },
+      "pinned_python_source_files": 95,
+      "local_tests_passed": 15,
+      "test_scope": "Actual proc-style identity parsing, PID reuse/zombie/missing handles, owner/project/config checks, changed source/config/spec/host/job refusal, CPU-to-GPU environment transition, real retention refusal before cleanup on missing rank, complete audit receipt coverage and mocked ordered handoff/failure cases. These qualify coordination, not future scientific results.",
+      "sequence": "Wait for the exact original handles to end; verify all15 protected epochs and training/retention completion; finish only verified postprocessing if needed; run30 A reference contrastive exports on GPUs0,2,5,6; start exactly one fresh next frozen-grid driver and observe its training launcher live.",
+      "failure_policy": "No restart or automatic retry of partial/failed training or inference; pinned source/config changes stop the watcher. Original training/protector are not signalled. Inspect recorded child handles after any watcher interruption.",
+      "source_change_constraint": "While this watcher is active, its pinned experiment/model Python sources must remain unchanged. Report-only commits are allowed.",
+      "scientific_audit_started": false,
+      "next_training_started": false,
+      "study_complete": false
     }
   },
   "deployment": "unseen molecules from a molecule generator",

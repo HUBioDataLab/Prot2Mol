@@ -418,6 +418,19 @@ numerical evidence. Its independent scope covers correlations, sampled pair
 counts and composition-weighted point estimates; it does not independently
 reconstruct bootstrap intervals, temperature fits or all NDCG values.
 
+A CPU handoff watcher is now armed on Atum (PID1097836, verified live at
+Unix1793568246.11). The A optimizer log has reached epoch 11; independent native
+analysis still covers epochs 1–10. The watcher waits for the exact original
+training/driver/protector handles to end, verifies all 15 protected checkpoints
+and completed training/retention, runs the 30 protected A contrastive exports,
+then starts one next job through the existing frozen-grid driver. It passed 15
+local coordination checks and its prepared source/process identities were
+verified on Atum. No further scientific fit or contrastive inference has
+started through this watcher yet. Source/config changes or partial/failed work
+stop it for inspection; report-only updates are allowed. This is execution
+coordination, not an additional completed experiment. Evidence:
+`controlled/reference_handoff/{plan.json,outer_launch.json,invocation.json,status.json}`.
+
 Q11's scalar localization audit covers all 15 initial B validation epochs and
 the verified A epochs 1–4. B's BCE rises by 0.03768 from its overall minimum at
 epoch 2 to epoch 15, with a positive point change in every fixed size bin.
