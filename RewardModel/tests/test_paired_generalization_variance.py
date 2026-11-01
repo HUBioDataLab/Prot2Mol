@@ -41,3 +41,23 @@ def test_replicate_contrast_diagnostic_uses_within_observation_degrees_of_freedo
     # SSE: 2 for the first observation, 8 for the second, zero for the singleton.
     assert diagnosis["direct_within_observation_noise_variance"] == pytest.approx(10 / 3)
     assert diagnosis["observed_centered_variance"] == pytest.approx(frame.pchembl_value.var(ddof=0))
+
+
+def test_weighted_covariance_fit_matches_dense_weighted_intercept_projection():
+    y = np.array([0., 2., 4., 5., 1., 6., 3., 8.])
+    weights = np.array([.2, .2, .2, .2, 1., 1., 2., 2.])
+    labels = {"a": np.array([0, 0, 1, 1, 2, 2, 3, 3]), "b": np.tile([0, 1], 4)}
+    names, gram, rhs = covariance_moments(y, labels, weights)
+    w = np.diag(np.sqrt(weights))
+    intercept = np.sqrt(weights)
+    project = np.eye(len(y)) - np.outer(intercept, intercept) / weights.sum()
+    matrices = [project @ w @ (codes[:, None] == codes[None, :]) @ w @ project for codes in labels.values()]
+    matrices.append(project @ w @ w @ project)
+    design = np.stack([matrix.reshape(-1) for matrix in matrices], axis=1)
+    residual = project @ w @ y
+    target = np.outer(residual, residual).reshape(-1)
+    np.testing.assert_allclose(gram, design.T @ design, atol=1e-12)
+    np.testing.assert_allclose(rhs, design.T @ target, atol=1e-12)
+    expected, _ = nnls(design, target)
+    fit = fit_components(y, labels, weights)
+    np.testing.assert_allclose([fit["variance_components"][name] for name in names], expected, atol=1e-9)

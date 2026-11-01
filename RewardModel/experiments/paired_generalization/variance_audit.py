@@ -19,21 +19,29 @@ else:
     from run import DATA, ROOT, WORK, write_json
 
 
-def covariance_moments(values, labels):
-    """Return <P Ki P, P Kj P> and y' P Ki P y, with intercept projection P."""
+def covariance_moments(values, labels, observation_weights=None):
+    """Covariance regression after optional W transform and intercept projection.
+
+    W=diag(sqrt(observation_weights)); P removes W*1. This preserves the
+    random-effect variance interpretation while changing covariance-fit weights.
+    """
     y = np.asarray(values, dtype=float)
     if not np.isfinite(y).all() or len(y) < 2:
         raise ValueError("Finite replicated observations are required")
-    y = y - y.mean()
     n = len(y)
+    weights = np.ones(n) if observation_weights is None else np.asarray(observation_weights, dtype=float)
+    if weights.shape != (n,) or not np.isfinite(weights).all() or (weights <= 0).any():
+        raise ValueError("Positive finite observation weights must align with values")
+    mass = weights.sum()
+    y = y - np.average(y, weights=weights)
     names = list(labels) + ["measurement_noise"]
     codes, counts, row_counts, sums, rhs = [], [], [], [], []
     for name in labels:
         code, _ = pd.factorize(labels[name], sort=False)
         if len(code) != n or (code < 0).any():
             raise ValueError("Random-effect labels must align and contain no missing values")
-        count = np.bincount(code).astype(float)
-        total = np.bincount(code, weights=y)
+        count = np.bincount(code, weights=weights)
+        total = np.bincount(code, weights=weights * y)
         codes.append(code)
         counts.append(count)
         row_counts.append(count[code])
@@ -44,18 +52,20 @@ def covariance_moments(values, labels):
     for i in range(d):
         for j in range(i, d):
             key = codes[i].astype(np.int64) * len(counts[j]) + codes[j]
-            _, intersections = np.unique(key, return_counts=True)
-            trace = float(intersections.astype(float) @ intersections)
-            centered_trace = trace - 2 * float(row_counts[i] @ row_counts[j]) / n + sums[i] * sums[j] / n**2
+            _, inverse = np.unique(key, return_inverse=True)
+            intersections = np.bincount(inverse, weights=weights)
+            trace = float(intersections @ intersections)
+            centered_trace = trace - 2 * float((weights * row_counts[i]) @ row_counts[j]) / mass + sums[i] * sums[j] / mass**2
             gram[i, j] = gram[j, i] = centered_trace
-        gram[i, d] = gram[d, i] = n - sums[i] / n
-    gram[d, d] = n - 1
-    rhs.append(float(y @ y))
+        squared_weights = weights**2
+        gram[i, d] = gram[d, i] = float(squared_weights.sum() - 2 * squared_weights @ row_counts[i] / mass + sums[i] * squared_weights.sum() / mass**2)
+    gram[d, d] = float((weights**2).sum() - 2 * (weights**3).sum() / mass + (weights**2).sum()**2 / mass**2)
+    rhs.append(float((weights * y) @ (weights * y)))
     return names, gram, np.asarray(rhs)
 
 
-def fit_components(values, labels):
-    names, gram, rhs = covariance_moments(values, labels)
+def fit_components(values, labels, observation_weights=None):
+    names, gram, rhs = covariance_moments(values, labels, observation_weights)
     scale = np.sqrt(np.maximum(np.diag(gram), 0.))
     present = scale > 1e-10
     standardized = gram[np.ix_(present, present)] / np.outer(scale[present], scale[present])
@@ -133,6 +143,16 @@ def main():
                       "observation_residual": subset.observation_id}
             result = json.loads(path.read_text()) if path.exists() else fit_components(subset.pchembl_value, labels)
             result["fit_diagnostics"] = fit_diagnostics(subset, result)
+            if "assay_balanced_fit" not in result:
+                counts = subset.groupby("assay_id").assay_id.transform("size").to_numpy()
+                weights = 1. / counts
+                weights *= len(weights) / weights.sum()
+                balanced = fit_components(subset.pchembl_value, labels, weights)
+                balanced["weighting"] = "W_ii=sqrt(1/raw_measurements_in_assay), up to a common constant; reduces giant-assay dominance in the covariance objective"
+                # Evaluate the alternative fit against raw, unweighted marginal variance.
+                balanced["fit_diagnostics"] = fit_diagnostics(subset, {
+                    **balanced, "covariance_design_gram": result["covariance_design_gram"]})
+                result["assay_balanced_fit"] = balanced
             unique = subset.drop_duplicates("observation_id")
             assay_size = unique.groupby("assay_id").size()
             cluster_count = unique.groupby(["assay_id", "scaffold"]).size()
@@ -147,6 +167,14 @@ def main():
                  "target_and_assay_effects": 0.,
                  "note": "equal-assay average for unique observations; target and assay intercepts cancel. Raw measurement noise is not converted into median noise. Observation residual includes unmodeled molecule-specific signal and cannot be called irreducible noise."}
                 if variance is not None else None)
+            balanced_variance = result["assay_balanced_fit"]["variance_components"]
+            if balanced_variance is not None:
+                result["assay_balanced_fit"]["within_assay_latent_contributions"] = {
+                    "scaffold_main": balanced_variance["scaffold_main"] * float(heterogeneity.mean()),
+                    "target_by_scaffold": balanced_variance["target_by_scaffold"] * float(heterogeneity.mean()),
+                    "observation_residual": balanced_variance["observation_residual"] * float(nonconstant_factor.mean()),
+                    "target_and_assay_effects": 0.,
+                    "note": "same unique-observation, equal-assay estimand as the primary fit; measurement noise is not transformed into median uncertainty"}
             result["assays_with_one_scaffold_fraction"] = float((unique.groupby("assay_id").scaffold.nunique() == 1).mean())
             result["effect_levels"] = {key: int(pd.Series(value).nunique()) for key, value in labels.items()}
             result["method_source"] = "https://pmc.ncbi.nlm.nih.gov/articles/PMC8604792/"

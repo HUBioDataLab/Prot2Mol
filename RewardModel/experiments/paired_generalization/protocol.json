@@ -267,7 +267,7 @@
     "chembl37_download": "checksum_verified_and_extracted",
     "initial_tier1_batch": "complete: 31 checkpoint exports analyzed; full study remains incomplete",
     "live_status": "RewardModel/outputs/paired_generalization/tier1/status.json on Atum",
-    "remaining_tiers": "Tier 2 pretrained feature extraction started on physical GPUs 0,2,5,6; model baselines and controlled retraining remain pending",
+    "remaining_tiers": "Tier 2 pretrained features complete; baseline model fitting next. Tier 3 controlled multi-seed retraining, Tier 4 probes and applicable conditional interventions remain pending.",
     "data_isolation_finding": "Original random-split pair-median labeling changes 5289 training labels using held-out measurements; scaffold split changes zero. This is reported, not silently repaired.",
     "raw_measurement_reconstruction": {
       "verified_source_rows": 1957400,
@@ -283,7 +283,7 @@
     "variance_components": "six fits complete; boundary and model-fit limitations explicitly diagnosed",
     "noise_band_metrics": "complete for all six compositions and 31 Split B prediction exports",
     "formal_shift_tests": "six C2ST comparisons and Split B BBSE complete",
-    "frozen_features": "7,873 target identities and 1,001,148 molecule identities prepared; four authorized GPU workers active"
+    "frozen_features": "complete: 7,873 target identities x 480 and 1,001,148 molecule identities x 768; all four workers exited 0; exact row coverage, finite outputs and checksums verified"
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
