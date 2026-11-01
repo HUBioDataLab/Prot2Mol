@@ -1462,6 +1462,10 @@ class RewardPairCollator:
 class RewardAssayListCollator(RewardPairCollator):
     """Flatten assay-list items while retaining list boundaries for ranking."""
 
+    def __init__(self, *, known_positive_index=None, **kwargs):
+        super().__init__(**kwargs)
+        self.known_positive_index = known_positive_index
+
     @staticmethod
     def _collate_identity_ids(
         rows: Sequence[Mapping[str, Any]],
@@ -1667,6 +1671,9 @@ class RewardAssayListCollator(RewardPairCollator):
             batch["contrastive_target_ids"] = contrastive_target_ids
         if contrastive_molecule_ids is not None:
             batch["contrastive_molecule_ids"] = contrastive_molecule_ids
+        if self.known_positive_index is not None and next_contrastive_group_id > 0:
+            batch['contrastive_known_positive_mask'] = self.known_positive_index.mask(
+                [row['target_chembl_id'] for row in all_rows], [row['compound_id'] for row in all_rows])
         if balance_assays:
             batch['ranking_group_weights'] = torch.tensor(ranking_row_weights, dtype=torch.float32)
             batch['ranking_batch_item_count'] = len(features)

@@ -44,6 +44,8 @@ def cases():
         ("lora", dict(encoder_lora_rank=2, encoder_lora_alpha=4.)),
         ("fixed_scale", dict(learn_contrastive_scale=False)),
         ("detach", dict(contrastive_detach_encoders=True)),
+        ("unmasked", dict(contrastive_mask_policy="none")),
+        ("training_known_mask", dict(contrastive_mask_policy="training_known")),
         ("listwise_normalized", dict(ranking_normalize_per_group=True)),
         ("assay_balanced", dict(ranking_normalize_per_group=True, ranking_balance_assays=True)),
         ("pairwise_top", dict(ranking_objective="pairwise_logistic", ranking_normalize_per_group=True)),
@@ -101,6 +103,10 @@ def make_batch(model, device, real):
     if model.config.ranking_balance_assays:
         batch.update(ranking_group_weights=torch.tensor([.5]*6 + [2.]*3, device=device),
                      ranking_batch_item_count=3)
+    if model.config.contrastive_mask_policy == "training_known":
+        mask = torch.zeros((9, 9), dtype=torch.bool, device=device)
+        mask[:3, 3] = True
+        batch['contrastive_known_positive_mask'] = mask
     return batch
 
 

@@ -80,10 +80,9 @@ REQUIRED_DISTRIBUTED_ENV_VARS = (
 
 
 def _encode_identity_ids(values: Sequence[Any]) -> torch.Tensor:
+    from .known_positives import identity_mapping
     identities = [str(value) for value in values]
-    identity_to_id = {
-        identity: index for index, identity in enumerate(sorted(set(identities)))
-    }
+    identity_to_id = identity_mapping(identities)
     return torch.tensor(
         [identity_to_id[identity] for identity in identities],
         dtype=torch.long,
@@ -858,7 +857,7 @@ class RewardModelTrainer(Trainer):
         if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
             model_inputs["pchembl_values"] = inputs["pchembl_values"]
             model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
-            for key in ("ranking_group_weights", "ranking_batch_item_count"):
+            for key in ("ranking_group_weights", "ranking_batch_item_count", "contrastive_known_positive_mask"):
                 if key in inputs:
                     model_inputs[key] = inputs[key]
             if "contrastive_group_ids" in inputs:
@@ -1113,6 +1112,14 @@ class RewardModelTrainer(Trainer):
                     "Contrastive evaluation requires identity columns: "
                     f"{sorted(missing_identity_columns)}"
                 )
+            known_positive_pairs = None
+            if model_config.contrastive_mask_policy == "training_known":
+                index = getattr(self.data_collator, "known_positive_index", None)
+                if index is None:
+                    raise ValueError("Training-known evaluation requires the training collator's positive index")
+                known_positive_pairs = index.encoded_for(
+                    active_eval_dataset.example_dataset['target_chembl_id'],
+                    active_eval_dataset.example_dataset['compound_id'])
             contrastive_loss = compute_contrastive_evaluation_loss(
                 normalized_protein_embeddings=normalized_protein_embeddings,
                 normalized_molecule_embeddings=normalized_molecule_embeddings,
@@ -1133,6 +1140,8 @@ class RewardModelTrainer(Trainer):
                 strict_active_only=(
                     model_config.contrastive_strict_active_only
                 ),
+                mask_policy=model_config.contrastive_mask_policy,
+                known_positive_pairs=known_positive_pairs,
                 assay_batch_size=int(
                     getattr(
                         self,

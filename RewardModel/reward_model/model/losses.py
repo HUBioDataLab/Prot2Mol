@@ -84,6 +84,8 @@ def ligunity_bidirectional_contrastive_loss(
     *,
     active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD,
     strict_active_only: bool = False,
+    mask_policy: str = "reference",
+    known_positive_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Mirror LigUnity's masked bidirectional in-batch retrieval objective.
 
@@ -101,6 +103,11 @@ def ligunity_bidirectional_contrastive_loss(
     duplicate a molecule measured in the query assay. Directional losses use
     LigUnity's ``1 / sqrt(num_assay_ligands)`` weighting and are averaged over
     assay rows, matching its trainer-level sample-size normalization.
+
+    ``mask_policy='none'`` disables the complete reference mask bundle,
+    including own-assay co-candidate hiding. ``training_known`` preserves that
+    bundle and additionally hides cross-list training-known positives supplied
+    by the caller. Supervised owner targets can never be masked.
 
     Returns ``(total, protein_to_molecule, molecule_to_protein)`` where total is
     the sum of the two directional losses before the external objective weight.
@@ -124,6 +131,14 @@ def ligunity_bidirectional_contrastive_loss(
         molecule_identity_ids,
     )
     num_groups, num_ligands = scores.shape
+    if mask_policy not in {"none", "reference", "training_known"}:
+        raise ValueError("Unknown contrastive mask policy")
+    if mask_policy == "training_known":
+        if known_positive_mask is None or known_positive_mask.dtype != torch.bool or known_positive_mask.shape != scores.shape:
+            raise ValueError("Training-known masking requires a boolean query-by-candidate mask")
+        known_positive_mask = known_positive_mask.to(device=scores.device)
+    elif known_positive_mask is not None:
+        raise ValueError("Known-positive masks must only accompany the training_known policy")
 
     # LigUnity masks false negatives before applying either retrieval direction.
     group_membership = F.one_hot(
@@ -140,6 +155,10 @@ def ligunity_bidirectional_contrastive_loss(
     false_negative_mask = (~group_membership) & (
         same_target | duplicate_molecule
     )
+    if mask_policy == "none":
+        false_negative_mask = torch.zeros_like(false_negative_mask)
+    elif mask_policy == "training_known":
+        false_negative_mask |= (~group_membership) & known_positive_mask
     masked_scores = scores.masked_fill(
         false_negative_mask,
         CONTRASTIVE_MASK_VALUE,
@@ -161,10 +180,11 @@ def ligunity_bidirectional_contrastive_loss(
     protein_to_molecule_logits = masked_scores.index_select(0, owners)
     same_owner = owners[:, None] == owners[None, :]
     same_owner.fill_diagonal_(False)
-    protein_to_molecule_logits = protein_to_molecule_logits.masked_fill(
-        same_owner,
-        CONTRASTIVE_MASK_VALUE,
-    )
+    if mask_policy != "none":
+        protein_to_molecule_logits = protein_to_molecule_logits.masked_fill(
+            same_owner,
+            CONTRASTIVE_MASK_VALUE,
+        )
     per_ligand_protein_to_molecule = F.cross_entropy(
         protein_to_molecule_logits,
         ligand_positions,

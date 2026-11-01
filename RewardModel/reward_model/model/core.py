@@ -488,6 +488,7 @@ class RewardModel(nn.Module):
         contrastive_target_ids: torch.Tensor,
         contrastive_molecule_ids: torch.Tensor,
         score_scale: Optional[torch.Tensor] = None,
+        contrastive_known_positive_mask: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build LigUnity's shared assay-by-ligand score matrix from pair rows."""
         group_ids = contrastive_group_ids.reshape(-1).to(
@@ -567,6 +568,12 @@ class RewardModel(nn.Module):
             if score_scale is None
             else contrastive_cosines * score_scale.float()
         )
+        known_positive_mask = None
+        if contrastive_known_positive_mask is not None:
+            if contrastive_known_positive_mask.shape != (num_pairs, num_pairs):
+                raise ValueError("Known-positive row mask must align with the flattened example batch")
+            known_positive_mask = contrastive_known_positive_mask.to(device=contrastive_scores.device).index_select(
+                0, representative_indices).index_select(1, valid_indices)
         return ligunity_bidirectional_contrastive_loss(
             contrastive_scores,
             pchembl.index_select(0, valid_indices),
@@ -575,6 +582,8 @@ class RewardModel(nn.Module):
             molecule_ids.index_select(0, valid_indices),
             active_threshold=self._config.contrastive_active_threshold,
             strict_active_only=self._config.contrastive_strict_active_only,
+            mask_policy=self._config.contrastive_mask_policy,
+            known_positive_mask=known_positive_mask,
         )
 
     def _compute_legacy_pair_ranking_loss(
@@ -807,6 +816,7 @@ class RewardModel(nn.Module):
         contrastive_group_ids: Optional[torch.Tensor] = None,
         contrastive_target_ids: Optional[torch.Tensor] = None,
         contrastive_molecule_ids: Optional[torch.Tensor] = None,
+        contrastive_known_positive_mask: Optional[torch.Tensor] = None,
         positive_indices: Optional[torch.Tensor] = None,
         negative_indices: Optional[torch.Tensor] = None,
         return_token_embeddings: bool = False,
@@ -1006,6 +1016,7 @@ class RewardModel(nn.Module):
                 contrastive_target_ids,
                 contrastive_molecule_ids,
                 score_scale=score_scale,
+                contrastive_known_positive_mask=contrastive_known_positive_mask,
             )
             weighted_contrastive = (
                 contrastive_loss * self._config.contrastive_loss_weight

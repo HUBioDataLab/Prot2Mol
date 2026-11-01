@@ -88,6 +88,7 @@ class RewardModelConfig:
     contrastive_loss_weight: float = 0.0
     contrastive_active_threshold: float = DEFAULT_CONTRASTIVE_ACTIVE_THRESHOLD
     contrastive_strict_active_only: bool = False
+    contrastive_mask_policy: str = "reference"
     classification_loss_weight: float = 1.0
     cosine_classification_mlp: bool = False
     # Hidden widths of the ``mlp`` scoring-mode heads. Defaults reproduce the
@@ -336,6 +337,10 @@ class RewardModelConfig:
         for name in ("learn_contrastive_scale", "contrastive_detach_encoders"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a boolean")
+        if self.contrastive_mask_policy not in {"none", "reference", "training_known"}:
+            raise ValueError("Unknown contrastive_mask_policy")
+        if self.contrastive_mask_policy == "training_known" and not self.contrastive_strict_active_only:
+            raise ValueError("Training-known masking requires strict active-only contrastive supervision")
         if self.contrastive_detach_encoders and self.pair_scoring_mode not in {"mlp_contrastive", "fusion_contrastive"}:
             raise ValueError("contrastive_detach_encoders requires a separate contrastive projection pathway")
         if not self.learn_contrastive_scale and self.pair_scoring_mode not in {"mlp_contrastive", "fusion_contrastive"}:

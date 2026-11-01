@@ -358,7 +358,18 @@ def train_reward_model_from_config(
             protein_shuffle_sensitivity=False,
         )
     model = _initialize_training_model(config.model, warm_start_path)
+    known_positive_index = None
+    if config.model.contrastive_mask_policy == "training_known":
+        from .known_positives import KnownPositiveIndex
+        import json
+        known_positive_index = KnownPositiveIndex.from_training_dataset(
+            train_examples, active_threshold=config.model.contrastive_active_threshold)
+        if int(os.environ.get('RANK', '0')) == 0:
+            os.makedirs(config.training.output_dir, exist_ok=True)
+            with open(os.path.join(config.training.output_dir, 'known_positive_index.json'), 'w') as handle:
+                json.dump(known_positive_index.provenance, handle, indent=2)
     collator = RewardAssayListCollator(
+        known_positive_index=known_positive_index,
         dynamic_padding=config.training.dynamic_padding,
         protein_pad_token_id=getattr(
             getattr(model, "protein_tokenizer", None),
@@ -406,6 +417,7 @@ def train_reward_model_from_config(
         "output_dir": os.path.abspath(config.training.output_dir),
         "init_from_checkpoint": warm_start_path,
         "optimizer_state_restored": False,
+        "known_positive_index": known_positive_index.provenance if known_positive_index is not None else None,
         "eval_metrics": eval_metrics,
         "test_metrics": test_metrics,
         **(

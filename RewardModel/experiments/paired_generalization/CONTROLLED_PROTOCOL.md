@@ -109,6 +109,26 @@ make a sampled subset of pairs equal to every pair in a large assay.
 Validation instead averages its complete-coverage list losses within each
 original eligible assay, then averages assays and fixed partitions.
 
+## Contrastive masking controls
+
+Compare the reference, no mask, and the reference plus all training-known
+positive target/molecule pairs. The reference already hides same-assay
+co-candidates and cross-assay same-target/duplicate-query-molecule candidates.
+The no-mask setting removes this whole bundle; its comparison is not an
+isolated estimate of one masking mechanism. The added training-known mask
+isolates the remaining observed false negatives found in the sampling audit.
+
+Training-known means any curated observation in the actual training partition
+strictly above pChEMBL 6 after conversion to the float32 supervision dtype.
+Do not add validation/test labels or original measurements that were excluded
+from training. This conservative rule can mask pairs with conflicting training
+assay results; it treats them as potentially positive, not confirmed negatives.
+Keep supervised targets. Record the canonical index digest, threshold, source
+row count and pair count with each run. The training collator and full-dataset
+loss evaluator share this index. Evaluation maps identities into its own
+integer namespace without consulting its labels. Saved models score new inputs
+without the index, which is used only for contrastive loss construction.
+
 Controlled retention must preserve both selection rules, the trajectory
 measurements and the averaging candidates. It must fit the authorized storage
 quota without deleting original data or the first reference's checkpoints.

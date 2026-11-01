@@ -20,6 +20,7 @@ from sklearn.metrics import (
 )
 
 from .data import RewardPairCollator, RewardPairDataset
+from .known_positives import positive_mask
 from ..model.losses import (
     DEFAULT_RANKING_AFFINITY_MARGIN,
     MIN_LISTWISE_LIGANDS,
@@ -189,6 +190,8 @@ def compute_contrastive_evaluation_loss(
     active_threshold: float,
     assay_batch_size: int,
     strict_active_only: bool = False,
+    mask_policy: str = "reference",
+    known_positive_pairs: Mapping[int, set[int]] | None = None,
     ranking_max_ligands: int = 16,
     ranking_num_partitions: int = 3,
     ranking_partition_seed: int = 42,
@@ -240,6 +243,8 @@ def compute_contrastive_evaluation_loss(
         raise ValueError("strict_active_only must be a boolean")
     if assay_batch_size <= 0:
         raise ValueError("assay_batch_size must be > 0")
+    if mask_policy == "training_known" and known_positive_pairs is None:
+        raise ValueError("Training-known loss evaluation requires a training-only positive index")
 
     partitions = build_complete_coverage_contrastive_partitions(
         contrastive_group_ids=assay_ids,
@@ -328,6 +333,9 @@ def compute_contrastive_evaluation_loss(
                 molecule_ids.index_select(0, selected_indices),
                 active_threshold=active_threshold,
                 strict_active_only=strict_active_only,
+                mask_policy=mask_policy,
+                known_positive_mask=(positive_mask(known_positive_pairs, group_target_ids.tolist(),
+                    molecule_ids.index_select(0, selected_indices).tolist()) if mask_policy == "training_known" else None),
             )
             batch_list_count = len(batch_members)
             weighted_partition_loss += batch_loss * batch_list_count
