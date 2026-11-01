@@ -128,6 +128,21 @@ reference objective/normalization; it does not reinterpret controlled loss arms.
 It reads no test scores or model weights. Results live in
 `tier1/ranking_localization/`; contrastive-loss localization remains separate.
 
+`contrastive_localization.py --regime B` attributes both contrastive directions
+to the original assay-size and scaffold strata using the existing fifteen
+validation embedding exports. It keeps the original candidate batches intact,
+including all negative candidates, masks, strict-active cutoff, query weights
+and zero-active lists. Stratum means are query-origin attribution, not scores
+against a new stratum-only candidate pool. Learned-scale and scale-13 values
+must reproduce the previous directional audit, and sampled batches are checked
+directly against the production loss. Endpoints include the original native
+validation-macro peak, not a hard-coded epoch. No confidence intervals are
+claimed: simply resampling query contributions would hold cross-unit candidate
+contexts fixed. After the protected A embedding audit completes, the same
+command accepts `--regime A --a-reference <reference-contrastive-complete.json>`.
+Outputs live in `tier1/contrastive_localization/<regime>/`; no fitting, model
+inference or test scoring occurs.
+
 After the matched A reference has finished training and retention,
 `reference_contrastive.py run --workers 4` completes its remaining checkpoint
 audit before the next controlled fit. It requires all fifteen verified protected
