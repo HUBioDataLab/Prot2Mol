@@ -753,6 +753,37 @@ on physical GPUs0,2,5,6; its launcher and all four exact ranks were verified
 live. No common LR choice, confirmation seed, selected test comparison or new
 experiment closure follows.
 
+The completed full-horizon comparison now confirms that A seed42 LR0.3 has
+lower validation macro rho at every matched epoch than the base LR. Both
+native validation peaks occur at14. The same195,618 validation rows/7,997
+eligible assays and39,740 fixed-probe rows/2,048 eligible assays have full
+defined coverage throughout. Configurations differ only in output directory
+and the four learning rates multiplied by0.3; qualification and labels match.
+
+| Metric | Base LR | LR0.3 | LR0.3 minus base |
+| --- | ---: | ---: | ---: |
+| Best validation macro rho, epoch14 | 0.343675 | 0.280355 | -0.063320 |
+| Final validation macro rho, epoch15 | 0.343317 | 0.279279 | -0.064038 |
+| Final fixed training-probe macro rho | 0.492076 | 0.338962 | -0.153115 |
+| Final aggregate validation loss | 2.363955 | 3.297752 | +0.933797 |
+| Final eligible validation NDCG@1 | 0.708997 | 0.673520 | -0.035477 |
+
+This is learning-rate sensitivity for one A seed and the fixed15-epoch budget.
+It does not establish performance after longer training, a preferred LR for
+unseen generated molecules, a causal mechanism or seed/split variance. The
+registered B-validation selection rule is unchanged. The full report preserves
+all15 same-step comparisons, all native loss components and eligible NDCG@1/3/5;
+native losses/NDCG reuse the earlier audits rather than being independently
+reconstructed by their correlation verifier. All21 focused comparison tests
+passed. Atum execution exited0;816 input hashes and both source hashes were
+rechecked, and the first five reported epochs exactly match the earlier report.
+No fitting, inference or test scoring occurred. Q04 remains partial, and
+completion counts are unchanged. Evidence: `tier1/native_lr_comparison/full_A_seed42_lr0p3_vs_lr1p0/complete.json`,
+SHA256 `e931f093e3f156c4c1ba08642c83632a2c04f2deccaaae15b6676cbea81427e9`;
+`tier1/native_lr_comparison_runtime/e49a881/{complete,exit,verification}.json`,
+execution SHA256 `bd9328e23c887dd43124cc192948f1d9452d901843656a76341af9cfd86e780f`,
+verification SHA256 `7db2bdb7deefcfecad5a116854ce7de745e2dc77f65e2e5748ea771c205e8192`.
+
 Automatic CPU audits are now queued for the three remaining, already registered
 full-arm tuning fits: B LR0.3, then A/B LR3.0. The separate worker
 `native_tuning_audits.py` (source `2f586fd`) is live and waiting for the current

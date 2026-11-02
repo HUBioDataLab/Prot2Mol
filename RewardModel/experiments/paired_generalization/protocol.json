@@ -44,7 +44,8 @@
       "allocation_reporting_evidence": "realization_analysis_runtime/27901fe/{deployment,reference_qualification}.json on Atum",
       "primary_reporting_preparation": "controlled_summary.py (b7568b4) requires all six tuning and four selected confirmation analyses. It separates seed42 tuning exposure, seed43/44 confirmations, LR sensitivity, matched A/B gaps and paired whole-unit checkpoint changes, with score coverage. All26 focused CPU tests passed. Atum reproduced the existing A14->15 macro change -0.00035783 and conditional interval[-0.00233925,0.00164323] across16431 whole-assay units and7997 mutually defined eligible assays. No new fit, seed or scientific primary summary; remaining controlled fits/selection/evaluations still gate Q04.",
       "primary_reporting_evidence": "controlled_summary_runtime/b7568b4/{deployment,preflight,reference_qualification}.json on Atum",
-      "early_lr_evidence": "Verified first five matched epochs of full-data A seed42 LR0.3 versus base LR. Identical qualification and validation/probe rows; only all four learning rates and output directory differ. At epoch5/step4010 validation macro0.23105329 versus0.27953106 (change -0.04847777), probe0.25785812 versus0.33753322. This is early single-seed sensitivity, not completed LR/seed/realization variance or final selection. Evidence: tier1/native_trajectory_prefix/full__A__seed42__lr0p3/epoch05/matched_reference_evidence.json on Atum, SHA2568c5d47fee2df1321891a00327aa5fe3894c7bf0e2c302b600f6f32f7d191660d. Q04 remains partial."
+      "early_lr_evidence": "Verified first five matched epochs of full-data A seed42 LR0.3 versus base LR. Identical qualification and validation/probe rows; only all four learning rates and output directory differ. At epoch5/step4010 validation macro0.23105329 versus0.27953106 (change -0.04847777), probe0.25785812 versus0.33753322. This is early single-seed sensitivity, not completed LR/seed/realization variance or final selection. Evidence: tier1/native_trajectory_prefix/full__A__seed42__lr0p3/epoch05/matched_reference_evidence.json on Atum, SHA2568c5d47fee2df1321891a00327aa5fe3894c7bf0e2c302b600f6f32f7d191660d. Q04 remains partial.",
+      "full_horizon_lr_evidence": "Completed fifteen-epoch A seed42 LR0.3 versus base-LR comparison: lower validation macro at every matched epoch; both peak at14,0.28035523 versus0.34367521 (difference -0.06331998). Final validation/probe differences -0.06403822/-0.15311468 with identical rows, labels, qualification and full headline coverage. Only output directory and four rates scaled0.3 differ. All816 input hashes verified and first five results unchanged. Descriptive fixed-budget sensitivity only; no B-validation LR choice, test claim or seed/split variance estimate. Evidence: tier1/native_lr_comparison/full_A_seed42_lr0p3_vs_lr1p0/complete.json on Atum, SHA256e931f093e3f156c4c1ba08642c83632a2c04f2deccaaae15b6676cbea81427e9. Q04 remains partial."
     },
     {
       "id": "Q05",
@@ -1755,6 +1756,36 @@
         "finished_unix": 1793622478.0027092,
         "verified_terminal_unix": 1793622675.710297
       }
+    },
+    "native_A_full_horizon_lr_comparison": {
+      "source_commit": "e49a881359f222215c5f9acb8a3571a524ac60c1",
+      "reference_job": "full__A__seed42__lr1p0",
+      "candidate_job": "full__A__seed42__lr0p3",
+      "epochs": 15,
+      "lower_lr_validation_below_reference_at_all_epochs": true,
+      "both_validation_peak_epoch": 14,
+      "best_validation_macro_reference": 0.3436752128379461,
+      "best_validation_macro_lower_lr": 0.28035522968099963,
+      "best_validation_macro_difference": -0.06331998315694648,
+      "final_validation_macro_difference": -0.06403822448873497,
+      "final_fixed_probe_macro_difference": -0.15311468314400806,
+      "final_validation_loss_difference": 0.9337966442108154,
+      "final_eligible_validation_ndcg_at_1_difference": -0.03547694984649841,
+      "identical_rows_labels_qualification": true,
+      "only_configuration_differences": "Output directory and all four learning rates multiplied by0.3",
+      "focused_tests_passed": 21,
+      "input_hashes_verified": 816,
+      "first_five_reported_metrics_unchanged": true,
+      "comparison_sha256": "e931f093e3f156c4c1ba08642c83632a2c04f2deccaaae15b6676cbea81427e9",
+      "execution_sha256": "bd9328e23c887dd43124cc192948f1d9452d901843656a76341af9cfd86e780f",
+      "verification_sha256": "7db2bdb7deefcfecad5a116854ce7de745e2dc77f65e2e5748ea771c205e8192",
+      "evidence": "tier1/native_lr_comparison/full_A_seed42_lr0p3_vs_lr1p0/complete.json; tier1/native_lr_comparison_runtime/e49a881/{complete,exit,verification}.json on Atum",
+      "interpretation": "Descriptive single-A-seed sensitivity under the same15-epoch budget. Epochs are not independent replicates. Does not establish longer-training behavior, seed/split variance, causal mechanism or a preferred LR for unseen generated molecules. Native loss/NDCG values reuse existing audits. B-validation LR selection remains unchanged; Q04 remains partial.",
+      "new_fits_created": 0,
+      "model_inference": false,
+      "test_predictions_read": false,
+      "learning_rate_selected": false,
+      "scientific_completion_counts_changed": false
     },
     "native_remaining_tuning_audits": {
       "source_commit": "2f586fd17f79520e84b860978cc604cdd221bd41",
