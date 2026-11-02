@@ -276,6 +276,29 @@ Scientific postselection evaluation has not run yet. Statistical comparisons,
 calibration summaries, additional B allocations and multi-seed reporting remain
 separate required work; completing native inference alone does not finish them.
 
+`controlled_summary.py` collects the complete ten-fit primary arm: six seed42
+tuning fits and four A/B seed43/44 confirmations at the B-selected LR. It
+re-verifies the frozen validation decision, native evaluation receipts, current
+metric/data provenance and each checkpoint's saved diagnostics. All three LR
+candidates contribute matched A/B best-macro results; only the selected LR
+contributes all five checkpoint rules. Seed42 tuning exposure stays explicit.
+Reports contain individual scores/coverage, three-seed and confirmation-only
+descriptive spread, same-seed A-minus-B differences and separate seed42 LR
+sensitivity. All three scoring pathways and the existing rank, pair and eligible
+NDCG summaries are retained without selecting a new metric or model from test.
+
+Checkpoint changes relative to best macro also use paired whole-unit bootstrap
+intervals within each fitted run and partition. These contrasts match assay
+identity, unit, size and eligibility, restrict correlations to assays defined
+at both checkpoints, and keep units with no eligible correlations in the
+resampling population. They are distinct from differences between separately
+aggregated scores and from seed spread. The report also preserves matched A/B
+composition comparisons, with no cross-split interval. This finishes neither
+the scientific arm nor the broader study until actual selected evaluations
+exist; cross-arm, leak, learning-curve and dependent-allocation comparisons
+remain separate deliverables. `preflight` inventories completion markers without
+interpreting marker existence as verified scientific completion.
+
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
 groups remain fixed, and leak-in training must match leak-out training size,
