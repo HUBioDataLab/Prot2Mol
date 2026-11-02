@@ -578,6 +578,25 @@ training, allocation LR selection and the native-loss/averaging stages. No
 completion count changes. Evidence:
 `realization_postselection_runtime/2b4ce42/{deployment,input_qualification}.json`.
 
+The allocation-specific CPU diagnostics and seed summaries are implemented in
+`realization_analysis.py` (commit `27901fe`). All 19 focused tests passed,
+including actual tiny-model predictions, independently calculated Spearman,
+whole-component coverage, cached-output integrity and rejection of incomplete
+or mismatched seed/allocation grids. Reporting keeps seed42 tuning exposure,
+seed43/44 confirmation spread, dependent allocation sensitivity and conditional
+whole-unit intervals separate. All five checkpoint rules are required; scores
+and coverage remain tied to verified child analyses and current source receipts.
+Atum qualified all six descriptor views over 273,913 unique held-out rows.
+Original/seed43/seed44 validation eligibility is 3,969/3,963/4,059 assays; test
+eligibility is 3,972/3,978/3,882. Recomputed coarse composition cells support
+99.80%/99.82%/99.92% of eligible test mass in A; this is descriptor support,
+not model performance or evidence that all composition differences disappear.
+No model was loaded and no prediction scores were read. Scientific per-fit
+diagnostics and the complete seed/allocation summary still await the selected
+evaluations. Deployment preserved all eight live training/queue identities and
+their frozen inputs. Completion counts are unchanged. Evidence:
+`realization_analysis_runtime/27901fe/{deployment,reference_qualification}.json`.
+
 The downstream primary-grid evaluator had the same unresolved-versus-resolved
 encoder-width mismatch. It was reproduced with a saved-model fixture and
 repaired in commit `ed4393f`: only unspecified launch widths may resolve to
