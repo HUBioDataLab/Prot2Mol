@@ -545,6 +545,23 @@ The remaining B epochs and repeated controlled fits remain pending. Evidence:
 `tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/`
 with `trajectory_through_epoch10.json` and `verification_through_epoch10.json`.
 
+A one-shot CPU handoff now covers the remaining B trajectory analysis
+(`native_horizon_queue.py`, commit `fec3286`). It waits for the original driver,
+launcher and four ranks, requires verified training/export/retention completion
+and all 15 validation/fixed-probe snapshots, then runs the existing native
+analysis and independent verifier. The unchanged verified ten-epoch prefix is
+reused only after its evidence hashes are checked; completion requires all 30
+snapshots. It creates no training fit, model inference or test-set score and
+does not retry a failed stage. All 13 focused orchestration tests passed, with
+simulated analysis/verification. Atum verified coordinator PID1547432,
+start_ticks154657346, blank CUDA visibility and all eleven live handles. Its
+current phase is `waiting_for_original_processes`, not a completed analysis.
+The frozen plan SHA256 is
+`3df846ee379582df8b0c996ed38b3eefaa3c09d75b22ec711d4c5de5b08931e1`.
+Evidence: `tier1/native_trajectory_handoff/full__B__seed42__lr1p0/`
+`{plan,launch_intent,launch_initial,started,launch_verification,status}.json`
+and `native_horizon_queue_runtime/fec3286/deployment.json` on Atum.
+
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
 values). No checkpoint was changed and no next training was started. The
