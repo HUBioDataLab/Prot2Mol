@@ -299,6 +299,21 @@ exist; cross-arm, leak, learning-curve and dependent-allocation comparisons
 remain separate deliverables. `preflight` inventories completion markers without
 interpreting marker existence as verified scientific completion.
 
+`full_evaluation_queue.py` provides the bounded handoff after the existing full
+confirmation coordinator. It waits for that exact owned process to terminate,
+reconstructs its completion chain and frozen B-validation LR decision, and then
+evaluates exactly the six tuning plus four confirmation fits. Native inference
+uses the existing shared GPU lock and authorized four-device evaluator, with
+storage checks before launch. The coordinator exposes no GPUs; evaluation
+children inherit `ACCELERATE_USE_CPU=false` and expose only their assigned
+authorized UUID. Per-fit diagnostics and the complete primary summary run on CPU.
+The queue pins its parent, configurations, reporting/evaluation sources, packages,
+descriptor design and noise record. An existing partial output, failed worker or
+changed source/evidence stops it for inspection; there is no automatic retry.
+Completion means only that this full-arm primary report exists. It does not
+train another arm, select from test scores, run additional allocations, release
+weights or mark the study complete.
+
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
 groups remain fixed, and leak-in training must match leak-out training size,
