@@ -1345,11 +1345,47 @@ payloads or trained weights; they are not scientific inference or performance.
 
 No curve fit, scientific evaluation or new GPU queue has started. All nine
 existing live process identities and 138 pinned inputs were preserved during
-deployment. E41/Q29 remain partial: fitting, native scoring and statistical
-learning-curve reporting are still required. Evidence on Atum:
+deployment. E41/Q29 remain partial: fitting, native scoring and scientific
+learning-curve results are still required. Evidence on Atum:
 `learning_curve_evaluation_runtime/2bc0f21/{deployment,preflight,view_qualification}.json`.
 Preflight SHA256 `bfeb49c95c52ad64391db077e3704faa55e977dae74ecae4dc9a054e4b7df324`;
 view qualification SHA256 `71f364cfdd0edcd3f4e0deb6be1f85ac2f6ab11d3ed45538cb0822c4ced827c0`.
+
+The E41 CPU analysis/reporting path is implemented in
+`learning_curve_analysis.py` (source `bcd5a85`). It requires all 30 smaller-fraction
+fit analyses and the ten-fit canonical full-reference summary, preserving the
+shared endpoint, validation-only LR choices, all five checkpoint rules, three
+scorers and nine core metrics. It reports individual seeds, confirmation means
+and spread, common-LR seed42 sensitivities, and adjacent slopes per actual row
+and unit doubling. Common-cohort ranking comparisons use assays eligible and
+defined at all four fractions, with paired whole-unit intervals that retain
+zero-eligible units. Full-training scaffold strata are not reused as subset
+training support. No result selects a fraction, LR or checkpoint using test data.
+
+All 29 local analysis checks passed, alongside the unchanged 21 native-evaluation
+checks. These include real tiny-model native predictions checked against
+independent rank metrics, report assembly over synthetic 40-fit records, changed
+cohort/artifact rejection, empty-cohort handling, non-monotone curves, equal-size
+undefined slopes, and independent row/unit counting. Synthetic PNG/SVG plots
+were visually checked. These fixtures are qualification, not model results.
+
+Atum's CPU qualification independently counted all eight selected views and
+rehashed 28 inputs. The A views contain 13,145/32,862/65,725/131,450 units and
+149,177/406,906/782,230/1,569,095 rows. The B views contain 57/142/285/570 units
+and 1,664,366/1,666,810/1,675,358/1,683,487 rows: even the nominal 10% unit prefix
+contains 98.864% of B training rows. Thus a B curve here measures changes near
+full row coverage, not a low-data regime. One nested subset permutation and fixed
+15-epoch training do not isolate sample size from composition, subset-local
+labels or optimizer-step exposure.
+
+Preflight found zero curve analyses and zero canonical full-endpoint summaries.
+An attempt to analyze a fit without native evaluation was refused before
+predictions were read. No trained weights, token payloads or predictions were
+read in this CPU qualification; no fitting, inference or scientific curve was
+created. E41/Q29 and all completion counts remain unchanged. Evidence on Atum:
+`learning_curve_analysis_runtime/bcd5a85/{deployment,preflight,axes_qualification}.json`.
+Preflight SHA256 `0435d6847520332094d95aacebf9e202d006fee415dc6493311cb190615f0265`;
+axes qualification SHA256 `02be6bc93fc1e350cca9636692b5c1c8ff2aa9e8f0671e707cbef071c3d7ea1f`.
 
 E40's fixed-test leak comparison has data-construction evidence, not model
 results. Version 2 matches whole-assay protein identity, size, BCE-positive

@@ -632,6 +632,33 @@ evaluation plan and `run --job-id ID --workers 4` uses the existing training
 lock and only GPUs 0,2,5,6. Native receipts bind source data, checkpoints,
 predictions, precision and device provenance; CPU qualification cannot be used
 as scientific GPU evidence. Partial evaluation output requires inspection.
-No queue or scientific curve evaluation has been started. Aggregated learning
-curves, paired whole-unit uncertainty, final reporting and any conditional
-additional-allocation work remain separate unfinished requirements.
+`learning_curve_analysis.py` provides CPU reporting after those native evaluations
+complete. `job --job-id ID` verifies the completed GPU evaluation before reading
+predictions, reproduces the native headline metric and saves exact per-assay
+tables for all three scorers. It uses the fixed held-out identities, labels and
+indivisible units; full-training scaffold support is not treated as support in
+the smaller training subset.
+
+`report --analyses PATH... --endpoint-summary PATH` requires all 30 smaller-fit
+analyses and the canonical ten-fit primary full-reference summary. It reuses the
+100% endpoint, checks the registered B-validation choices and all five checkpoint
+rules, and independently counts rows and units from each saved subset. Results
+include all nine core metrics, individual seeds 42/43/44, confirmation-only means
+and spread, and separate same-LR seed42 curves. Adjacent slopes use actual row
+and unit doublings; equal sizes produce an undefined slope, and dips remain
+visible. For the ranking-head headline, a sensitivity analysis intersects the
+eligible, defined assay cohort across all four fractions before paired whole-unit
+bootstrap contrasts. Zero-eligible units remain in the bootstrap; intervals are
+conditional on fitted models and assignments, not seed or subset-redraw intervals.
+
+The PNG/SVG overview shows best-macro test results against actual rows and units,
+with common score axes and explicit seed roles. The JSON retains all metrics,
+rules, coverage, selected LRs and actual training statistics. Fifteen epochs
+fixes passes, not optimizer updates or example exposure. Each fraction may select
+a different LR, so common-LR seed42 sensitivity remains separate. The one nested
+subset permutation does not quantify subset-selection uncertainty. Split B's
+near-full row coverage does not support low-data extrapolation.
+
+`preflight` is read-only preparation inventory. No curve fit, scientific
+evaluation, performance curve or GPU queue has started. Actual performance
+reporting and any conditional additional-allocation work remain required.
