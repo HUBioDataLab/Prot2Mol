@@ -1889,6 +1889,18 @@
       "packed_vectors_and_protocol_verified": true,
       "token_payloads_rehashed": false,
       "scientific_completion_counts_changed": false
+    },
+    "adaptation_statistics_preparation": {
+      "module": "adaptation_statistics.py",
+      "source_sha256": "da1c30e417509b8193be494011a962eb36c896ecf7c00c228b7372ca30539ff8",
+      "local_focused_checks": 76,
+      "new_aggregation_checks": 25,
+      "scope": "Statistics library for already verified E49-E52 native assay records. Available and identical common-unit cohorts across k; common-defined sensitivity; paired k0 and adjacent-budget effects using existing whole-unit bootstrap; three-seed descriptive spread with separate confirmations. Exact assay/unit/size/eligibility checks retain undefined and zero-eligible units.",
+      "scientific_results": 0,
+      "new_fits_created": 0,
+      "epoch_selection_performed": false,
+      "artifact_provenance_verified_by_library": false,
+      "remaining": "Caller must verify scientific query/model/source/epoch provenance, complete support-exposure accounting and Tier3/GPU gates. Statistical preparation does not complete adaptation reporting or E49-E52."
     }
   },
   "deployment": "unseen molecules from a molecule generator",

@@ -178,6 +178,17 @@ reconstructs assay metrics from the saved query exports. `verify-cpu` verifies
 the same output without fitting. Existing qualification outputs are never
 implicitly reused or overwritten.
 
+`adaptation_statistics.py` supplies the query-cohort statistics for that protocol.
+`compare_budgets` accepts already verified native assay records and frozen group
+inventories for one regime/seed/query-role/kind/scope. It reports each available
+cohort, the identical-unit intersection across k, common-defined-assay
+sensitivity, and paired changes against k=0 and adjacent budgets. All three
+pathways retain undefined/ineligible assays and zero-eligible units in the
+existing whole-unit bootstrap. `summarize_seeds` requires all three seeds and
+keeps tuning-exposed seed42 separate from confirmation spread. This library does
+not verify artifact/model provenance, select epochs, report support exposures,
+or launch a scientific job; those remain the orchestration caller's duties.
+
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,
 unique-protein and unique-molecule views, capped at 25,600 each. The latter two

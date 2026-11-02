@@ -1730,6 +1730,20 @@ when GPUs are visible; artifact corruption is rejected. Evidence on Atum:
 This qualifies the tiny CPU runtime only; E49–E52 and production GPU execution
 remain pending.
 
+The statistical aggregation layer is prepared in `adaptation_statistics.py`.
+It validates complete assay/pathway inventories and unchanged query membership
+within shared units, then reports available and common-unit cohorts across k.
+A separate sensitivity restricts to assays defined for the base and every k,
+without removing units from the bootstrap population. Paired changes reuse the
+existing whole-unit bootstrap; three-seed spread remains descriptive and keeps
+seed42 tuning exposure distinct. All 76 focused local checks passed, including
+25 new aggregation cases and native float32 query-schema compatibility. The
+first compatibility fixture used an invalid assay-ID format; correcting that
+fixture resolved the failure. No scientific data or fitting was used.
+Artifact/model/epoch provenance, support-exposure accounting and scientific
+orchestration remain outside this statistics library. It adds no experimental
+completion or adaptation result.
+
 ## Representation geometry preparation — inference pending
 
 E54/E55 have fixed, label-free sampling cohorts for each A/B train, validation
