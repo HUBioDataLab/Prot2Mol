@@ -20,6 +20,39 @@ Epoch 15 minimized aggregate validation loss but had lower validation Spearman
 (0.17561). These are one seed and one scaffold realization, not a completed
 method comparison. Source: `baseline_status.json`, checkpoint trainer states.
 
+## Measured execution costs — scope unchanged
+
+`resource_audit.py` (commit `27b06d2`, seven focused tests passed) sampled the
+completed full A run and B through epoch11. Median checkpoint save intervals are
+1,447.16s on A and1,476.56s on B: approximately6.03/6.15h per15-epoch fit at that
+cadence. This includes the work between saves, not isolated training kernels;
+startup and final post-training work are excluded from the cadence projection.
+Applying that full-model pace to the primary plan's140 A+140 B fits gives71.06
+four-GPU wall days (6,822 GPU-hours). This is a reference-paced scenario, not an
+ETA or bound: frozen/partial/LoRA/loss arms may differ, and exports, selected
+evaluation, reporting, dataset ablations, adaptation and conditional work add
+other costs. The280 fits comprise168 tuning+112 confirmation fits. The MD requires
+matched tuning budgets and at least three seeds; three LR candidates are the
+current protocol's choice, not a numeric requirement of the MD.
+
+Archive quota headroom at this sample was784.57GB; home headroom was32.28GB.
+The current B retention policy keeps15 epochs plus a selected root model and an
+average. Using observed full-model weight sizes and A's four retained payloads
+across the entire primary grid yields a weight-only scenario of1.46TB. It is
+not an additional allocation or exact disk forecast, but establishes that all
+those weights cannot accumulate within current headroom. The scoped run scan
+de-duplicates hard links: A's protected trajectory adds6.46GB beyond its2.09GB run
+directory; live B used16.44GB including10.92GB of optimizer states. These are not
+whole-project storage totals. No files were deleted or policies changed.
+
+Extra B-allocation confirmations range from zero to four per setting, depending
+on the union of validation-selected LRs;112 additional fits is only an all-setting
+maximum, not a launch request. Their actual cost and the user's time/compute
+constraint are needed for the MD's affordability condition. A budget clarification
+is pending; the already authorized run and queues continue unchanged. Evidence:
+`resource_audits/full_reference_cost/4a2971a2a83f2d3a.json` and
+`resource_audit_runtime/27b06d2/{deployment,audit_receipt}.json` on Atum.
+
 ## Measurement and composition
 
 The selection metric `eval_macro_spearman` is an unweighted mean of per-assay

@@ -1438,6 +1438,20 @@
       "validation": "24 CPU orchestration tests passed with actual configuration/validation-selection reconstruction and simulated training/evaluation. Atum preflight verified both settings, parent identity and quota headroom. GPU-free coordinator verified live; training remains on authorized GPUs0,2,5,6. Partial/failed work is never automatically retried.",
       "evidence": "controlled/regularization_queue/{plan,preflight,launch_process,launch_verification}.json on Atum; regularization_queue_runtime/5face02/deployment.json",
       "remaining": "All20 regularization fits, their native evaluations and scientific comparisons remain pending. Waiting handoff does not close E33 or any question."
+    },
+    "resource_audit": {
+      "status": "measured_reference_scenario_budget_clarification_pending",
+      "code_commit": "27b06d23464e04828ec0d8fa4ffb7d040c3eba9a",
+      "audit": "resource_audits/full_reference_cost/4a2971a2a83f2d3a.json on Atum",
+      "audit_sha256": "0203feb89ebb40c85a91a6374c2b75476f434808b2592c4d5e6378a725058a0d",
+      "A_median_seconds_between_checkpoint_saves": 1447.1582905054092,
+      "B_median_seconds_between_checkpoint_saves": 1476.5606113672256,
+      "full_model_pace_primary_wall_days": 71.06261219829321,
+      "full_model_pace_primary_gpu_hours": 6822.010771036148,
+      "full_model_retained_weight_scenario_bytes": 1459962719460,
+      "archive_quota_remaining_bytes_at_sample": 784566341632,
+      "validation": "Seven focused tests passed for cadence arithmetic, accounting and hard-link-aware allocated bytes. Atum sampled registered actual run artifacts with source hashes. Audit created0 fits, deleted0 files and changed0 settings or retention policies.",
+      "limitations": "Checkpoint save-time cadence is a wall-clock proxy including between-save evaluation/export. Entire-grid projection assumes full-model pace, not a completion ETA or runtime bound; other variants/costs differ. Storage scenario is weight-only, omits data/optimizer peaks and future verified releases. Current B retention cannot accumulate across the entire grid within sampled headroom. Optional allocation confirmations depend on validation LR unions and measured costs; budget clarification is pending. Three LR candidates are the current protocol choice, not a number mandated by the MD."
     }
   },
   "deployment": "unseen molecules from a molecule generator",

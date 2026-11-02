@@ -51,6 +51,24 @@ B-validation selection (28 × 2 further seeds × 2 splits). Every fit retains th
 15-epoch horizon. These 280 fits exclude the dataset ablations, additional B
 realizations, Tier 4 and conditional method-catalog experiments.
 
+The MD requires equal tuning budgets and at least three seeds; it does not
+mandate three LR candidates. The three-candidate grid is this protocol's declared
+implementation choice. `resource_audit.py` records measured reference save-time
+cadence, quota headroom and hard-link-aware file footprints without scheduling
+work or changing that choice. Its primary-grid projection assumes every setting
+runs at the full-reference pace; it is a cost scenario, not a completion ETA.
+Frozen/partial/LoRA arms, final exports, selected evaluations, CPU reports and
+the additional experiment families have different or unmeasured costs.
+
+The current B policy keeps all15 epoch weights for allocation-native losses and
+averaging. Retaining that policy across the entire primary grid exceeds current
+archive headroom under the full-model weight-size scenario. Existing quota gates
+protect individual launches; a separate verified release policy will be needed
+before accumulating the entire grid. The initial reference and required selected
+weights remain protected. No resource audit deletes files or treats unmeasured
+optional split work as affordable. User time/compute constraints and measured
+allocation costs must inform the MD's affordability condition.
+
 The five-point static-weight sweep includes the shared reference R/B/C weights
 0.25/0.25/1. Change B alone to 0.0625 or 1, or C alone to 0.25 or 4. This is an
 axis sweep, not a full Cartesian search or evidence of a globally optimal weight
