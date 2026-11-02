@@ -418,6 +418,17 @@ The worker performs no fitting, inference, LR selection or test scoring, and
 does not expand the existing tuning queue. Its preparation gives no experiment
 completion credit. All65 focused new-worker and existing-handoff checks passed.
 
+`native_lr_comparison.py` reports Q04's completed A seed42 base-LR versus LR0.3
+sensitivity across all15 matched epochs. It requires the exact independently
+verified trajectories, identical reference rows/labels and runtime qualification,
+and configuration equality except output directory and the four rates scaled
+by0.3. It rehashes the saved predictions and audit tables and preserves headline
+coverage. Validation and fixed training-probe points, native loss components and
+eligible NDCG remain separate. Descriptive validation peaks do not choose the
+study LR; there is no test scoring, fitting, seed-variance estimate or interval
+treating epochs as independent replicates. Q04 still requires the remaining
+controlled comparisons.
+
 `regularization_queue.py` continues E33 only after that exact full-evaluation
 coordinator terminates and its ten-fit report passes verification. It runs the
 already registered weight-decay 0.001 and 0.1 settings, in that order. Each gets
