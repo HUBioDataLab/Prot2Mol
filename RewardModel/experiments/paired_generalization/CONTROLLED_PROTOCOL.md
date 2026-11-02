@@ -360,6 +360,29 @@ checks quota, GPU ownership and frozen configurations. `preflight` is read-only;
 test roles, evaluate allocation full losses, average or release weights, or close
 the realization experiment by itself.
 
+`realization_losses.py` evaluates every epoch on each allocation's validation
+view only at its frozen selected LR, for tuning seed42 and confirmation seeds
+43/44. Views concatenate the original validation/test token caches in their
+frozen order, then select the frozen allocation indices without retokenizing,
+relabeling or fragmenting units. Original test rows can belong to an alternative
+allocation's validation role; that allocation's test role is never evaluated in
+this stage. Training-known positives still come exclusively from the unchanged
+training cache and its verified index.
+
+The production single-device evaluator preserves configured ranking partitions,
+assay pools, precision and eligibility. Its native validation losses define the
+loss-based checkpoint and patience-3 rules; the already frozen uniform-batch-32
+Spearman trajectory continues to define LR and macro-based rules. Native
+Spearman is retained separately and never replaces those choices. This preserves
+the existing numerical distinction between inference protocols. All 15 passes
+must verify before creating uniform native-parameter averages from each
+allocation's minimum-loss epoch through epoch15; identical windows share one
+average, and singleton windows stay explicit. Cost receipts record timed pass
+seconds and output bytes. The shared GPU lock and quota checks protect running
+training, and explicit CPU qualification artifacts cannot count as scientific
+GPU results. Selected test evaluation, seed/allocation summaries and any weight
+release remain separate requirements.
+
 ## Whole-unit learning curves
 
 `learning_curve_plan.py` fixes nested 10%, 25%, 50% and 100% unit prefixes from
