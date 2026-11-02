@@ -390,6 +390,20 @@ Completion means only that this full-arm primary report exists. It does not
 train another arm, select from test scores, run additional allocations, release
 weights or mark the study complete.
 
+`native_active_handoff.py` is a separate CPU-only handoff for the already running
+`full__A__seed42__lr0p3` fit. It records the launcher and four rank identities
+separately from the persistent tuning coordinator, allowing that coordinator to
+finish retention and proceed to its next registered fit. Analysis starts only
+after the five original training handles terminate and all fifteen native
+validation/probe epochs have verified completion evidence. The verified five-epoch
+prefix, source files, configuration and runtime qualification remain pinned.
+Transient process/status-read failures cause another observation of the same
+handles; changed provenance or failed analysis requires inspection. The worker
+never retries fitting or analysis, runs inference, reads test predictions or
+creates another training job. It reuses the existing trajectory analyzer and
+independent verifier; preparing or launching it does not count as a scientific
+result or completed experiment.
+
 `regularization_queue.py` continues E33 only after that exact full-evaluation
 coordinator terminates and its ten-fit report passes verification. It runs the
 already registered weight-decay 0.001 and 0.1 settings, in that order. Each gets
