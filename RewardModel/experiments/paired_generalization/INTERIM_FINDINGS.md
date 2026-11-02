@@ -673,6 +673,32 @@ identities and 105 pinned inputs. Q30 and E38 remain pending; completion counts
 are unchanged. Evidence:
 `loss_subset_analysis_runtime/074f5aa/{deployment,preflight}.json`.
 
+E34–E37/Q09 reporting is implemented in `encoder_analysis.py` (commit `56e8cb8`).
+It requires the six existing full/frozen/last-two-block/LoRA-4/16/64 primary-arm
+summaries: 36 tuning and 24 confirmation fits, including the ten shared full
+fits. Each arm keeps its B-validation-selected LR; all five checkpoint rules,
+three diagnostic scorers and same-LR seed42 results remain visible. Encoder-minus-
+full contrasts use paired whole-unit intervals on mutually defined eligible
+assays, with tuning-exposed and confirmation-only seed spreads kept separate.
+They compare selected training procedures, not a fixed-LR causal encoder effect.
+
+The reporter also preserves all 60 native 15-epoch validation/fixed-probe
+trajectories, component-loss minima, first adjacent increases and ranking peaks.
+It requires matching dataset fingerprints and row counts within each regime and
+seed, and validates native history against hash-bound prediction exports. These
+are reported native metrics, not a fresh independent rescore; a first increase
+does not establish sustained overfitting or encoder drift. All 27 focused tests
+passed. Atum's completed A trajectory matched all 30 existing independently
+rescored snapshots, reproducing macro peak14, final validation0.34331738 and
+probe0.49207621. Its aggregate/ranking/contrastive losses had no adjacent increase;
+BCE's first increase was5→6 and minimum was13. This is reader qualification on an
+existing fit, not a frozen-encoder result. Preflight found zero family summaries;
+no new fit, family selection or scientific encoder comparison was created.
+Q09/E34–E37 remain pending. Deployment preserved all ten live process identities
+and 133 pinned inputs. Evidence:
+`encoder_analysis_runtime/56e8cb8/{deployment,preflight}.json` on Atum;
+preflight SHA256 `8b5f5da5eca4683c783aba48ab9f0f6201a17b798f677e04227c9903ec82c0f9`.
+
 The allocation-specific LR selector and supplemental-fit runner are implemented
 in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
 allocations uses its own validation trajectory across the same three LRs. The
