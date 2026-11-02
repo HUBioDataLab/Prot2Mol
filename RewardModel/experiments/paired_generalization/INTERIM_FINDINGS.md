@@ -734,11 +734,24 @@ completion/retention verifier passed; training-completion SHA256 is
 `01430261a06ff4159a3465436cf3cc8d18040a01261ddcba9895b11c03164a78`
 and retention SHA256 is
 `0338d7df7caef0bc7f6a20d2ea742873cd4de64144995777bd1499da9c09faf8`.
-These are native Trainer results, not yet the independent fifteen-epoch audit.
-The pre-existing CPU handoff is live and analyzing that trajectory. The existing
-tuning queue then launched `full__B__seed42__lr0p3` on physical GPUs0,2,5,6;
-its launcher and all four exact ranks were verified live. No common LR choice,
-confirmation seed, selected test comparison or new experiment closure follows.
+The independent audit has now completed all30 validation/probe snapshots,
+checking831,555 group/scorer correlations and900 sampled noise-band pair counts.
+It confirms the validation macros above and a final fixed-probe macro of0.33896153.
+All15 epochs retain full defined coverage on7,997 validation and2,048 probe
+assays. The earlier five-epoch evidence is unchanged. The worker exited0 at
+Unix1793623080.57; completion receipts and all snapshot table hashes were
+rechecked. Bootstrap intervals, calibration and NDCG were not independently
+reconstructed. Evidence: `tier1/native_trajectory_handoff/full__A__seed42__lr0p3/`
+`{complete,exit}.json`, completion SHA256
+`dc3fcc9748e8c35eefe141ccfd32db4e188b43e8fb178ca7baf15cd60717cd8c`;
+the corresponding native `trajectory_through_epoch15.json`, SHA256
+`8ee661e8f322a2d56750c32fa3783a4441765a370be10ac1dab72b7520c56595`,
+and `verification_through_epoch15.json`, SHA256
+`a1f0cafdb350d73ff5173233a8ddd9c4ec4d7b0bd860845743662bd97eb7fb80`.
+The existing tuning queue launched `full__B__seed42__lr0p3` (W&B `bcisozj7`)
+on physical GPUs0,2,5,6; its launcher and all four exact ranks were verified
+live. No common LR choice, confirmation seed, selected test comparison or new
+experiment closure follows.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
