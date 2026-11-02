@@ -53,6 +53,30 @@ is pending; the already authorized run and queues continue unchanged. Evidence:
 `resource_audits/full_reference_cost/4a2971a2a83f2d3a.json` and
 `resource_audit_runtime/27b06d2/{deployment,audit_receipt}.json` on Atum.
 
+The checkpoint-retention dependency review at source commit `8298c8f` confirms
+that scalar exports alone do not permit releasing all B epoch weights. Native
+allocation-loss evaluation needs all 15 epochs for allocation-selected jobs;
+weight averaging needs every checkpoint in its selected window. Later primary
+and allocation report verification reopens selected epoch weights and saved
+averages, but does not rehash every unselected epoch payload. However, rerunning
+the original `retain()` checks every originally preserved weight, and the training
+completion receipt hashes the original retention manifest. A future release
+procedure must therefore preserve selected weights and all immutable evidence,
+explicitly account for released files, and verify the remaining consumers; simply
+deleting files or rewriting the original manifest would break those guarantees.
+The generic averaging function also reopens its source weights even when its
+saved average already exists, so that rerun path must be considered separately.
+
+No cleanup procedure was implemented. At review time the primary full-model LR
+selection, allocation selection, selected evaluations and allocation averages
+were still absent. Tier 4 bases and any conditional consumers must be included
+in a future release check; the initial fresh reference and protected A trajectory
+remain excluded from intermediate cleanup. All ten live process identities and
+133 pinned queue inputs were verified. This is a source dependency review, not
+a successful post-release test or a completed experiment. Evidence:
+`resource_audits/checkpoint_retention_review/source_8298c8f.json` on Atum,
+SHA256 `6a8f75cd21dcb9dcbebf1beaaef20e31c81064062c7bf8227041ffbab9f3c9d2`.
+
 ## Measurement and composition
 
 The selection metric `eval_macro_spearman` is an unweighted mean of per-assay
