@@ -541,9 +541,30 @@ are not independent sampling units. B validation has 136,957 rows and 3,969
 eligible assays. All 339,840 assay/scorer correlations across twenty snapshots and
 600 sampled pair-count checks passed independent verification. This does not
 independently verify the bootstrap intervals, calibration fits or all NDCGs.
-The remaining B epochs and repeated controlled fits remain pending. Evidence:
+Independent analysis of the remaining B epochs and repeated controlled fits
+remain pending. Evidence:
 `tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/`
 with `trajectory_through_epoch10.json` and `verification_through_epoch10.json`.
+
+The controlled B training phase has now completed all 15 epochs and 13,155
+optimizer steps. All four rank-completion receipts match its frozen config.
+The saved native validation history selects **epoch6, macro Spearman0.18457785**;
+epoch15 gives **0.17975193** and the minimum aggregate validation loss,
+**6.68894768**. All3,969 eligible validation assays have defined correlations.
+This is native Trainer evidence, not yet the independently verified full-horizon
+analysis or a selected test result. At Unix1793599102.02 the same driver was
+exporting allocation predictions through four workers on physicalGPUs0,2,5,6;
+final export/retention completion was still pending.
+
+The initial reference also selects epoch6 (0.18460015), with its minimum loss
+at epoch15 (6.68789959; macro0.17561471). The two seed42 runs therefore agree
+on the selection-rule distinction. Their different source revisions and
+diagnostic configurations preclude treating this as an exact replay or an
+independent seed replicate; these observations do not estimate seed variance.
+Evidence: both runs' `launch_provenance.json` and
+`checkpoint-13155/trainer_state.json`; the controlled checkpoint-state SHA256 is
+`f0c91b09d7dfb5877090e7131dd1370bf456e1c54c1cb66e6f163f3d94b071fa`.
+Repeated controlled comparisons and all completion counts remain unchanged.
 
 A one-shot CPU handoff now covers the remaining B trajectory analysis
 (`native_horizon_queue.py`, commit `fec3286`). It waits for the original driver,
