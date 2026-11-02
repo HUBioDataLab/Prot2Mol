@@ -547,6 +547,20 @@ does not execute additional allocations. No scientific primary evaluation or
 summary has started, and experiment/question counts are unchanged. Evidence:
 `controlled/full_evaluation_queue/{plan,preflight,launch_process,launch_verification}.json`.
 
+Q34/E39's validation-only weight comparison is implemented in
+`weight_selection.py` (commit `c13c5e9`). It reuses the five registered axis-sweep
+settings and their three LRs: 15 candidates per split, 30 existing tuning fits,
+including six shared full-reference fits. A-validation and B-validation choices
+are reported separately, with fixed tie rules, defined coverage and explicit
+limitations when an A-selected LR lacks seed43/44 confirmation coverage. No new
+fit or confirmation request is created and no test score is read. All 20 focused
+tests passed, including actual registration/validation-receipt reconstruction,
+scope/qualification checks and rejection of changed or incomplete fits. Atum's
+read-only preflight verified one completed training receipt and 29 unfinished
+fits; it created no selection. This prepares the comparison rather than answering
+Q34 or completing E39. Evidence:
+`weight_selection_runtime/c13c5e9/{deployment,preflight}.json`.
+
 The allocation-specific LR selector and supplemental-fit runner are implemented
 in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
 allocations uses its own validation trajectory across the same three LRs. The

@@ -330,7 +330,9 @@
       "question": "Were the loss weights tuned, and on which split's validation data?",
       "rationale": "Weights tuned on random-group validation optimize for the warm regime.",
       "interpretation": "If the weights change when tuned on Split-B-style validation data, the value of the auxiliary losses depends on the shift.",
-      "status": "pending"
+      "status": "pending",
+      "reporting_preparation": "weight_selection.py (c13c5e9) compares A-validation and B-validation choices over the existing five weight settings and three LRs. Requires all30 tuning fits, unchanged native validation evidence and matching training qualifications. Reports coverage and missing A-selected-LR confirmation coverage. No new fit or test-driven selection. All20 focused CPU tests passed; Atum preflight verified1 complete training receipt and29 unfinished fits without creating a choice. Original pre-study weight-tuning history is not established by this sweep.",
+      "reporting_evidence": "weight_selection_runtime/c13c5e9/{deployment,preflight}.json on Atum"
     }
   ],
   "baseline_status": "complete",
