@@ -8,7 +8,7 @@ Test results do not select models or hyperparameters.
 The ledger has 23 complete, 12 partial and 35 pending experiment entries,
 including 12 conditional entries. Tier 2 is complete (11/11 entries); the other
 three tiers remain incomplete. Of the 34 questions, 11 are answered, fifteen have
-answers with limitations, three are partial and five are pending. The latest
+answers with limitations, four are partial and four are pending. The latest
 closures concern the two completed reference trajectories: BCE/AUROC, validation
 temperature fitting, logit scale, checkpoint locations, top-weighted metrics,
 contrastive directions and fixed-pool rescoring.
@@ -19,6 +19,42 @@ selected epoch 6 (0.18460); its original test macro Spearman was 0.17688.
 Epoch 15 minimized aggregate validation loss but had lower validation Spearman
 (0.17561). These are one seed and one scaffold realization, not a completed
 method comparison. Source: `baseline_status.json`, checkpoint trainer states.
+
+## Historical loss-weight selection — Q34 remains partial
+
+A read-only W&B audit on 2026-11-02 found six historical `fusion512_tri_*`
+runs, covering three recorded static weight settings on both intended split
+regimes. Here R/B/C means ranking/BCE/contrastive, while Split B means scaffold.
+
+| R/B/C weights | Intended Split A run | Intended Split B run |
+| --- | --- | --- |
+| 0.5 / 0.5 / 0.5 | `f65gc8ot` | `nasmr8n1` |
+| 0.5 / 0.25 / 0.25 | `gy28264l` | `0rgisysy` |
+| 0.25 / 0.25 / 1 | `ciqykvch` | `m5guoqkx` (requested reference) |
+
+All six record seed42, `metric_for_best_model=eval_loss`, and interrupted
+(`killed`) status. The first four were created on October19 and the
+contrastive-dominant pair on October22. None has a linked sweep, run group,
+selection notes or tags. This shows that several settings were tried; it does
+**not establish whether weights were selected by validation performance, or
+which split selected them**. Checkpoint selection by loss is a separate decision
+from selecting loss weights. Absence of sweep metadata does not rule out manual
+tuning. No historical performance winner is inferred from final run summaries.
+
+Split identities here come from run names and saved launch config arguments;
+original dataset hashes were not recovered. All six launch config paths are
+absent from their recorded Git commits (two commits across the family), so those
+commits cannot reconstruct the executed config bytes. This limits provenance;
+it does not prove the historical configurations were invalid. The audit covered
+this named family, not every project run or off-W&B decision.
+
+Q34 now has partial historical evidence. Its prospective A/B weight-selection
+comparison still requires the registered controlled fits; E39 remains pending.
+No new fit or test-based selection was made. Six metadata files were rehashed
+and all six config paths checked against the recorded Git trees. Evidence on
+Atum: `historical_weight_audit/wandb_20261102/{audit,verification}.json`;
+audit SHA256 `4d88f1d3bef4c99cf466c6bb081c617c762180c8085429a660ed6dfc2bedf0b0`,
+verification SHA256 `62e307b41baee786e341daea1f94d925dcfc94f7e09f9b534fd413848e2c40c6`.
 
 ## Measured execution costs — scope unchanged
 

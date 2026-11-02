@@ -96,6 +96,17 @@ LR, only seed42 covers that A-selected configuration; the report must not borrow
 seed43/44 evidence at another LR. These validation choices do not establish test
 improvement or explain how the reference weights were chosen before this study.
 
+The historical Q34 audit is separate from this prospective selection. W&B records
+three R/B/C settings (0.5/0.5/0.5, 0.5/0.25/0.25, 0.25/0.25/1) in six named
+three-objective runs, each setting on the intended random and scaffold regimes.
+Their saved launch metadata and configurations do not identify a weight-selection
+decision or its validation split. No linked sweep or notes does not rule out
+manual tuning. All six launch config paths are absent from their recorded Git
+commits, and original split hashes were not recovered. These historical runs do
+not substitute for the current matched controls or establish which weights were
+best. Evidence: `historical_weight_audit/wandb_20261102/{audit,verification}.json`
+on Atum; Q34 remains partial and E39 remains pending.
+
 Checkpoint selection-rule and averaging contrasts use the same B-selected LR
 within each setting to isolate those changes. They do not independently retune
 the LR for each checkpoint rule. The original requested B reference remains a
