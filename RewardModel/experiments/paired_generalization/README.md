@@ -122,6 +122,30 @@ consumers, source/artifact tampering and both-regime preparation. Production
 data-view execution, adaptation protocol selection and runtime qualification
 are still required; the Tier-3 gate remains in force.
 
+`adaptation_fit.py` supplies the separate support-only fitting worker. The
+`heads` scope trains the active ranking/BCE heads, contrastive projections and
+learnable contrastive scale. `heads_cross_attention` additionally trains
+`fusion` and `extra_fusion_layers`. Encoders, shared input projections and
+normalizations stay frozen in both scopes. Frozen feature modules, including
+the shared projection dropout, remain in evaluation mode across Trainer mode
+changes. Disabled objectives and a fixed contrastive scale stay disabled.
+
+The worker receives no query dataset, runs the native assay sampler and
+optimizer for the caller's fixed whole-epoch horizon, and performs no evaluation,
+checkpoint selection or implicit resume. It checks exact optimizer membership
+and unchanged frozen parameters/buffers. Epoch payloads contain only the
+trainable parameter subset; restoration requires the exact original base model
+and verifies payload checksums, names, shapes and dtypes before mutation.
+Each task must start from that same base, preventing carryover between units.
+The fit record includes its support fingerprint, sampler exposure, optimizer
+groups, source and configuration. Low-k supports with no ranking-eligible assay
+remain usable by their available objectives and are reported as such.
+
+Its `--qualify-cpu --output PATH` command uses tiny randomly initialized encoders
+and synthetic support only. Scientific GPU fitting, the adaptation
+budget/validation-selection protocol and the Tier-3 gate remain separate
+requirements; this worker and its qualification do not complete E49–E52.
+
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,
 unique-protein and unique-molecule views, capped at 25,600 each. The latter two
