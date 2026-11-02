@@ -16,12 +16,16 @@ def primary(tmp_path):
     return module.control_plan.build_plan(ROOT, tmp_path/'outputs', noise_fixture())
 
 
-@pytest.mark.parametrize('family,count', [('contrastive', 30), ('ranking', 42)])
+@pytest.mark.parametrize('family,count', [('weights', 30), ('contrastive', 30), ('ranking', 42)])
 def test_existing_family_grid_and_targeted_contrasts(tmp_path, family, count):
     jobs = module.validate_grid(primary(tmp_path), family)
     assert len(jobs) == count and all(j['seed'] == 42 for j in jobs)
     spec = module.FAMILIES[family]
     assert set(x for pair in spec['contrasts'].values() for x in pair) <= set(spec['arms'])
+    if family == 'weights':
+        assert all(reference == 'full' for reference, _ in spec['contrasts'].values())
+        for j in jobs:
+            assert tuple(j['config']['model'][k] for k in module.weight_selection.WEIGHT_KEYS) == module.weight_selection.WEIGHTS[j['arm']]
     if family == 'ranking':
         assert spec['contrasts']['uniform_minus_top_pair_weights'] == ('pairwise_top', 'pairwise_uniform')
         assert spec['contrasts']['noise_soft_minus_zero_margin_hard_targets'] == ('pairwise_hard_zero_margin', 'pairwise_noise_soft')
@@ -45,7 +49,7 @@ def test_grid_rejects_extra_settings_or_hidden_changes(tmp_path, damage):
     with pytest.raises(ValueError): module.validate_grid(plan, 'ranking')
 
 
-@pytest.fixture(params=['contrastive', 'ranking'])
+@pytest.fixture(params=['weights', 'contrastive', 'ranking'])
 def reports(tmp_path, monkeypatch, request):
     """Synthetic report assembly; canonical native scientific gates are separate."""
     family = request.param; spec = module.FAMILIES[family]
@@ -82,13 +86,27 @@ def reports(tmp_path, monkeypatch, request):
         calls.append(arm); assert set(paths) == set(module.read(locations[arm])['source']['analysis_sha256'])
         return locations[arm]
     monkeypatch.setattr(module.controlled_summary, 'summarize', canonical)
+    selection = work/'weight_selection/static_weight_sweep/selection.json'
+    if family == 'weights':
+        candidates = []
+        for arm in spec['arms']:
+            for regime in ('A', 'B'):
+                best_lr = 3. if regime == 'A' else (1. if arm == 'full' else .3)
+                for lr in module.control_plan.LEARNING_RATE_MULTIPLIERS:
+                    score = (.7 if arm == ('full' if regime == 'A' else 'bce_low') else .4)-.2*(lr != best_lr)
+                    candidates.append(dict(arm=arm, regime=regime, learning_rate_multiplier=lr,
+                        validation_macro_spearman=score, validation_defined_fraction=1.))
+        write_json(selection, dict(primary_plan_sha256=sha256(directory/'plan.json'), historical_limit='Historical tuning unknown',
+            **module.weight_selection.choose(candidates)))
+        monkeypatch.setattr(module.weight_selection, 'destination', lambda: selection)
+        monkeypatch.setattr(module.weight_selection, 'verify', lambda: module.read(selection))
     return dict(family=family, spec=spec, root=root, work=work, paths=list(locations.values()), records=records, calls=calls, code=code)
 
 
 def test_reports_use_correct_references_signs_lr_roles_and_seed_spread(reports):
     family = reports['family']; path = module.analyze(family, reports['paths']); result = module.read(path)
     n = len(reports['spec']['arms']); assert result['accounting']['unique_total_fits'] == 10*n
-    assert result['accounting']['both_families_unique_total_fits'] == 110
+    assert result['accounting']['all_families_unique_total_fits'] == 150
     assert len(result['source']['runtime_qualification_sha256']) == len(result['source']['analysis_sha256']) == 10*n
     for name, (reference, alternative) in reports['spec']['contrasts'].items():
         change = result['paired_changes'][name]['best_loss']['test']['B']['43']
@@ -102,6 +120,17 @@ def test_reports_use_correct_references_signs_lr_roles_and_seed_spread(reports):
         assert spread['B']['confirmation_only']['mean_change']['total'] == 2
         assert spread['A_minus_B']['all_three']['mean_change']['mean'] == pytest.approx(0.)
     assert not result['test_used_for_selection'] and result['new_fits_created'] == 0 and not result['study_complete']
+    if family == 'weights':
+        choice = result['weight_selection_comparison']
+        assert choice['choices']['A']['arm'] == 'full' and choice['choices']['A']['learning_rate_multiplier'] == 3.
+        assert not choice['choices']['A']['matches_existing_confirmation_lr']
+        assert choice['choices']['B']['arm'] == 'bce_low' and choice['choices']['B']['learning_rate_multiplier'] == .3
+        assert choice['different_weights'] and choice['different_learning_rates']
+        # The deliberately extreme synthetic test scores must never choose the family winner.
+        assert result['settings']['full']['selected']['synthetic_test_score'] == 999
+        assert result['source']['weight_selection_sha256'] == {str(module.weight_selection.destination()): sha256(module.weight_selection.destination())}
+    else:
+        assert result['weight_selection_comparison'] is None and result['source']['weight_selection_sha256'] == {}
     assert module.analyze(family, reports['paths']) == path and len(reports['calls']) == 2*n
     changed = copy.deepcopy(result); changed['paired_changes'] = {}; write_json(path, changed)
     with pytest.raises(ValueError, match='Completed objective-control report changed'): module.analyze(family, reports['paths'])
@@ -141,7 +170,7 @@ def test_child_analysis_mutation_during_reporting_is_rejected(reports, monkeypat
     assert not list((reports['work']/'objective_controls_analysis').glob('*/*/complete.json'))
 
 
-@pytest.mark.parametrize('family', ['contrastive', 'ranking'])
+@pytest.mark.parametrize('family', list(module.FAMILIES))
 def test_preflight_adds_no_fit_selection_or_report(tmp_path, monkeypatch, family):
     work = tmp_path/'outputs'; monkeypatch.setattr(module, 'WORK', work)
     write_json(work/'controlled/plan.json', primary(tmp_path))
@@ -150,3 +179,36 @@ def test_preflight_adds_no_fit_selection_or_report(tmp_path, monkeypatch, family
     assert all(not paths for paths in result['summary_candidates'].values())
     assert not result['scientific_comparison_created'] and result['new_fits_created'] == 0
     assert {str(p): sha256(p) for p in work.rglob('*') if p.is_file()} == before
+
+
+@pytest.mark.parametrize('damage', ['unfrozen_selection', 'plan', 'B_lr', 'mid_report_mutation'])
+@pytest.mark.parametrize('reports', ['weights'], indirect=True)
+def test_weight_selection_provenance_and_lr_roles(reports, monkeypatch, damage):
+    selection = module.weight_selection.destination()
+    if damage == 'unfrozen_selection':
+        def reject(): raise ValueError('Frozen validation selection missing or changed')
+        monkeypatch.setattr(module.weight_selection, 'verify', reject)
+    elif damage in ('plan', 'B_lr'):
+        record = module.read(selection)
+        if damage == 'plan': record['primary_plan_sha256'] = 'another-plan'
+        else: record['within_setting']['B']['full']['learning_rate_multiplier'] = 3.
+        write_json(selection, record)
+    else:
+        original = module.controlled_summary.paired_group_change
+        def mutate(*args):
+            selection.write_text('{}')
+            return original(*args)
+        monkeypatch.setattr(module.controlled_summary, 'paired_group_change', mutate)
+    with pytest.raises(ValueError): module.analyze('weights', reports['paths'])
+    assert not list((reports['work']/'objective_controls_analysis').glob('*/*/complete.json'))
+
+
+@pytest.mark.parametrize('damage', ['reference_weight', 'second_weight', 'ranking_weight', 'sampler'])
+def test_weight_grid_rejects_hidden_changes(tmp_path, damage):
+    plan = primary(tmp_path)
+    job = next(j for j in plan['tuning_jobs'] if j['arm'] == ('full' if damage == 'reference_weight' else 'bce_low'))
+    if damage == 'reference_weight': job['config']['model']['classification_loss_weight'] = .3
+    elif damage == 'second_weight': job['config']['model']['contrastive_loss_weight'] = 2.
+    elif damage == 'ranking_weight': job['config']['model']['ranking_loss_weight'] = .5
+    else: job['config']['data']['synthetic_sampler_change'] = True
+    with pytest.raises(ValueError): module.validate_grid(plan, 'weights')

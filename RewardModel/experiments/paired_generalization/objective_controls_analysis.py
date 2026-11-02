@@ -1,7 +1,8 @@
-"""E42-E47: matched reports for existing contrastive and ranking controls.
+"""E39/E42-E47: matched reports for existing weight and objective controls.
 
 Compare the registered systems at their frozen B-selected learning rates. No
-family winner, additional hyperparameter or training run is introduced here.
+additional hyperparameter or training run is introduced here. The weight report
+links existing validation-only family choices without selecting again on test.
 """
 from __future__ import annotations
 
@@ -16,15 +17,19 @@ import pandas as pd
 
 if __package__:
     from .run import ROOT, WORK, sha256
-    from . import controlled_summary, control_plan
+    from . import controlled_summary, control_plan, weight_selection
 else:
     from run import ROOT, WORK, sha256
-    import controlled_summary, control_plan
+    import controlled_summary, control_plan, weight_selection
 
 read = controlled_summary.read
 immutable = controlled_summary.immutable
 CHANGES = {
     'full': {},
+    'bce_low': dict(classification_loss_weight=.0625),
+    'bce_high': dict(classification_loss_weight=1.),
+    'contrastive_low': dict(contrastive_loss_weight=.25),
+    'contrastive_high': dict(contrastive_loss_weight=4.),
     'unmasked': dict(contrastive_mask_policy='none'),
     'training_known_mask': dict(contrastive_mask_policy='training_known'),
     'fixed_scale': dict(learn_contrastive_scale=False),
@@ -37,6 +42,13 @@ CHANGES = {
     'pairwise_noise_soft': dict(ranking_objective='pairwise_logistic', ranking_position_weighting='uniform', ranking_affinity_margin=0., ranking_pair_target_temperature='training_replicate_rms'),
 }
 FAMILIES = {
+    'weights': dict(registry='static_weight_sweep', arms=tuple(weight_selection.WEIGHTS),
+        contrasts={
+            'low_bce_minus_reference': ('full', 'bce_low'),
+            'high_bce_minus_reference': ('full', 'bce_high'),
+            'low_contrastive_minus_reference': ('full', 'contrastive_low'),
+            'high_contrastive_minus_reference': ('full', 'contrastive_high'),
+        }),
     'contrastive': dict(registry='contrastive_controls', arms=('full', 'unmasked', 'training_known_mask', 'fixed_scale', 'detach_contrastive'),
         contrasts={
             'reference_masks_minus_unmasked': ('unmasked', 'full'),
@@ -59,6 +71,8 @@ FAMILIES = {
 def software():
     result = controlled_summary.software(); path = Path(__file__)
     result['source_sha256'][str(path.relative_to(ROOT))] = sha256(path)
+    path = Path(weight_selection.__file__)
+    result['source_sha256'][str(path.relative_to(ROOT))] = sha256(path)
     return result
 
 
@@ -77,6 +91,8 @@ def validate_grid(primary, family):
     expected = {control_plan.job_id(a, r, 42, lr) for a in arms for r in ('A', 'B') for lr in control_plan.LEARNING_RATE_MULTIPLIERS}
     if len(jobs) != 6*len(arms) or {j['id'] for j in jobs} != expected:
         raise ValueError('Need all existing matched tuning configurations')
+    if family == 'weights':
+        weight_selection.family_jobs(primary)
     references = {(j['regime'], j['learning_rate_multiplier']): j['config'] for j in jobs if j['arm'] == 'full'}
     baseline = dict(contrastive_mask_policy='reference', learn_contrastive_scale=True, contrastive_detach_encoders=False,
         ranking_objective='ligunity_listwise', ranking_normalize_per_group=False, ranking_balance_assays=False,
@@ -145,8 +161,27 @@ def analyze(family, paths):
             runtime_evidence[str(path)] = sha256(path)
     if len(protocols) != 1:
         raise ValueError('Metrics, composition or noise definitions differ')
+    weight_comparison = None; selection_evidence = {}
+    if family == 'weights':
+        decision = weight_selection.verify()
+        if decision['primary_plan_sha256'] != sha256(primary_path):
+            raise ValueError('Weight selection belongs to another primary plan')
+        for arm, summary in summaries.items():
+            if summary['selected_learning_rate_multiplier'] != decision['within_setting']['B'][arm]['learning_rate_multiplier']:
+                raise ValueError('Weight report must use each setting\'s frozen B-selected LR')
+        selection_evidence[str(weight_selection.destination())] = sha256(weight_selection.destination())
+        weight_comparison = {k: decision[k] for k in ('choices', 'within_setting', 'all_candidates',
+            'different_weights', 'different_learning_rates', 'family_tie_order', 'accounting', 'historical_limit')}
+        weight_comparison['interpretation'] = ('A and B choices are computed from validation only. '
+            'The repeated-seed test comparisons below use each setting\'s B-selected LR. '
+            'They do not evaluate an A-selected LR when it differs from that setting\'s B-selected LR. '
+            'The A-selected procedure is a diagnostic comparator, not an independently validated deployment procedure: '
+            'training and selection exposure can cross partition roles between the A and B regimes. '
+            'No cross-regime independence is asserted. The B-selected family choice is identified without selecting on test scores; '
+            'all five settings remain visible. This axis sweep does not establish globally optimal weights or reconstruct historical tuning.')
     source = dict(family=family, primary_plan_sha256=sha256(primary_path), summary_sha256={str(p): sha256(p) for p in paths},
-        analysis_sha256=analysis_evidence, runtime_qualification_sha256=runtime_evidence, software=software())
+        analysis_sha256=analysis_evidence, runtime_qualification_sha256=runtime_evidence,
+        weight_selection_sha256=selection_evidence, software=software())
     target = WORK/'objective_controls_analysis'/family/control_plan.digest_json(source)[:16]/'complete.json'
     if target.exists():
         saved = read(target); payload = {k: v for k, v in saved.items() if k not in ('source', 'payload_sha256')}
@@ -183,12 +218,14 @@ def analyze(family, paths):
                     controlled_summary.subtract(values['A'][str(s)], values['B'][str(s)]) for s in controlled_summary.SEEDS})
     n = len(spec['arms'])
     payload = dict(family=family, settings=summaries, contrast_definitions=spec['contrasts'], paired_changes=comparisons,
+        weight_selection_comparison=weight_comparison,
         paired_change_seed_spread=spreads, group_tables_sha256=hashes, test_used_for_selection=False, new_fits_created=0, study_complete=False,
         accounting=dict(settings=n, unique_tuning_fits=6*n, unique_confirmation_fits=4*n, unique_total_fits=10*n,
             shared_full_reference_fits=10, additional_control_fits=10*(n-1),
-            both_families_unique_total_fits=110, interpretation='The two family totals share the same ten full-reference fits; do not add them without removing that overlap.'),
+            all_families_unique_total_fits=10*len({a for f in FAMILIES.values() for a in f['arms']}),
+            interpretation='All three family totals share the same ten full-reference fits. Their union contains only existing primary-plan fits; this reporter adds none.'),
         interpretation='All registered settings, three diagnostic scorers, five checkpoint rules and same-LR seed42 results remain visible. Contrasts are alternative minus reference at each setting\'s B-selected LR; they compare selected procedures, not a fixed-LR causal effect. Uniform versus top weights uses pairwise models on both sides. Soft versus hard targets uses zero-margin pairwise models on both sides, with a separate margin-removal contrast. Assay balancing is compared against list-normalization, not conflated with it. Whole-unit intervals condition on fitted models and mutually defined eligible assays; tuning-exposed seed42 and confirmation-only seeds43/44 remain separate. Different contrasts may use different defined cohorts. A-minus-B is descriptive across distinct populations. These ranking-score effects do not themselves establish false-negative causality, gradient alignment or calibration mechanisms. No family winner, new fit or test-driven selection is created.')
-    for name, digest in {str(primary_path): source['primary_plan_sha256'], **source['summary_sha256'], **analysis_evidence, **runtime_evidence, **hashes}.items():
+    for name, digest in {str(primary_path): source['primary_plan_sha256'], **source['summary_sha256'], **analysis_evidence, **runtime_evidence, **selection_evidence, **hashes}.items():
         if sha256(Path(name)) != digest:
             raise ValueError('Objective-control evidence changed during reporting')
     immutable(target, dict(source=source, payload_sha256=control_plan.digest_json(payload), **payload))
