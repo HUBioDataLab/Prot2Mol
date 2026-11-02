@@ -5,6 +5,10 @@ expand the scientific scope. Answer its 34 questions and execute its suggested
 experiments, distinguishing required comparisons, conditional interventions,
 inapplicable methods, and missing evidence.
 
+Start with the [concise 34-question report](CONCISE_REPORT.md) for current results
+and explicit gaps. The [evidence ledger](protocol.json) and
+[detailed findings](INTERIM_FINDINGS.md) retain experiment-level provenance.
+
 User-approved execution constraints:
 
 - Code and execution stay inside `/home/atabey/Prot2Mol` on Atum. After the
