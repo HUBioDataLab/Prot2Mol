@@ -1557,6 +1557,46 @@ provenance, and numerical qualification on the permitted GPUs. Sources:
 `tier4/objective_probes/qualification_cpu_add5162.json` on Atum; copied evidence
 and current local source hashes match.
 
+## A-versus-B variant reporting preparation — scientific results pending
+
+`variant_relation.py` (source `a1aeafb`) prepares the primary-grid component of
+E58/Q17. It requires all 28 canonical primary-arm summaries, covering the 280
+already registered fits; it creates no fit or model selection. Each setting
+retains its declared readout and B-validation-selected LR. The report keeps all
+five checkpoint rules and nine ranking/top-weighted metrics, with seed 42,
+seeds 43/44 and the two-confirmation mean separate. The three common-LR seed-42
+views are separate sensitivity analyses, not pooled additional observations.
+
+Original score coverage remains visible. A second macro-Spearman view restricts
+each regime/seed/rule/partition to eligible assays with defined predictions for
+every primary variant; it verifies group identities, sizes and whole units and
+reports the coverage lost. This intersection can differ across seeds or rules.
+The plots use common axis limits and include a numbered variant/readout/LR key.
+Pearson and rank correlations, OLS slopes and in-sample R-squared describe these
+registered variants. Shared data, references, tuning and overlapping A/B
+partition roles preclude interpreting them as independent samples or proof
+that selection on A transfers to B. No p-values or association intervals are
+claimed, and test scores do not choose variants, LRs, readouts or rules.
+
+All 22 focused tests passed, including analytic tied-rank/linear/inverse cases,
+undefined coverage, missing confirmations, changed native evidence and changes
+during reporting. Synthetic raster/vector plots were visually checked. Atum
+preflight found zero canonical primary summaries and has Matplotlib 3.9.2. Its
+actual group-table reader reproduced verified A14/A15 and B6/B15 means on
+7,997 and 3,969 common eligible assays respectively; these are reader checks on
+existing reference epochs, not variant-association results. All nine live
+process identities and 138 pinned inputs were preserved during deployment.
+
+The MD requires every Tier-3 variant. E40 leak-in/out and E41 learning-curve
+comparisons remain additional unfinished inputs to the eventual combined plot;
+the primary component explicitly cannot mark E58 complete. Q17/E58 remain
+**pending**, with zero scientific variant plots or associations. Evidence:
+`variant_relation_runtime/a1aeafb/{deployment,preflight,native_reader_qualification}.json`
+on Atum. Preflight SHA256:
+`e6a02f07cc54fa4db50bbf9036890a71bf9e08a3e1ad4d9ff3bc692753d00e29`;
+reader qualification SHA256:
+`fec23f4ad4f2c1a32a0b3a280fd0c8d09d1e699a083249c8b87ce448d47adafb`.
+
 Deployment is unseen generated molecules. That does not establish whether their
 scaffolds are unseen. The report must distinguish unseen identity from unseen
 scaffold, rather than presume either split alone matches the generator.

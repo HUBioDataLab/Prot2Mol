@@ -196,7 +196,9 @@
       "question": "Across model variants, do Split A and Split B scores move together?",
       "rationale": "Out-of-distribution accuracy often tracks in-distribution accuracy linearly ([Miller et al. 2021](https://arxiv.org/abs/2107.04649)). The relation is \"largely dataset-dependent\" ([Wenzel et al. 2022](https://arxiv.org/abs/2207.09239)) and sometimes inverse ([Teney et al. 2022](https://arxiv.org/abs/2209.00613)).",
       "interpretation": "A tight line means tuning on Split A is a valid proxy. A flat or inverse relation means tuning on Split A actively misleads. All of this evidence is classification accuracy on images, so applying it to grouped rank metrics is an extrapolation.",
-      "status": "pending"
+      "status": "pending",
+      "reporting_preparation": "Primary-grid E58/Q17 component implemented in variant_relation.py (a1aeafb). Requires all28 canonical summaries/280 existing fits; creates no fit or selection. Preserves configured readouts, each setting's B-selected LR, all five checkpoint rules and nine metrics. Seed42, seeds43/44, confirmation means and three separate same-LR seed42 views remain distinct. Macro sensitivity intersects eligible/defined assays across all variants within each regime/seed/rule/partition, with exact group/unit/size/eligibility checks and coverage. Relations are descriptive Pearson/Spearman/OLS/R-squared without p-values, association intervals, causal or tuning-transfer claims. All22 focused tests passed and synthetic PNG/SVG plots were visually checked. Atum preflight found0 canonical summaries; actual reader reproduced verified A14/A15 and B6/B15 group means on7997/3969 eligible assays. No scientific variant association or plot exists. E40/E41 remain required unfinished inputs to the MD all-Tier-3 plot; this primary component cannot complete E58. Q17/E58 remain pending.",
+      "reporting_evidence": "variant_relation_runtime/a1aeafb/{deployment,preflight,native_reader_qualification}.json on Atum; preflight SHA256e6a02f07cc54fa4db50bbf9036890a71bf9e08a3e1ad4d9ff3bc692753d00e29; reader SHA256fec23f4ad4f2c1a32a0b3a280fd0c8d09d1e699a083249c8b87ce448d47adafb"
     },
     {
       "id": "Q18",
@@ -1508,7 +1510,8 @@
       "handoff_complete_sha256": "67c7df00b651238c8a4206754210b6ae2bccd9291fd5d72c86163892e8c61d87",
       "evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch15,verification_through_epoch15}.json; tier1/native_trajectory_handoff/full__B__seed42__lr1p0/{complete,exit}.json on Atum",
       "limitations": "One fitted seed/allocation, fixed2048-assay probe containing25 components, distinct A/B populations and steps/epoch. Earlier ten-epoch numerical checks inherited only after identical-prefix/source/output checks. Bootstrap intervals, calibration fits and NDCG not independently reconstructed. No test predictions read by native analysis. Repeated controlled and selected test comparisons pending."
-    }
+    },
+    "variant_relation_reporting_preparation": "Primary-grid E58/Q17 component implemented in variant_relation.py (a1aeafb). Requires all28 canonical summaries/280 existing fits; creates no fit or selection. Preserves configured readouts, each setting's B-selected LR, all five checkpoint rules and nine metrics. Seed42, seeds43/44, confirmation means and three separate same-LR seed42 views remain distinct. Macro sensitivity intersects eligible/defined assays across all variants within each regime/seed/rule/partition, with exact group/unit/size/eligibility checks and coverage. Relations are descriptive Pearson/Spearman/OLS/R-squared without p-values, association intervals, causal or tuning-transfer claims. All22 focused tests passed and synthetic PNG/SVG plots were visually checked. Atum preflight found0 canonical summaries; actual reader reproduced verified A14/A15 and B6/B15 group means on7997/3969 eligible assays. No scientific variant association or plot exists. E40/E41 remain required unfinished inputs to the MD all-Tier-3 plot; this primary component cannot complete E58. Q17/E58 remain pending. Evidence: variant_relation_runtime/a1aeafb/{deployment,preflight,native_reader_qualification}.json on Atum; preflight SHA256e6a02f07cc54fa4db50bbf9036890a71bf9e08a3e1ad4d9ff3bc692753d00e29; reader SHA256fec23f4ad4f2c1a32a0b3a280fd0c8d09d1e699a083249c8b87ce448d47adafb"
   },
   "deployment": "unseen molecules from a molecule generator",
   "approved_physical_gpus": [
@@ -2180,7 +2183,9 @@
       "key": "accuracy_on_line",
       "experiment": "Plot Split A versus Split B across trained variants",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "reporting_preparation": "Primary-grid E58/Q17 component implemented in variant_relation.py (a1aeafb). Requires all28 canonical summaries/280 existing fits; creates no fit or selection. Preserves configured readouts, each setting's B-selected LR, all five checkpoint rules and nine metrics. Seed42, seeds43/44, confirmation means and three separate same-LR seed42 views remain distinct. Macro sensitivity intersects eligible/defined assays across all variants within each regime/seed/rule/partition, with exact group/unit/size/eligibility checks and coverage. Relations are descriptive Pearson/Spearman/OLS/R-squared without p-values, association intervals, causal or tuning-transfer claims. All22 focused tests passed and synthetic PNG/SVG plots were visually checked. Atum preflight found0 canonical summaries; actual reader reproduced verified A14/A15 and B6/B15 group means on7997/3969 eligible assays. No scientific variant association or plot exists. E40/E41 remain required unfinished inputs to the MD all-Tier-3 plot; this primary component cannot complete E58. Q17/E58 remain pending.",
+      "reporting_evidence": "variant_relation_runtime/a1aeafb/{deployment,preflight,native_reader_qualification}.json on Atum; preflight SHA256e6a02f07cc54fa4db50bbf9036890a71bf9e08a3e1ad4d9ff3bc692753d00e29; reader SHA256fec23f4ad4f2c1a32a0b3a280fd0c8d09d1e699a083249c8b87ce448d47adafb"
     },
     {
       "id": "E59",
