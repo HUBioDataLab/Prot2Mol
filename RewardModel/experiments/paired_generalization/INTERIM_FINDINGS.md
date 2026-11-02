@@ -1699,6 +1699,23 @@ checkpoint binding and production GPU qualification remain required; E49–E52
 remain pending. Evidence: `tier4/adaptation_protocol/{plan,complete,verification}.json`
 and `tier4/adaptation_protocol_17f1328_launch.json` on Atum.
 
+Query scoring is now implemented separately in `adaptation_query.py`. It binds
+each saved adapter to its exact base, frozen support task and fit receipt;
+validates reserved query identities and float32 labels; and exports native
+ranking, BCE and cosine scores. Undefined and ineligible assays retain their
+unit identities and coverage. k=0 creates no optimizer or selection candidate.
+The base parameters, module modes and random state are restored after every
+call, including evaluation failure, to prevent adaptation carryover.
+
+All 58 focused local CPU checks passed (15 new query checks plus the existing
+fit, protocol, view and fixed-evaluation checks). These include actual tiny-model
+fits in both scopes, native query inference, exact comparison with independently
+restored weights, within-unit query isolation, changed-export rejection and
+failure restoration. No scientific adaptation fit, query inference, epoch
+selection or GPU qualification occurred. E49–E52 remain pending. The query
+worker source SHA256 is recorded in `protocol.json`; production orchestration,
+base-checkpoint verification and the Tier-3 gate remain outstanding.
+
 ## Representation geometry preparation — inference pending
 
 E54/E55 have fixed, label-free sampling cohorts for each A/B train, validation

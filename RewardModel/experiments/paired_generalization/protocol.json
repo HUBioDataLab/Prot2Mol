@@ -1789,7 +1789,11 @@
     },
     "native_remaining_tuning_audits": {
       "source_commit": "2f586fd17f79520e84b860978cc604cdd221bd41",
-      "jobs": ["full__B__seed42__lr0p3", "full__A__seed42__lr3p0", "full__B__seed42__lr3p0"],
+      "jobs": [
+        "full__B__seed42__lr0p3",
+        "full__A__seed42__lr3p0",
+        "full__B__seed42__lr3p0"
+      ],
       "scope": "Exactly three CPU audits of existing queued fits, all15 native validation/probe epochs each; no fit, inference, test scoring, LR selection or retries. Requires verified completion with four ranks and retention. Existing/failed analysis requires inspection.",
       "status_at_activation": "waiting_for_registered_fit",
       "worker_pid": 2007376,
@@ -1841,6 +1845,17 @@
       "common_learning_rate_selected": false,
       "confirmation_started": false,
       "scientific_completion_counts_changed": false
+    },
+    "adaptation_query_preparation": {
+      "module": "adaptation_query.py",
+      "source_sha256": "1c8072f222a19279a22641f0ef413c8cf2b19679c07a9b26be67e0c0b29c560b",
+      "local_cpu_checks": 58,
+      "new_query_checks": 15,
+      "scientific_fits": 0,
+      "scientific_query_evaluations": 0,
+      "production_gpu_qualified": false,
+      "scope": "Query-only worker for the frozen E49-E52 protocol. Verified support-fit/base binding, query role and complete assay identities, native float32-label metrics for all three pathways, explicit undefined/ineligible assay rows, k0 baseline, and base/mode/RNG restoration on success or failure. No epoch selection, launcher, queue expansion or scientific completion credit.",
+      "remaining": "Tier 3 completion, selected base-checkpoint/source/token binding, production GPU qualification, orchestration and all scientific adaptation results."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -2422,7 +2437,8 @@
       "conditional": false,
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain."
+      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
     },
     {
       "id": "E50",
@@ -2433,7 +2449,8 @@
       "conditional": false,
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain."
+      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
     },
     {
       "id": "E51",
@@ -2444,7 +2461,8 @@
       "conditional": false,
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain."
+      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
     },
     {
       "id": "E52",
@@ -2455,7 +2473,8 @@
       "conditional": false,
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain."
+      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
     },
     {
       "id": "E53",

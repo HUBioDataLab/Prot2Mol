@@ -160,6 +160,16 @@ their explicit coverage. The manifest counts every independent support fit and
 records infeasible budgets. Preparing it starts no fitting or inference and
 does not resolve the still-pending base-checkpoint and production-GPU gates.
 
+`adaptation_query.py` supplies query-only evaluation of a saved head adapter or
+the unchanged k=0 base. Use its `task_source` as the support fit's provenance,
+then `evaluate_query` with a verified `AdaptationViews` bundle. It checks the
+fit, snapshot, query identities and native labels, exports all three pathways,
+and retains ineligible/undefined assay rows with their unit identities. Each
+call restores the base parameters, modes and random state. Selection remains a
+separate operation requiring the complete B/42 validation inventory across all
+15 epochs. This library has local tiny-model CPU tests; it adds no launcher,
+scientific query result or production-GPU qualification.
+
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,
 unique-protein and unique-molecule views, capped at 25,600 each. The latter two
