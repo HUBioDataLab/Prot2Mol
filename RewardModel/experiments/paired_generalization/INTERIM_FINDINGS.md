@@ -490,6 +490,19 @@ coordinator and its receipts were verified and recorded without restarting it.
 This is execution preparation, not another completed scientific experiment.
 Evidence: `controlled/full_tuning_queue/{plan,preflight,launch_process,launch_verification}.json`.
 
+The downstream primary-grid evaluator had the same unresolved-versus-resolved
+encoder-width mismatch. It was reproduced with a saved-model fixture and
+repaired in commit `ed4393f`: only unspecified launch widths may resolve to
+positive integers; retained configurations must match the run, and loaded
+widths must match the actual encoders. All other configuration fields remain
+checked. All 26 focused CPU tests passed, including native inference without
+training for both contrastive-mask policies. Atum verified 19 existing A/B
+configuration files and a tiny CPU-only save/load with unchanged parameters.
+No scientific test predictions were computed. Deployment preserved all 43
+qualified training sources, the six original B process identities and the live
+queue. This fixes an evaluation blocker, not a scientific result. Evidence:
+`postselection_runtime/ed4393f/{deployment,qualification}.json`.
+
 Q11's scalar localization audit covers all 15 initial B validation epochs and
 all 15 verified A validation epochs. B's BCE rises by 0.03768 from its overall minimum at
 epoch 2 to epoch 15, with a positive point change in every fixed size bin.
