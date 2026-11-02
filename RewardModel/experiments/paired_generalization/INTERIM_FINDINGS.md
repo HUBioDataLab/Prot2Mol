@@ -114,8 +114,9 @@ The corrected reports are in `metrics_float32/`, `noise_bands_float32/` and
 
 B has a smaller median assay but a larger mean due to its tail. The differences
 in eligibility, variance and near-ties preclude interpreting the raw split gap
-as a pure similarity effect. Matched neural reweighting remains pending; the
-completed fixed depth-3 analysis below supplies supplementary evidence.
+as a pure similarity effect. Fixed depth-3 test reweighting and matched neural
+validation reweighting are complete below; selected neural test and repeated
+comparisons remain pending.
 Source: `tier1/data/composition.json`.
 
 The actual similarity relation is binary exact scaffold identity across all
@@ -157,13 +158,47 @@ weighted mean eligible-assay size is 26.11 on A versus 31.93 on B; mean label sp
 2.173 versus 1.954. Thus this adjustment does not remove every composition
 difference. Intervals condition on one fit, fixed assignments and empirical
 weights; they omit training-seed and weight-estimation uncertainty. No additional
-LambdaMART fit or tuning was performed. Neural strata/reweighting and additional
-realization comparisons remain pending. Sources:
+LambdaMART fit or tuning was performed. Selected neural test and additional
+seed/realization comparisons remain pending. Sources:
 `tier1/similarity_composition/design/complete.json`,
 `tier1/similarity_composition/lambdamart_depth3/complete.json`, and
 `tier1/similarity_composition/verification.json` on Atum. All source/artifact
 hashes were verified; an independent weighted sum reproduced both partitions,
 and maximum cell-mass error was below 7e-18.
+
+The two completed full-model seed 42 base-LR references now have matched
+composition comparisons at all 15 validation epochs. The fixed cells support
+3,962/3,969 eligible B assays (99.82%). Standardizing A lowers its point
+estimate at every epoch; the same-epoch terminal comparison and each run's
+own native validation-macro peak are kept separate:
+
+| Validation comparison | A common support | A standardized | B common support | Standardized A minus B |
+|---|---:|---:|---:|---:|
+| Both epoch 15 | 0.34301 | 0.33462 | 0.17925 | 0.15537 |
+| A epoch 14 / B epoch 6, own macro peaks | 0.34337 | 0.33486 | 0.18420 | 0.15066 |
+
+At epoch 15, the paired A-unit weighting change is -0.00839, with conditional
+interval [-0.01223, -0.00516]. Residual imbalance remains: weighted mean assay
+size is 27.18 on A versus 31.79 on B, and label span is 2.226 versus 2.020.
+A's unseen-scaffold rows within assays score 0.19670 (1,608 eligible assays),
+compared with B's 0.17975 (3,969); intact all-unseen A assays instead score 0.22976
+(190). These are distinct cohorts, not evidence that similarity explains a
+specific fraction of the gap.
+
+The analysis uses validation labels for descriptive standardization. Its
+intervals condition on one fitted seed and fixed empirical weights; they omit
+seed, split, weight-estimation and checkpoint-selection uncertainty. No joint
+cross-split gap interval is asserted, because A/B partition roles can overlap.
+The peak comparison is in-sample and does not select an LR or test checkpoint.
+No model was fitted and no test predictions were read. All 803 recorded input
+hashes, the result digest and execution receipt were checked; independent
+weighted point estimates and intact-assay stratum means were reproduced.
+Within-assay restricted-row statistics and bootstrap intervals reuse the native
+analysis and were not independently reconstructed by this report. Evidence:
+`tier1/reference_composition/139902be79aacd3f/complete.json` on Atum,
+SHA256 `1f0d06faf0aa2623365d5f0b28bb6207fd0d0425e9896bbadb32307388109acd`,
+and `reference_composition_runtime/67e2d88/execution.json`.
+E08/E09 and Q13 remain partial pending selected neural test and repeated results.
 
 All 1,957,400 curated observations were reconstructed from 2,032,748 retained raw
 measurements with zero count or median mismatches. On the replicated subsets:
@@ -485,8 +520,9 @@ All three point estimates are below epoch 14; the all-unseen score is also
 below its epoch-11 maximum of 0.23762. Restricting to unseen-scaffold rows
 within assays instead gives 0.19670 on 1,608 eligible assays; the cohorts differ.
 Fixed composition weighting changes A common-support validation macro from
-0.34301 to 0.33462. This uses the B validation label mix, not B predictions or
-test scores, and is separate from the pending matched model comparison.
+0.34301 to 0.33462. The weights use the B validation label mix. The completed
+matched validation comparison above also reports B predictions; selected
+neural test and repeated comparisons remain pending.
 
 Across epochs 1→15, ranking–BCE agreement changes 0.63066→0.63610 on the same
 7,995 mutually defined eligible assays. Its whole-assay change interval
@@ -500,7 +536,7 @@ whose macro Spearman is 0.34331738. All 15 epoch weights are protected and the
 retention hold has been released. Training finished at Unix1793574255.346448.
 The native A test remains unscored pending the registered selection protocol.
 Training-probe statistics are descriptive; intervals condition on one fit and
-allocation. Seed, matched B and scientific method comparisons remain pending.
+allocation. Multi-seed and selected-test method comparisons remain pending.
 
 Evidence: `controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json`,
 `controlled/protected_trajectories/full__A__seed42__lr1p0/complete.json`, and
