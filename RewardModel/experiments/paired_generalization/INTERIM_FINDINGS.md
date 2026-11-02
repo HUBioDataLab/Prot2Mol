@@ -624,6 +624,24 @@ No selected-model scientific predictions or scores were produced. Deployment
 preserved active training and its queue. Evidence:
 `selected_analysis_runtime/38f1196/{deployment,input_qualification}.json`.
 
+The primary-arm summary is implemented in `controlled_summary.py` (commit
+`b7568b4`). It requires six tuning and four selected confirmation analyses,
+re-verifies their validation-only decisions and native evaluation evidence, and
+reports all three scorers across all five selected-LR checkpoint rules. Seed
+spread, seed42 LR sensitivity, same-seed A/B gaps and within-run checkpoint
+contrasts remain separate, with explicit score coverage. All 26 focused CPU
+tests passed, including artifact integrity and rejection of actual CPU-native
+qualification predictions as scientific GPU evidence. Atum cross-checked the
+paired calculation on the existing hash-verified A epochs14/15: 7,997 mutually
+defined eligible assays, 16,431 resampled whole-assay units, mean change
+-0.00035783 and interval [-0.00233925, 0.00164323]. This reproduces the existing
+reference result; it is not a new fit, seed or method comparison. Read-only
+preflight found no frozen full-arm LR decision and five incomplete tuning fits;
+no scientific primary summary was created. All eight active training/queue
+handles and their frozen inputs survived deployment. Completion counts remain
+unchanged. Evidence:
+`controlled_summary_runtime/b7568b4/{deployment,preflight,reference_qualification}.json`.
+
 Q11's scalar localization audit covers all 15 initial B validation epochs and
 all 15 verified A validation epochs. B's BCE rises by 0.03768 from its overall minimum at
 epoch 2 to epoch 15, with a positive point change in every fixed size bin.

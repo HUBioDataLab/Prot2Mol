@@ -39,7 +39,9 @@
       "native_A_trajectory_update": "A epochs1-15 have whole-assay intervals conditional on one fitted trajectory; they do not add independent seeds or split realizations.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "allocation_reporting_preparation": "Allocation-specific diagnostics and complete three-seed/three-dependent-allocation summaries implemented in realization_analysis.py (27901fe); 19 focused CPU tests passed. Seed42 tuning exposure, seed43/44 confirmations, dependent allocation sensitivity and conditional whole-unit intervals remain distinct. Atum descriptor qualification covered all273913 held-out rows; original/seed43/seed44 eligible val assays3969/3963/4059 and test assays3972/3978/3882. No model predictions or scientific scores were used. Selected evaluations and actual seed/allocation spreads remain pending; Q04 remains partial.",
-      "allocation_reporting_evidence": "realization_analysis_runtime/27901fe/{deployment,reference_qualification}.json on Atum"
+      "allocation_reporting_evidence": "realization_analysis_runtime/27901fe/{deployment,reference_qualification}.json on Atum",
+      "primary_reporting_preparation": "controlled_summary.py (b7568b4) requires all six tuning and four selected confirmation analyses. It separates seed42 tuning exposure, seed43/44 confirmations, LR sensitivity, matched A/B gaps and paired whole-unit checkpoint changes, with score coverage. All26 focused CPU tests passed. Atum reproduced the existing A14->15 macro change -0.00035783 and conditional interval[-0.00233925,0.00164323] across16431 whole-assay units and7997 mutually defined eligible assays. No new fit, seed or scientific primary summary; remaining controlled fits/selection/evaluations still gate Q04.",
+      "primary_reporting_evidence": "controlled_summary_runtime/b7568b4/{deployment,preflight,reference_qualification}.json on Atum"
     },
     {
       "id": "Q05",
