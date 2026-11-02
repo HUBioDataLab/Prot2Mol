@@ -122,6 +122,32 @@ after validation-only selection; training completion is not experiment completio
   grid compares complete scoring systems; a factorial interaction computed
   across changing readouts is not evidence of gradient conflict by itself.
 
+`loss_subset_analysis.py` assembles Q30/E38 from all seven completed primary-arm
+reports. Each must pass the native evaluation, frozen selection and artifact
+checks in `controlled_summary.py`. The compared fits must share the metric,
+composition, noise and qualified training implementations. The family uses 42
+tuning and 28 confirmation fits, including the ten shared full-reference fits;
+the report creates no further fit or selection.
+
+All seven systems retain their declared scoring outputs, individual seed scores,
+coverage and selected LR for each checkpoint rule. For the four systems with R
+present, paired contrasts on the same eligible, mutually defined assays are
+RB−R, RBC−RC, RC−R, RBC−RB, and the conditional interaction RBC−RB−RC+R. Their
+2,000 bootstrap draws resample whole split units, including units with no
+eligible scores, and share draws across contrasts. Original-cohort means remain
+visible alongside common-cohort means. Empty common cohorts give undefined
+effects, never zero effects.
+
+This interaction concerns B and C with R present and a common ranking-head
+output. It is not a three-factor interaction, an estimate from an untrained
+empty-loss cell, or evidence of gradient alignment. Each arm's validation-chosen
+LR and checkpoint remain part of the training procedure being compared. Seed42
+has tuning exposure; all-three-seed and seed43/44-only spreads stay distinct from
+the conditional unit intervals. A−B effect differences compare different
+populations and receive no paired cross-split confidence interval. No test score
+changes the setting, selection or training budget. A preflight inventory of
+report paths does not establish a scientific loss comparison.
+
 ## Runtime qualification and retention
 
 `qualify_controls.py` exercises all seven loss subsets plus frozen, partial,
