@@ -396,6 +396,27 @@ test scores nor this evaluator change any LR, epoch, average or training budget.
 Scientific seed/allocation comparisons and weight release still require their
 own completed evidence.
 
+`realization_analysis.py` applies the existing CPU diagnostics to completed
+selected-model predictions on each allocation's exact validation/test membership.
+It verifies row identities, labels, whole-component membership, group counts,
+frozen evaluation receipts and training-only noise thresholds. Descriptor cells
+are recomputed for each allocation without using model scores. Per-fit outputs
+include all three scorers, whole-unit bootstrap intervals, pair/noise-band and
+top-k metrics, scorer agreement, validation-fitted calibration and shift checks.
+These outputs do not infer missing A model results at supplemental B-only LRs.
+
+The summary requires the complete selected three-seed by three-allocation grid
+for all five checkpoint rules. It reports seed42 as tuning-exposed, seeds43/44
+as confirmations, and gives their individual scores and defined coverage. Seed
+means/SDs/ranges within each allocation and allocation sensitivity within each
+seed stay separate. The latter includes changes in test membership and in the
+allocation-specific validation LR/checkpoint choices; it does not isolate split
+assignment alone. Neither descriptive spread becomes an independent-realization
+confidence interval, and the nine cells are never pooled as independent runs.
+Missing/changed evidence, different metric code and CPU qualification outputs
+cannot enter a scientific summary. `qualify-references` checks production
+descriptor membership without loading models or computing prediction scores.
+
 ## Whole-unit learning curves
 
 `learning_curve_plan.py` fixes nested 10%, 25%, 50% and 100% unit prefixes from
