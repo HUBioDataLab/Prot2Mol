@@ -1678,7 +1678,43 @@
       "model_inference": false,
       "new_fits_created": 0,
       "scientific_probe_results": 0,
-      "remaining": "Tier3 and selected checkpoint evidence; freeze step sizes; complete token-payload verification and permitted-GPU numerical qualification; actual per-block gradients and held-out lookahead transfer."
+      "remaining": "Tier3 and selected checkpoint evidence; complete token-payload verification and permitted-GPU numerical qualification; actual per-block gradients and held-out lookahead transfer. Checkpoint and nominal-step rules are frozen in objective_probe_execution_protocol."
+    },
+    "objective_probe_execution_protocol": {
+      "status": "rules_frozen_no_selection_or_scientific_probes",
+      "code_commit": "635f3230f098fbcc3e66245545d44a7e9a7972fc",
+      "experiment_ids": [
+        "E56",
+        "E57"
+      ],
+      "existing_model_slots": 6,
+      "diagnostic_pairs": 192,
+      "additional_fits": 0,
+      "additional_lr_candidates": 0,
+      "base_policy": "Full R+B+C A/B references, seeds42/43/44, common B-validation-selected LR and each fit own best validation-macro checkpoint. Same reference policy as head adaptation. No alternative-arm or test-based winner.",
+      "step_policy": "One nominal weighted-SGD step per source objective/scope using actual Trainer component-rate fallbacks. Private parameters fixed. No step-size grid, scheduler/AdamW replay, clipping or decay. Unequal projection/fusion rates rejected.",
+      "precision": "float32 parameters and forwards; autocast, TF32 and dropout disabled; production GPU numerics still require qualification",
+      "reporting_policy": "Per-block norms/cosines and cold-batch loss changes/relative transfer, with undefined/zero-step coverage and seed-separated distributions. Shared batches are not independent units. No causal or trained-model improvement claim.",
+      "local_tests_passed": 23,
+      "input_files_verified": 38,
+      "source_files_verified": 6,
+      "plan_sha256": "ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275",
+      "completion_sha256": "a3b030c69d24bc0fb7ec547bfc4f83602a3cbc9a273190f8628721282ff392bc",
+      "runtime_receipt_sha256": "958fc8f3d84dc19ce90ff3d7344df241a51ea06740aad30a14f68c612cbafe24",
+      "evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum",
+      "process": {
+        "pid": 1843031,
+        "start_ticks": 156497407,
+        "returncode": 0,
+        "finished_unix": 1793614176.7247255,
+        "verified_terminal_unix": 1793614219.8322735
+      },
+      "selection_resolved": false,
+      "model_inference": false,
+      "new_fits_created": 0,
+      "scientific_probe_results": 0,
+      "executable_gpu_queue": false,
+      "remaining": "Tier3 completion, selected checkpoint/configuration evidence, complete token-payload verification, production float32 GPU numerical qualification and actual gradient/transfer measurements."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -2336,12 +2372,14 @@
       "experiment": "Measure per-block objective gradient cosines",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Fixed step sizes, source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
+      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
       "preparation_evidence": "tier4/objective_probe_design/{complete.json,verification.json}; tier4/objective_probes/qualification_cpu_add5162.json on Atum",
-      "batch_preparation": "32 training/cold-validation batch pairs per regime frozen at source cd4ac87; 128 batches total, with no gradient/score-dependent selection. Raw/cache mappings, source-unit cold membership and native list boundaries checked. All28 focused tests passed and Atum preparation exited0. Scientific gradients/transfer, step sizes, token payload/GPU qualification and Tier3 gate remain pending.",
+      "batch_preparation": "32 training/cold-validation batch pairs per regime frozen at source cd4ac87; 128 batches total, with no gradient/score-dependent selection. Raw/cache mappings, source-unit cold membership and native list boundaries checked. All28 focused tests passed and Atum preparation exited0. Scientific gradients/transfer, token payload/GPU qualification and Tier3 gate remain pending.",
       "batch_preparation_evidence": "tier4/objective_probe_batches/complete.json; tier4/objective_probe_batches_runtime/cd4ac87/{complete,exit}.json on Atum",
-      "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, step sizes, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
-      "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum"
+      "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
+      "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum",
+      "protocol_preparation": "Checkpoint/step rules frozen at635f323: six existing full R+B+C A/B references at common B-selected LR, seeds42/43/44, own best-macro checkpoints. One nominal Trainer-rate weighted-SGD step per source/scope; float32 without autocast/TF32. All23 focused tests passed and Atum CPU preparation exited0. Six checkpoint slots remain unresolved; no selection, new fits, GPU queue, gradient or transfer results.",
+      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275"
     },
     {
       "id": "E57",
@@ -2350,12 +2388,14 @@
       "experiment": "Measure TAG-style lookahead transfer on cold validation batches",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Fixed step sizes, source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
+      "preparation_scope": "Numerical worker passed11 local tests and3 Atum tiny-model CPU cases. Own-regime cold-validation cohorts independently verified: A6012rows/598assays/190ranking-eligible, B136957rows/9280assays/3969eligible. Source-token-checkpoint provenance, permitted-GPU qualification and scientific execution remain pending behind Tier3.",
       "preparation_evidence": "tier4/objective_probe_design/{complete.json,verification.json}; tier4/objective_probes/qualification_cpu_add5162.json on Atum",
-      "batch_preparation": "32 training/cold-validation batch pairs per regime frozen at source cd4ac87; 128 batches total, with no gradient/score-dependent selection. Raw/cache mappings, source-unit cold membership and native list boundaries checked. All28 focused tests passed and Atum preparation exited0. Scientific gradients/transfer, step sizes, token payload/GPU qualification and Tier3 gate remain pending.",
+      "batch_preparation": "32 training/cold-validation batch pairs per regime frozen at source cd4ac87; 128 batches total, with no gradient/score-dependent selection. Raw/cache mappings, source-unit cold membership and native list boundaries checked. All28 focused tests passed and Atum preparation exited0. Scientific gradients/transfer, token payload/GPU qualification and Tier3 gate remain pending.",
       "batch_preparation_evidence": "tier4/objective_probe_batches/complete.json; tier4/objective_probe_batches_runtime/cd4ac87/{complete,exit}.json on Atum",
-      "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, step sizes, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
-      "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum"
+      "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
+      "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum",
+      "protocol_preparation": "Checkpoint/step rules frozen at635f323: six existing full R+B+C A/B references at common B-selected LR, seeds42/43/44, own best-macro checkpoints. One nominal Trainer-rate weighted-SGD step per source/scope; float32 without autocast/TF32. All23 focused tests passed and Atum CPU preparation exited0. Six checkpoint slots remain unresolved; no selection, new fits, GPU queue, gradient or transfer results.",
+      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275"
     },
     {
       "id": "E58",

@@ -1699,7 +1699,7 @@ detached contrastive encoders), with checkpoint state and RNG unchanged. These
 are implementation checks, not scientific gradient or transfer measurements.
 
 E56/E57 and Q33 remain **pending**. Scientific execution still needs the Tier 3
-results, fixed step sizes, checkpoint/token
+results, checkpoint/token
 provenance, and numerical qualification on the permitted GPUs. Sources:
 `tier4/objective_probe_design/{complete.json,verification.json}` and
 `tier4/objective_probes/qualification_cpu_add5162.json` on Atum; copied evidence
@@ -1756,8 +1756,39 @@ Evidence: `tier4/objective_probe_batches/reconstruction_verification.json`,
 SHA256 `3e2d23f5b831e73ec592419ea32f8f2a60e2a681d8d37187929fe97f01516446`;
 runtime receipt `tier4/objective_probe_reconstruction_runtime/70c3252/complete.json`,
 SHA256 `6cb1861b87247a758ea809afc0e2070312dde141a6f220c107e9a7a2b033d291`.
-Tier3 and selected checkpoints, fixed step sizes, full token-payload hashes and
+Tier3 and selected checkpoints, full token-payload hashes and
 GPU numerical qualification still precede the actual E56/E57 measurements.
+
+Checkpoint and step rules are now frozen by `objective_probe_protocol.py`
+(source `635f323`). The six references are the full R+B+C A/B models for
+seeds42/43/44 at the common B-validation-selected LR, each at its own best
+validation-macro checkpoint. This matches the head-adaptation reference policy.
+The manifest records unresolved checkpoint slots; it makes no LR or checkpoint
+selection and adds no model fits. Each reference uses the same32 saved
+training/cold-validation pairs for its regime, giving192 diagnostic pairs.
+
+Each source objective takes one nominal weighted-SGD step for each existing
+scope (encoders, interaction, shared), holding private heads fixed. Rates follow
+the actual Trainer's side-specific/common/default fallback rules. At multiplier1,
+both encoder rates are1e-5 and the interaction rate is1e-4; the existing0.3/3
+candidates scale these rates. There is no additional step-size grid. Unequal
+projection/fusion rates are rejected because the numerical worker has one
+interaction rate. The protocol specifies float32 parameters and forwards,
+disabled autocast/TF32/dropout, and reports actual versus planned parameter
+steps and explicit undefined or unchanged-loss cases. GPU numerical adequacy
+is still unverified. These are conditional local diagnostics, not AdamW replay
+or evidence of improved generalization. Batch distributions are reported per
+model seed; overlapping batches do not supply independent-unit intervals.
+
+All23 focused protocol/worker tests passed locally. Atum CPU preparation exited0
+and rechecked38 input files and6 protocol source files, alongside the existing
+batch reconstruction provenance. No model, loss, gradient, test prediction or
+new fit was produced. E56/E57/Q33 and the study completion counts are unchanged.
+Evidence: `tier4/objective_probe_protocol/{plan,complete}.json`, plan SHA256
+`ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275`;
+runtime `tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json`,
+completion receipt SHA256
+`958fc8f3d84dc19ce90ff3d7344df241a51ea06740aad30a14f68c612cbafe24`.
 
 ## A-versus-B variant reporting preparation — scientific results pending
 
