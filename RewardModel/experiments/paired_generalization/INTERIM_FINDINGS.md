@@ -7,8 +7,9 @@ Test results do not select models or hyperparameters.
 
 The ledger has 23 complete, 12 partial and 35 pending experiment entries,
 including 12 conditional entries. Tier 2 is complete (11/11 entries); the other
-three tiers remain incomplete. Of the 34 questions, 11 are answered, fifteen have
-answers with limitations, four are partial and four are pending. The latest
+three tiers remain incomplete. Of the 34 questions, 12 are answered, fifteen have
+answers with limitations, three are partial and four are pending. Q34 is answered
+by the user's clarification that the original loss weights were arbitrary. Prior
 closures concern the two completed reference trajectories: BCE/AUROC, validation
 temperature fitting, logit scale, checkpoint locations, top-weighted metrics,
 contrastive directions and fixed-pool rescoring.
@@ -20,7 +21,12 @@ Epoch 15 minimized aggregate validation loss but had lower validation Spearman
 (0.17561). These are one seed and one scaffold realization, not a completed
 method comparison. Source: `baseline_status.json`, checkpoint trainer states.
 
-## Historical loss-weight selection — Q34 remains partial
+## Historical loss-weight selection — Q34 answered by user clarification
+
+On 2026-11-02, the user answered the question about the original
+R/B/C = 0.25/0.25/1 weights with **"arbitrary selection"**. The reference weights
+therefore had no validation-based selection rule on either Split A or Split B.
+This answer comes from the user; the W&B audit below alone did not establish it.
 
 A read-only W&B audit on 2026-11-02 found six historical `fusion512_tri_*`
 runs, covering three recorded static weight settings on both intended split
@@ -48,7 +54,7 @@ commits cannot reconstruct the executed config bytes. This limits provenance;
 it does not prove the historical configurations were invalid. The audit covered
 this named family, not every project run or off-W&B decision.
 
-Q34 now has partial historical evidence. Its prospective A/B weight-selection
+Q34's historical selection question is answered. The prospective A/B weight-selection
 comparison still requires the registered controlled fits; E39 remains pending.
 No new fit or test-based selection was made. Six metadata files were rehashed
 and all six config paths checked against the recorded Git trees. Evidence on
@@ -677,6 +683,47 @@ After verified B completion, the existing tuning queue launched
 `full__A__seed42__lr0p3` (W&B `lekrhvg9`) on physicalGPUs0,2,5,6. At
 Unix1793600720.55 it was at epoch0.2122; no LR has been selected and no
 confirmation seed has started. Scientific completion counts remain unchanged.
+
+The first five completed epochs of that already running A LR0.3 candidate now
+have an independently verified native validation/probe audit. Compared with
+`full__A__seed42__lr1p0` at the same epochs and optimizer steps:
+
+| Epoch | Reference validation rho | LR0.3 validation rho | Reference probe rho | LR0.3 probe rho |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.16488 | 0.13113 | 0.16214 | 0.12658 |
+| 2 | 0.21244 | 0.17298 | 0.22805 | 0.17453 |
+| 3 | 0.24317 | 0.19579 | 0.27084 | 0.20061 |
+| 4 | 0.26145 | 0.21412 | 0.30188 | 0.23170 |
+| 5 | 0.27953 | 0.23105 | 0.33753 | 0.25786 |
+
+Both use exactly the same 195,618 validation rows (7,997 eligible assays) and
+39,740 fixed-probe rows (2,048 eligible assays), with full defined coverage.
+Recorded configurations differ only in output directory and the four learning
+rates, all multiplied by 0.3: main/projection 1e-4 to 3e-5 and both encoders
+1e-5 to 3e-6. Training qualifications match. At epoch5/step4,010, LR0.3 has
+validation rho lower by0.04848 and probe rho lower by0.07968. Its validation
+aggregate loss is4.11930 versus2.93847, and eligible NDCG@1/3/5 is also lower
+(0.63377/0.69218/0.73471 versus0.67335/0.71781/0.75630).
+
+This is early learning-rate sensitivity on one seed and one A split. The LR0.3
+fit is still running: these five epochs do not establish its final peak, a
+preferred LR, final overfitting behavior, test generalization or seed variance.
+The training probe is descriptive. Neither the registered training schedule nor
+the B-validation selection rule was changed in response to these observations.
+
+All ten snapshots passed independent checks of277,185 group/scorer correlations
+and300 sampled noise-band pair counts. The matched comparison rehashed558 inputs
+and checked exact validation/probe identity and label equality. Bootstrap
+intervals, calibration and NDCG were not independently reconstructed by that
+verifier. No model inference, new fitting or test evaluation occurred.
+Evidence: `tier1/native_trajectory_prefix/full__A__seed42__lr0p3/epoch05/`
+`{plan,complete,exit,matched_reference_evidence}.json`, and
+`tier1/native_trajectories/full__A__seed42__lr0p3/6349989d65c2f7ef/`
+`{trajectory_through_epoch05,verification_through_epoch05}.json` on Atum.
+Trajectory SHA256 `95abce78a3a1ac386fa2b4e9571725f11d949d436c130f0325643b9cc73f013a`;
+verification SHA256 `c713c2e7c190ef9c97ffebc29f3a21f900aeddd2054458001cf932efaf1e128e`;
+matched evidence SHA256 `8c5d47fee2df1321891a00327aa5fe3894c7bf0e2c302b600f6f32f7d191660d`.
+Q04 and the incomplete metric/controlled-comparison experiments remain partial.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch

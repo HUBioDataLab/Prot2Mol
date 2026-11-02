@@ -105,7 +105,10 @@ manual tuning. All six launch config paths are absent from their recorded Git
 commits, and original split hashes were not recovered. These historical runs do
 not substitute for the current matched controls or establish which weights were
 best. Evidence: `historical_weight_audit/wandb_20261102/{audit,verification}.json`
-on Atum; Q34 remains partial and E39 remains pending.
+on Atum. On 2026-11-02 the user clarified that the original weights were an
+"arbitrary selection", supplying the answer to Q34's historical question.
+They were not selected through validation tuning. The current controlled
+weight-sweep experiment E39 remains pending.
 
 Checkpoint selection-rule and averaging contrasts use the same B-selected LR
 within each setting to isolate those changes. They do not independently retune
