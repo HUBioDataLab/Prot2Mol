@@ -1756,6 +1756,28 @@
         "verified_terminal_unix": 1793622675.710297
       }
     },
+    "native_remaining_tuning_audits": {
+      "source_commit": "2f586fd17f79520e84b860978cc604cdd221bd41",
+      "jobs": ["full__B__seed42__lr0p3", "full__A__seed42__lr3p0", "full__B__seed42__lr3p0"],
+      "scope": "Exactly three CPU audits of existing queued fits, all15 native validation/probe epochs each; no fit, inference, test scoring, LR selection or retries. Requires verified completion with four ranks and retention. Existing/failed analysis requires inspection.",
+      "status_at_activation": "waiting_for_registered_fit",
+      "worker_pid": 2007376,
+      "worker_start_ticks": 157513983,
+      "activation_verified_unix": 1793624387.9654927,
+      "cpu_only_environment_verified": true,
+      "files_frozen": 85,
+      "worker_sources_frozen": 21,
+      "training_sources_frozen": 43,
+      "focused_tests_passed": 65,
+      "completion_reader_qualification": "Accepted the already independently verified A LR0.3 completion, including all four rank receipts, complete horizon and retention; no analysis rerun or new measurement.",
+      "plan_sha256": "493afe4a28e02efa54b22e4ce309fbd48571b7a750d197c11e80e117c40d03f6",
+      "activation_sha256": "8d17f23ed730d0fd0df73bd4d8b233f6f281ca3f85614348efd4962ef333c4c1",
+      "completion_reader_qualification_sha256": "563ff600030c36678b09c18364f22c380b782c593d3f1108707b199983337dba",
+      "evidence": "tier1/native_remaining_tuning_audits/{plan,launch_process,started}.json; tier1/native_tuning_audits_runtime/2f586fd/{deployment,preflight,activation,completion_reader_qualification}.json on Atum",
+      "new_fits_created": 0,
+      "scientific_audits_completed_at_activation": 0,
+      "scientific_completion_counts_changed": false
+    },
     "native_A_lower_lr_training_complete": {
       "job_id": "full__A__seed42__lr0p3",
       "wandb_run_id": "lekrhvg9",

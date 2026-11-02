@@ -753,7 +753,29 @@ on physical GPUs0,2,5,6; its launcher and all four exact ranks were verified
 live. No common LR choice, confirmation seed, selected test comparison or new
 experiment closure follows.
 
-The automatic handoff stopped when its contrastive audit rejected encoder
+Automatic CPU audits are now queued for the three remaining, already registered
+full-arm tuning fits: B LR0.3, then A/B LR3.0. The separate worker
+`native_tuning_audits.py` (source `2f586fd`) is live and waiting for the current
+B fit, with no visible GPUs and two CPU threads per numerical library. It
+requires completed training, four rank receipts and retention before analyzing
+all15 validation/probe epochs. It makes no fit, inference, test-scoring or LR
+selection call. Existing or failed analysis output requires inspection.
+
+All65 focused worker/handoff tests passed. Atum preparation froze85 inputs,
+21 analysis/worker sources and the existing43 training sources; its completion
+reader also accepted the already independently verified A LR0.3 fit without
+rerunning that audit. The live training launcher and four permitted GPU ranks
+were unchanged. This is automation preparation, with zero additional fits or
+completed scientific audits and no change to experiment/question counts.
+Evidence: `tier1/native_remaining_tuning_audits/{plan,launch_process,started}.json`
+and `tier1/native_tuning_audits_runtime/2f586fd/`
+`{deployment,preflight,activation,completion_reader_qualification}.json` on Atum.
+Plan SHA256 `493afe4a28e02efa54b22e4ce309fbd48571b7a750d197c11e80e117c40d03f6`;
+activation SHA256 `8d17f23ed730d0fd0df73bd4d8b233f6f281ca3f85614348efd4962ef333c4c1`;
+reader qualification SHA256
+`563ff600030c36678b09c18364f22c380b782c593d3f1108707b199983337dba`.
+
+The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
 values). No checkpoint was changed and no next training was started. The
 repair validates those widths against the actual encoders while retaining
