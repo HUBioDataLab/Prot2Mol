@@ -83,8 +83,8 @@
       "rationale": "Selection is part of the method.",
       "interpretation": "If the best-Spearman checkpoint comes much later than the best-loss checkpoint on Split B, the early turning point is a selection artifact, not the model's limit.",
       "status": "answered_with_limits",
-      "answer": "Both completed reference runs select checkpoints on validation macro Spearman. A selects epoch14 (0.34367521); original B selects epoch6 (0.18460015). Aggregate validation loss is minimized at epoch15 on both splits (A2.36395550; B6.68790), when macro Spearman is0.34331738/0.17561471. Thus macro selection occurs earlier than minimum-loss selection in these runs. This answers the observed selection-rule/checkpoint-location question; test effects, seed spread and matched controlled B comparisons remain pending.",
-      "evidence": "controlled/runs/full__A__seed42__lr1p0/controlled_training_complete.json; baseline_status.json; tier1/baseline_trajectory_summary_v2.json; tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
+      "answer": "Both controlled reference fits at seed 42 and the base learning rate completed 15 epochs and select checkpoints on validation macro Spearman. A selects epoch 14 (0.34367521), and B selects epoch 6 (0.18457785). Aggregate validation loss is minimized at epoch 15 on both splits (A 2.36395550; B 6.68894768), when validation macro Spearman is 0.34331738/0.17975193. Thus macro selection occurs earlier than minimum-loss selection in both observed trajectories. Common learning-rate selection, selected controlled test effects and confirmation-seed spread remain pending. These are validation results from one seed; the initial fresh B baseline is recorded separately.",
+      "evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch15,verification_through_epoch15}.json; tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch15,verification_through_epoch15}.json on Atum",
       "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "native_B_trajectory_update": "Controlled B15 and all30 allocation exports/retention are complete. Native macro selects epoch6/step5262 at0.18457785; aggregate loss selects epoch15/step13155 at6.68894768. Counterfactual patience3 macro also selects6 and stops9. No selected test score or multi-seed comparison is available yet.",
@@ -1877,6 +1877,18 @@
         "production_gpu_qualified": false,
         "limitation": "Synthetic two-epoch CPU runtime only. No scientific dataset, selected checkpoint, 15-epoch selection or GPU qualification. Tier3, checkpoint/token provenance, orchestration and all scientific adaptation results remain pending."
       }
+    },
+    "canonical_summary_reconciliation": {
+      "checked_unix": 1793632358.0683782,
+      "scope": "Correct stale canonical summaries for Q07,E04,E19,E49-E52 using completed artifacts already recorded in their updates. No experiment added, executed or reclassified.",
+      "reference_trajectory_sha256": {
+        "A": "7cc18fafad3e454d1a44fd1c63a7f33f8aff2faba8f8a38921c3eb6a4c8924ff",
+        "B": "b5806c564a4b79adeb0f7c73e82a95db928d6b4b45781b917d1ded8cad59e02d"
+      },
+      "production_adaptation_views_sha256": "844c4c27ffd72036bcfd79c8102c4fb0b1b4ad3390607d1141d9eb1d47c85af6",
+      "packed_vectors_and_protocol_verified": true,
+      "token_payloads_rehashed": false,
+      "scientific_completion_counts_changed": false
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -1939,8 +1951,8 @@
       "experiment": "Treat differences within replicate noise as ties",
       "status": "partial",
       "conditional": false,
-      "completed_scope": "All 31 Split B exports re-scored with training-only replicate RMS epsilon and the original ranking margin; A predictions pending.",
-      "evidence": "RewardModel/outputs/paired_generalization/tier1/noise_bands on Atum",
+      "completed_scope": "All 31 initial B exports, including its selected test checkpoint, and both controlled A/B reference validation/probe trajectories over 15 epochs (60 snapshots) have noise-band rescoring using the training-only replicate RMS and reference ranking margin. Trainer float32 labels are used. Selected controlled test and repeated comparisons remain pending.",
+      "evidence": "tier1/noise_bands_float32/; tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json; tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "precision_update": "All 31 initial B exports rescored at Trainer float32 label values; 93 scorer/exports agree with native eligible groups and per-assay correlations. Original raw-label reports retained. A validation/probe trajectories are available; selected A test and controlled repeated comparisons remain pending.",
       "precision_evidence": "tier1/label_precision_complete.json; tier1/metrics_float32/; tier1/noise_bands_float32/",
       "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
@@ -2136,7 +2148,7 @@
       "experiment": "Label-marginal shift estimation/test with invertibility checked",
       "status": "partial",
       "conditional": false,
-      "completed_scope": "Split B validation-to-test BBSE completed with invertibility and unit-bootstrap checks; post-selection limitation explicit; Split A predictions pending.",
+      "completed_scope": "Initial B validation-to-test BBSE completed with invertibility and whole-unit bootstrap checks; the post-selection limitation is explicit. Selected A test predictions and its validation-to-test BBSE remain pending; A validation/probe predictions already exist.",
       "evidence": "RewardModel/outputs/paired_generalization/tier1/shift/bbse_B.json on Atum"
     },
     {
@@ -2456,9 +2468,9 @@
       "experiment": "Adapt heads on adaptation units and evaluate disjoint validation/test units",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
-      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "preparation_scope": "Whole-assay memberships, compact production token/label views and the fixed fitting/selection protocol are prepared. Support fitting and query scoring workers are qualified on tiny synthetic CPU models. A within-unit assay adaptation is structurally impossible; B feasibility and rank-evaluable cohorts remain explicit. Tier 3 completion, selected base-checkpoint/source/token verification, production GPU qualification, orchestration and every scientific adaptation result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json}; tier4/adaptation_views/complete.json and A/B views.json; tier4/adaptation_protocol/{plan,complete,verification}.json; tier4/adaptation_query_runtime/81ad6b6/{cpu_complete.json,qualification_cpu/verification.json} on Atum",
+      "local_view_preparation": "Initial local implementation at 98bb8b5 passed 28 CPU design/view checks. It was subsequently deployed in 49904db and the production A/B compact views were prepared. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache provenance are retained. Current production preparation evidence is recorded under execution_status.adaptation_view_preparation; no scientific adaptation performance is implied.",
       "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
       "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
@@ -2469,9 +2481,9 @@
       "experiment": "Repeat adaptation including cross-attention",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
-      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "preparation_scope": "Whole-assay memberships, compact production token/label views and the fixed fitting/selection protocol are prepared. Support fitting and query scoring workers are qualified on tiny synthetic CPU models. A within-unit assay adaptation is structurally impossible; B feasibility and rank-evaluable cohorts remain explicit. Tier 3 completion, selected base-checkpoint/source/token verification, production GPU qualification, orchestration and every scientific adaptation result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json}; tier4/adaptation_views/complete.json and A/B views.json; tier4/adaptation_protocol/{plan,complete,verification}.json; tier4/adaptation_query_runtime/81ad6b6/{cpu_complete.json,qualification_cpu/verification.json} on Atum",
+      "local_view_preparation": "Initial local implementation at 98bb8b5 passed 28 CPU design/view checks. It was subsequently deployed in 49904db and the production A/B compact views were prepared. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache provenance are retained. Current production preparation evidence is recorded under execution_status.adaptation_view_preparation; no scientific adaptation performance is implied.",
       "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
       "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
@@ -2482,9 +2494,9 @@
       "experiment": "Adapt and evaluate on disjoint groups of the same unit",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
-      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "preparation_scope": "Whole-assay memberships, compact production token/label views and the fixed fitting/selection protocol are prepared. Support fitting and query scoring workers are qualified on tiny synthetic CPU models. A within-unit assay adaptation is structurally impossible; B feasibility and rank-evaluable cohorts remain explicit. Tier 3 completion, selected base-checkpoint/source/token verification, production GPU qualification, orchestration and every scientific adaptation result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json}; tier4/adaptation_views/complete.json and A/B views.json; tier4/adaptation_protocol/{plan,complete,verification}.json; tier4/adaptation_query_runtime/81ad6b6/{cpu_complete.json,qualification_cpu/verification.json} on Atum",
+      "local_view_preparation": "Initial local implementation at 98bb8b5 passed 28 CPU design/view checks. It was subsequently deployed in 49904db and the production A/B compact views were prepared. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache provenance are retained. Current production preparation evidence is recorded under execution_status.adaptation_view_preparation; no scientific adaptation performance is implied.",
       "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
       "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
@@ -2495,9 +2507,9 @@
       "experiment": "Vary k across all three adaptation settings",
       "status": "pending",
       "conditional": false,
-      "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
-      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
-      "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
+      "preparation_scope": "Whole-assay memberships, compact production token/label views and the fixed fitting/selection protocol are prepared. Support fitting and query scoring workers are qualified on tiny synthetic CPU models. A within-unit assay adaptation is structurally impossible; B feasibility and rank-evaluable cohorts remain explicit. Tier 3 completion, selected base-checkpoint/source/token verification, production GPU qualification, orchestration and every scientific adaptation result remain pending.",
+      "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json}; tier4/adaptation_views/complete.json and A/B views.json; tier4/adaptation_protocol/{plan,complete,verification}.json; tier4/adaptation_query_runtime/81ad6b6/{cpu_complete.json,qualification_cpu/verification.json} on Atum",
+      "local_view_preparation": "Initial local implementation at 98bb8b5 passed 28 CPU design/view checks. It was subsequently deployed in 49904db and the production A/B compact views were prepared. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache provenance are retained. Current production preparation evidence is recorded under execution_status.adaptation_view_preparation; no scientific adaptation performance is implied.",
       "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
       "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
