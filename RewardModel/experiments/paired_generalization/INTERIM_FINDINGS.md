@@ -475,6 +475,21 @@ All 43 qualified training source files remain unchanged. Evidence:
 `tier1/reference_contrastive/recovery_{preflight,launch}_2cc800d.json` and
 `tier1/reference_contrastive/full__A__seed42__lr1p0/c81891c91f5ed91f/`.
 
+The remaining four registered full-arm tuning fits now have a bounded queue:
+A/B at learning-rate multiplier 0.3, followed by A/B at multiplier 3. The CPU
+coordinator was verified live as PID1260221 at Unix1793578258.44, waiting on the
+exact original B driver, launcher and four ranks. It requires B's verified
+completion, including allocation exports and retention, before continuing.
+The existing training driver and all 43 qualified source files are unchanged.
+Both filesystem capacity and account quotas are checked before each successor;
+the preparation check found approximately 746 GiB archive quota remaining.
+The queue stops before confirmation or test selection, and never retries a
+partial fit. All 23 queue/driver CPU tests passed. An immediate outer-launch
+process read encountered a transient empty command line; the already-running
+coordinator and its receipts were verified and recorded without restarting it.
+This is execution preparation, not another completed scientific experiment.
+Evidence: `controlled/full_tuning_queue/{plan,preflight,launch_process,launch_verification}.json`.
+
 Q11's scalar localization audit covers all 15 initial B validation epochs and
 all 15 verified A validation epochs. B's BCE rises by 0.03768 from its overall minimum at
 epoch 2 to epoch 15, with a positive point change in every fixed size bin.
