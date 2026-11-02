@@ -513,7 +513,7 @@ point estimates passed. Earlier checks are inherited only after exact source,
 prefix and table verification. This verification does not independently
 reconstruct bootstrap intervals, calibration fits or all NDCG values.
 
-The controlled B run now has a separately verified **ten-epoch prefix**.
+The controlled B run first received a separately verified **ten-epoch prefix**.
 Its probe uses the same fixed 2,048-eligible-assay rule as A, unlike the original
 B baseline's uniformly sampled assay probe. The sampled assays still differ.
 
@@ -541,8 +541,8 @@ are not independent sampling units. B validation has 136,957 rows and 3,969
 eligible assays. All 339,840 assay/scorer correlations across twenty snapshots and
 600 sampled pair-count checks passed independent verification. This does not
 independently verify the bootstrap intervals, calibration fits or all NDCGs.
-Independent analysis of the remaining B epochs and repeated controlled fits
-remain pending. Evidence:
+This prefix was subsequently extended to15 below; repeated controlled fits
+remain pending. Prefix evidence:
 `tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/`
 with `trajectory_through_epoch10.json` and `verification_through_epoch10.json`.
 
@@ -551,10 +551,10 @@ optimizer steps. All four rank-completion receipts match its frozen config.
 The saved native validation history selects **epoch6, macro Spearman0.18457785**;
 epoch15 gives **0.17975193** and the minimum aggregate validation loss,
 **6.68894768**. All3,969 eligible validation assays have defined correlations.
-This is native Trainer evidence, not yet the independently verified full-horizon
-analysis or a selected test result. At Unix1793599102.02 the same driver was
-exporting allocation predictions through four workers on physicalGPUs0,2,5,6;
-final export/retention completion was still pending.
+All30 allocation prediction exports and managed retention subsequently finished
+at Unix1793600398.06, with verified training completion and no selected test
+score. Completion-receipt SHA256:
+`1372d4e4dc731f697b3deeba5aec0b89fad488cb6a435d6ef899a72ec66c0b8b`.
 
 The initial reference also selects epoch6 (0.18460015), with its minimum loss
 at epoch15 (6.68789959; macro0.17561471). The two seed42 runs therefore agree
@@ -566,22 +566,45 @@ Evidence: both runs' `launch_provenance.json` and
 `f0c91b09d7dfb5877090e7131dd1370bf456e1c54c1cb66e6f163f3d94b071fa`.
 Repeated controlled comparisons and all completion counts remain unchanged.
 
-A one-shot CPU handoff now covers the remaining B trajectory analysis
-(`native_horizon_queue.py`, commit `fec3286`). It waits for the original driver,
-launcher and four ranks, requires verified training/export/retention completion
-and all 15 validation/fixed-probe snapshots, then runs the existing native
-analysis and independent verifier. The unchanged verified ten-epoch prefix is
-reused only after its evidence hashes are checked; completion requires all 30
-snapshots. It creates no training fit, model inference or test-set score and
-does not retry a failed stage. All 13 focused orchestration tests passed, with
-simulated analysis/verification. Atum verified coordinator PID1547432,
-start_ticks154657346, blank CUDA visibility and all eleven live handles. Its
-current phase is `waiting_for_original_processes`, not a completed analysis.
-The frozen plan SHA256 is
+The one-shot CPU handoff (`native_horizon_queue.py`, commit `fec3286`) completed
+at Unix1793600683.91 after verifying the original driver's completion. All30
+validation/probe snapshots are independently checked: **509,760** per-assay/scorer
+correlations and **900** sampled pair-count checks. The identical ten-epoch
+prefix was reused only after source/output hashes were verified. This verifier
+does not independently reconstruct bootstrap intervals, calibration fits or
+NDCG values, and it read no test predictions or model/token payloads.
+The frozen handoff plan SHA256 is
 `3df846ee379582df8b0c996ed38b3eefaa3c09d75b22ec711d4c5de5b08931e1`.
-Evidence: `tier1/native_trajectory_handoff/full__B__seed42__lr1p0/`
-`{plan,launch_intent,launch_initial,started,launch_verification,status}.json`
-and `native_horizon_queue_runtime/fec3286/deployment.json` on Atum.
+The final trajectory and verification SHA256 values are respectively
+`b5806c564a4b79adeb0f7c73e82a95db928d6b4b45781b917d1ded8cad59e02d` and
+`2b178b8d2fc28c84e17b7798d0323dc15b04b7291d955d7b1560480e16f17139`.
+Evidence: the native B directory above with `trajectory_through_epoch15.json`
+and `verification_through_epoch15.json`, plus
+`tier1/native_trajectory_handoff/full__B__seed42__lr1p0/{complete,exit}.json`.
+
+From epoch6 to15, B's fixed-probe macro rises **0.39862→0.51969**, while validation
+changes **0.18458→0.17975**. The final probe-minus-validation difference is
+**0.33994**. This probe contains2,048 eligible assays but only25 components;
+it is not a full-training estimate or independent seed evidence. Native BCE,
+ranking and contrastive validation losses attain minima at epochs2,3,15,
+respectively. Their first adjacent increases are2→3,3→4,6→7; an adjacent increase
+alone does not establish sustained overfitting. Learned scale rises13.5988→22.5452.
+At epoch15, validation-only temperature1.4732 changes BCE logloss0.49210→0.46908
+without changing score order; this is an in-sample calibration result.
+
+On the same3,969 eligible validation assays, ranking NDCG@1/@3/@5 peaks at
+epochs6/13/8. All three finish below their epoch6 values, so this run does not
+show sustained late top-ranking improvement. From1→15, within-assay
+ranking/BCE agreement falls0.67647→0.59235 on3,968 mutually defined assays,
+whereas ranking/cosine agreement rises0.07402→0.23018 on3,969. Final BCE-logit
+and cosine label macros are0.13944/0.07754, below the ranking head's0.17975.
+These prediction correlations do not establish gradient conflict. Separate
+directional/fixed-scale results remain labelled with their original source runs.
+
+After verified B completion, the existing tuning queue launched
+`full__A__seed42__lr0p3` (W&B `lekrhvg9`) on physicalGPUs0,2,5,6. At
+Unix1793600720.55 it was at epoch0.2122; no LR has been selected and no
+confirmation seed has started. Scientific completion counts remain unchanged.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
