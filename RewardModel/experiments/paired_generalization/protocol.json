@@ -1863,7 +1863,9 @@
       "status": "pending",
       "conditional": false,
       "regularization_handoff": "regularization_queue.py (5face02) passed24 orchestration tests and is live waiting for the full-reference report. It covers only the20 already registered fits for decay0.001/0.1, followed by selected evaluation/reporting, reusing decay0.01 full reference. No regularization fit has started and no scientific selection-rule/regularization comparison is complete.",
-      "regularization_evidence": "controlled/regularization_queue/{plan,preflight,launch_process,launch_verification}.json on Atum"
+      "regularization_evidence": "controlled/regularization_queue/{plan,preflight,launch_process,launch_verification}.json on Atum",
+      "reporting_preparation": "regularization_analysis.py (c8d05e3) freezes one decay using only native seed42 B validation across3 settings/3 LRs, then keeps the chosen decay and each setting's selected LR common across checkpoint rules. All30 verified primary analyses are required; all settings, within-fit checkpoint effects, paired decay-minus-reference changes, coverage and separate tuning/confirmation seed summaries remain visible. This is not independently retuned stopping algorithms. All26 focused tests passed; Atum read-only preflight mapped18 planned tuning jobs and found0 summaries, creating0 selections/fits/scientific comparisons. E33 remains pending.",
+      "reporting_evidence": "regularization_analysis_runtime/c8d05e3/{deployment,preflight}.json on Atum"
     },
     {
       "id": "E34",

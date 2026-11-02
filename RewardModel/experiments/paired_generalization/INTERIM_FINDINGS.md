@@ -569,6 +569,22 @@ No regularization fit has started and no experiment/question is newly complete.
 Evidence: `controlled/regularization_queue/{plan,preflight,launch_process,launch_verification}.json`
 and `regularization_queue_runtime/5face02/deployment.json`.
 
+E33's regularization comparison is implemented in `regularization_analysis.py`
+(commit `c8d05e3`). It freezes one decay from native seed42 B validation across
+the three existing settings, after each setting's existing three-LR selection.
+The same selected decay/LR is used across checkpoint rules; all settings remain
+reported. This isolates checkpoint choices on common training procedures rather
+than independently tuning every stopping algorithm. The report requires all
+30 verified primary analyses and preserves within-fit checkpoint changes, paired
+alternative-decay minus reference changes, score coverage and separate seed42/
+confirmation-seed summaries. No test score chooses the decay or LR, and no fit
+is added. All26 focused tests passed, including actual validation-receipt
+reconstruction, test-score independence, source/scope rejection and cached-report
+integrity. Atum's read-only preflight mapped18 planned tuning jobs and found no
+completed primary summaries; no decay selection or scientific comparison was
+created. E33 and all question/experiment completion counts remain unchanged.
+Evidence: `regularization_analysis_runtime/c8d05e3/{deployment,preflight}.json`.
+
 Q34/E39's validation-only weight comparison is implemented in
 `weight_selection.py` (commit `c13c5e9`). It reuses the five registered axis-sweep
 settings and their three LRs: 15 candidates per split, 30 existing tuning fits,
