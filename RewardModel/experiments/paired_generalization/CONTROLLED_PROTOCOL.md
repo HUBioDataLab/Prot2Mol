@@ -358,6 +358,25 @@ Completion means only that this full-arm primary report exists. It does not
 train another arm, select from test scores, run additional allocations, release
 weights or mark the study complete.
 
+`regularization_queue.py` continues E33 only after that exact full-evaluation
+coordinator terminates and its ten-fit report passes verification. It runs the
+already registered weight-decay 0.001 and 0.1 settings, in that order. Each gets
+six A/B seed42 tuning fits, B-validation LR selection, four A/B seed43/44
+confirmations, selected-checkpoint evaluation and a verified primary summary.
+The existing weight-decay 0.01 reference is reused. This is 20 existing planned
+fits, with no new setting or search expansion. The queue then stops before
+encoder-freedom, loss-subset, allocation and other study work.
+
+The coordinator has no visible GPUs. Training uses the existing four-GPU driver
+and native evaluation uses the existing evaluator, both protected by the shared
+lock and physical-GPU UUID allowlist. Archive/home quota and occupancy are checked
+before each launch. Parent receipts, configurations and source files are pinned;
+new confirmation configurations must exactly match the frozen validation choice.
+Existing output, failed training/evaluation or changed evidence requires
+inspection, never an automatic retry. All earlier arm receipts are checked again
+before final completion. Scientific comparison and E33 closure require the actual
+reports; preparing or launching this handoff does not complete an experiment.
+
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
 groups remain fixed, and leak-in training must match leak-out training size,
