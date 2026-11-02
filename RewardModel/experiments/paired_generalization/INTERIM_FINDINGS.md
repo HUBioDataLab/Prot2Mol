@@ -907,8 +907,9 @@ validation sets; original test groups remain unchanged. A has 8,215/8,216/16,431
 assays in these three roles. B has 4,722/4,558/9,578 assays across
 2,016/2,016/4,034 components. Across-unit adaptation uses nested whole-assay
 prefixes at k=1/2/4/8/16/64, shared between the heads-only and heads-plus-interaction
-settings. Token/label views are prepared; the fitting protocol and production
-training runtime still need qualification.
+settings. Token/label views and the fitting/epoch-selection protocol are now
+prepared; selected-base binding and the production GPU runtime still need
+qualification.
 The selected A prefixes at k=1/2/4 and B prefixes at k=1/2 contain no
 ranking-eligible assay. Those budgets provide no direct ranking supervision;
 an absence of ranking improvement there cannot establish a head-capacity limit.
@@ -974,10 +975,33 @@ optimizer steps each; compact restoration reproduced each fitted model exactly.
 All saved payload hashes passed verification at Unix1793579029.77.
 No scientific checkpoint or adaptation query set entered these fits.
 This qualifies the support-fitting code on tiny CPU models, not production
-GPU execution or the still-unfrozen adaptation budget/selection protocol.
+GPU execution or scientific adaptation performance.
 E49–E52 remain pending. Evidence:
 `tier4/adaptation_runtime/cpu_09135aa/qualification.json`, its per-scope
 `{fit_plan,complete}.json` records, and `cpu_09135aa_verification.json`.
+
+The adaptation protocol is now frozen from commit `17f1328`, before scientific
+adaptation fits or prediction scores. It inherits the selected full-arm bases
+and optimizer settings, with no additional learning-rate search. Each
+across/within, trainable-scope and k cell selects an epoch using only B seed42
+validation queries, then applies it to the matched A/B comparisons and
+seeds43/44. The native defined-correlation macro convention and explicit
+coverage are retained. Test queries and confirmation seeds cannot select an
+epoch, and k=0 remains an unchanged comparison on each identical query cohort.
+
+Production accounting gives 22 selection cells, comprising 72 across-unit fits
+and 24,192 independent fits on small within-unit support sets across both scopes
+and three seeds. Infeasible A within-unit and B k=64 ranking-selection cases
+remain explicit. Direct reconstruction from frozen group tables reproduced
+every selection inventory and fit count at Unix1793580028.39. Across-unit
+selection has 1,956 eligible B validation assays; within-unit k=1/2/4/8/16 has
+853/500/203/42/1 eligible validation query assays, spread over the previously
+reported 515/220/61/11/1 rank-evaluable units. The small k=16 selection cohort is
+a material limitation. Twenty-five local protocol/worker tests passed.
+No scientific fitting or inference occurred. Tier-3 completion, verified base
+checkpoint binding and production GPU qualification remain required; E49–E52
+remain pending. Evidence: `tier4/adaptation_protocol/{plan,complete,verification}.json`
+and `tier4/adaptation_protocol_17f1328_launch.json` on Atum.
 
 ## Representation geometry preparation — inference pending
 
