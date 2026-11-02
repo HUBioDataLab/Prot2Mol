@@ -404,6 +404,20 @@ creates another training job. It reuses the existing trajectory analyzer and
 independent verifier; preparing or launching it does not count as a scientific
 result or completed experiment.
 
+`native_tuning_audits.py` is a separate CPU-only worker for exactly the three
+remaining fits in the existing tuning queue: B at LR0.3, then A/B at LR3.0.
+It requires the completed A LR0.3 audit, freezes the existing queue and source
+evidence, and waits for each driver's verified completion receipt. That receipt
+must include all four rank completions, the training summary and retention;
+the first fit's observed launcher must also terminate. Future fits may finish
+while an earlier audit runs. Each then receives the unchanged native analyzer
+and an independent check of all30 validation/probe snapshots. Existing or
+partial analysis output is never adopted or retried. Observation errors re-poll
+the same coordinator; changed or missing scientific evidence stops the worker.
+The worker performs no fitting, inference, LR selection or test scoring, and
+does not expand the existing tuning queue. Its preparation gives no experiment
+completion credit. All65 focused new-worker and existing-handoff checks passed.
+
 `regularization_queue.py` continues E33 only after that exact full-evaluation
 coordinator terminates and its ten-fit report passes verification. It runs the
 already registered weight-decay 0.001 and 0.1 settings, in that order. Each gets
