@@ -564,6 +564,20 @@ scientific stage waits for completed fits and frozen allocation LR selections;
 no experiment or question is newly closed. Evidence:
 `realization_losses_runtime/2a7bfac/{deployment,view_qualification}.json`.
 
+The selected-allocation evaluator is implemented in
+`realization_postselection.py` (commit `2b4ce42`). It requires completed native
+validation trajectories and verified averages, reuses epoch validation outputs,
+and evaluates only the frozen selected weights on each allocation's test role;
+averages also receive validation evaluation. All 19 focused CPU tests passed,
+including actual tiny-model inference under both mask policies, unchanged
+upstream artifacts, exact role/label/fingerprint alignment, no test-driven
+selection and rejection of incomplete/corrupted evidence. Atum verified all six
+production role views over the same 273,913 held-out rows, with model inference
+and test metrics disabled. Scientific selected test evaluation still awaits
+training, allocation LR selection and the native-loss/averaging stages. No
+completion count changes. Evidence:
+`realization_postselection_runtime/2b4ce42/{deployment,input_qualification}.json`.
+
 The downstream primary-grid evaluator had the same unresolved-versus-resolved
 encoder-width mismatch. It was reproduced with a saved-model fixture and
 repaired in commit `ed4393f`: only unspecified launch widths may resolve to

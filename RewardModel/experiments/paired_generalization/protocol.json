@@ -1380,6 +1380,15 @@
       "verification_sha256": "1301281957f2909ada42859352574daaf827dd511ff2fa4b618cc29cea700ebc",
       "evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch05,verification_through_epoch05}.json on Atum",
       "limitations": "Single fitted seed/allocation, fixed eligible-assay probe with25 B components, unequal A/B steps per epoch. No test predictions read. Bootstrap intervals, temperature fits and NDCG not independently reconstructed by this verifier. Full horizon and repeated fits pending."
+    },
+    "allocation_selected_evaluation": {
+      "status": "implemented_and_input_qualified_scientific_execution_pending",
+      "code_commit": "2b4ce4232e6de3f2ea87090e8c9681423db5a488",
+      "module": "RewardModel/experiments/paired_generalization/realization_postselection.py",
+      "scope": "Verified native validation and averages must precede selected test tasks. Epoch validation is reused; selected averages receive validation and test evaluation. Test scores never select LRs, epochs, averages or budgets. Shared GPU lock and quota checks remain enforced.",
+      "validation": "19 focused CPU tests passed, including actual tiny-model inference under both masks, exact role/label/fingerprint checks, unchanged upstream evidence and rejection of invalid/partial inputs. Atum verified all six role views over273913 unique held-out rows without model inference or test metrics.",
+      "evidence": "realization_postselection_runtime/2b4ce42/{deployment,input_qualification}.json on Atum",
+      "remaining": "Scientific evaluation awaits completed fits, allocation LR selection, native validation losses and averages. Statistical allocation/seed comparisons and weight release remain pending."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
