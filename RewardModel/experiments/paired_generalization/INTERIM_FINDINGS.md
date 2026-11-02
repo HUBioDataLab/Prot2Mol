@@ -1738,8 +1738,26 @@ Evidence: `tier4/objective_probe_batches/complete.json`, SHA256
 `acc44c0028ef8fffb2c00917f506b17fb279e3e353055e93c996244d5f981c50`;
 runtime receipt `tier4/objective_probe_batches_runtime/cd4ac87/complete.json`,
 SHA256 `1bed336b7a4272e01c85e5e77c0f76b732ce928f084841fdd8783f3b926e49df`.
-Complete token-payload verification and production reconstruction/GPU numerical
-qualification remain required before scientific probes.
+Complete token-payload verification and GPU numerical qualification remain
+required before scientific probes.
+
+Production reconstruction has also passed at source `70c3252`. On Atum, all128
+saved batches reproduced native dataset items exactly, including cached tokens,
+labels, identities, list boundaries and original cache row indices. Native
+collation also matched exactly across2,304 tensor/metadata fields, including
+tensor shapes, dtypes and values. The cached tokenizer padding IDs are1 for
+ESM2 and3 for SELFormer. All30 focused reconstruction tests passed locally.
+The production verifier read the selected token payloads and local tokenizer
+metadata, but no model weights or test data; it measured no loss or gradient.
+This qualifies reconstruction, not full token-cache integrity or scientific
+probe outcomes. The worker exited0 and was confirmed terminal.
+
+Evidence: `tier4/objective_probe_batches/reconstruction_verification.json`,
+SHA256 `3e2d23f5b831e73ec592419ea32f8f2a60e2a681d8d37187929fe97f01516446`;
+runtime receipt `tier4/objective_probe_reconstruction_runtime/70c3252/complete.json`,
+SHA256 `6cb1861b87247a758ea809afc0e2070312dde141a6f220c107e9a7a2b033d291`.
+Tier3 and selected checkpoints, fixed step sizes, full token-payload hashes and
+GPU numerical qualification still precede the actual E56/E57 measurements.
 
 ## A-versus-B variant reporting preparation — scientific results pending
 
