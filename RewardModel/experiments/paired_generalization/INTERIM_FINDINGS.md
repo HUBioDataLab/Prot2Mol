@@ -1286,6 +1286,35 @@ subset-local binary labels, shared token buffers and the actual sampler. This
 qualifies data loading; it does not establish training or performance results.
 Source: `learning_curves/qualified_data_views.json`.
 
+The E41 native evaluation path is now implemented in
+`learning_curve_evaluation.py` (source `2bc0f21`). It requires all ten completed
+primary full-reference fits and all six tuning fits for the relevant fraction,
+reconstructs the B-validation LR choice, and checks complete 15-epoch histories,
+four-rank receipts, training qualifications and retained model bytes. It
+verifies that each completed fit used its exact registered subset and labels;
+fixed validation/test partitions are reused. The selected LR gets all five
+existing checkpoint rules, while other seed-42 LRs get best-macro only. The
+100% endpoint is reused, and the shared training lock/device allowlist applies
+to evaluation as well as fitting.
+
+All 21 focused tests passed, including real saved tiny-model inference through
+the native Trainer with no optimizer, training or weight changes. Tests also
+reject a rehashed but incomplete nonselected candidate, changed whole units,
+labels, model bytes, selection or device provenance. Atum recomputed the nested
+selections and subset-local labels for all eight views,
+verified the exact full endpoints and rechecked 28 unique view inputs. An
+attempt to plan evaluation of an unfinished curve fit correctly refused it.
+These CPU checks read prepared metadata and label/index arrays, not token
+payloads or trained weights; they are not scientific inference or performance.
+
+No curve fit, scientific evaluation or new GPU queue has started. All nine
+existing live process identities and 138 pinned inputs were preserved during
+deployment. E41/Q29 remain partial: fitting, native scoring and statistical
+learning-curve reporting are still required. Evidence on Atum:
+`learning_curve_evaluation_runtime/2bc0f21/{deployment,preflight,view_qualification}.json`.
+Preflight SHA256 `bfeb49c95c52ad64391db077e3704faa55e977dae74ecae4dc9a054e4b7df324`;
+view qualification SHA256 `71f364cfdd0edcd3f4e0deb6be1f85ac2f6ab11d3ed45538cb0822c4ced827c0`.
+
 E40's fixed-test leak comparison has data-construction evidence, not model
 results. Version 2 matches whole-assay protein identity, size, BCE-positive
 count, strict contrastive-active count, replicate histogram and ranking

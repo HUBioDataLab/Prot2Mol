@@ -601,3 +601,26 @@ Registered B curve fits also export every epoch for the additional fixed
 held-out allocations before retention. Test comparisons remain a later step.
 The primary and curve drivers cannot own the GPU training lock simultaneously;
 an existing incomplete run requires inspection rather than automatic relaunch.
+
+`learning_curve_evaluation.py` supplies native fixed-weight evaluation for the
+three smaller fractions. It reads the ten completed primary full-endpoint fits
+without materializing or refitting them, reconstructs each fraction's LR choice
+from its six completed A/B tuning fits using B validation, and verifies every
+input fit's complete 15-epoch history, four rank receipts and common training
+qualification. It recomputes the frozen nested unit selection and subset-local
+binary labels, verifies exact full-endpoint row/label identity, and checks that
+the training summary records the same view and realized size. The held-out
+partitions remain those of the primary plan. The registered reference mask and
+ranking readout are retained; no new loss or masking setting is introduced.
+
+The selected LR receives the existing five checkpoint rules; other seed-42 LRs
+receive best-macro evaluation only. Identical checkpoints share inference.
+`learning_curve_evaluation.py preflight` only inventories preparation. Once the
+required fits and selection exist, `prepare --job-id ID` freezes a checked
+evaluation plan and `run --job-id ID --workers 4` uses the existing training
+lock and only GPUs 0,2,5,6. Native receipts bind source data, checkpoints,
+predictions, precision and device provenance; CPU qualification cannot be used
+as scientific GPU evidence. Partial evaluation output requires inspection.
+No queue or scientific curve evaluation has been started. Aggregated learning
+curves, paired whole-unit uncertainty, final reporting and any conditional
+additional-allocation work remain separate unfinished requirements.
