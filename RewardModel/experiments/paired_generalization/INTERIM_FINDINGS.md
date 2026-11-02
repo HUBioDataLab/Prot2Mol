@@ -961,6 +961,24 @@ Tier 3 and training-protocol/runtime gates are satisfied. Evidence:
 `tier4/adaptation_views/complete.json`, its A/B `views.json` manifests, and
 `tier4/adaptation_views_launch_49904db.{json,log}` on Atum.
 
+The support-only adaptation fitting worker was added in commit `09135aa`.
+Its heads-only scope trains active ranking/BCE heads, contrastive projections
+and the learnable scale; the second scope additionally trains the fusion
+cross-attention blocks. Both hold encoders, shared input projections and
+normalizations fixed. Frozen feature modules remain in evaluation mode.
+Thirteen local CPU tests cover optimizer membership, unchanged frozen state,
+low-k supports lacking ranking supervision, disabled objectives, query-evaluation
+exclusion, exact compact-weight restoration and corrupt payload rejection.
+Atum also completed two-epoch synthetic CPU fits in both scopes, with two
+optimizer steps each; compact restoration reproduced each fitted model exactly.
+All saved payload hashes passed verification at Unix1793579029.77.
+No scientific checkpoint or adaptation query set entered these fits.
+This qualifies the support-fitting code on tiny CPU models, not production
+GPU execution or the still-unfrozen adaptation budget/selection protocol.
+E49–E52 remain pending. Evidence:
+`tier4/adaptation_runtime/cpu_09135aa/qualification.json`, its per-scope
+`{fit_plan,complete}.json` records, and `cpu_09135aa_verification.json`.
+
 ## Representation geometry preparation — inference pending
 
 E54/E55 have fixed, label-free sampling cohorts for each A/B train, validation
