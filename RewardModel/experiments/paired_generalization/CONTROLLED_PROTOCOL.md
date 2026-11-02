@@ -377,6 +377,29 @@ inspection, never an automatic retry. All earlier arm receipts are checked again
 before final completion. Scientific comparison and E33 closure require the actual
 reports; preparing or launching this handoff does not complete an experiment.
 
+`regularization_analysis.py` first freezes a decay choice from the eighteen
+existing native seed42 tuning fits. Each setting keeps its existing
+B-validation-selected LR; the highest best-macro B-validation score then chooses
+decay. Exact family ties prefer the full reference (0.01), then 0.001, then 0.1.
+The family therefore has nine decay/LR candidates per split. No test score or
+confirmation-seed score participates in this choice, and no new fit is created.
+The chosen decay is shared across all checkpoint rules. This isolates checkpoint
+rule changes on common training procedures; it does not independently optimize
+the hyperparameters of every stopping algorithm.
+
+The report requires all thirty verified primary analyses and their three
+canonical arm summaries, with unchanged qualified training and metric sources.
+It preserves every setting, each B-selected LR, all five checkpoint rules,
+coverage, seed42 tuning exposure and seed43/44 confirmations. It carries the
+within-fit checkpoint changes and adds each alternative decay minus the shared
+reference on paired assays/units within each split and seed. Each contrast uses
+the two fitted models' mutually defined eligible cohort, which can differ between
+alternatives. Conditional whole-unit intervals and seed spread remain separate;
+A−B changes are descriptive across different held-out populations, without a
+paired cross-split confidence interval. Completed paths alone do not pass the
+native inference, selection and artifact gates. The reference remains one of
+three declared settings, not a claim of globally optimal regularization.
+
 The user confirmed the leak experiment’s two axes: molecule-only versus full
 protein–molecule scoring, crossed with leak-in versus leak-out training. Test
 groups remain fixed, and leak-in training must match leak-out training size,
