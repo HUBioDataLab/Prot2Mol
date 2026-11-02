@@ -60,6 +60,24 @@ similarly uses the shared full reference plus its two declared decay settings.
 Report each family’s total tuning count, including its shared reference, rather
 than comparing family maxima as if all families had the same number of trials.
 
+`weight_selection.py` reports Q34/E39's A-validation versus B-validation choice
+over these same five settings and three LRs. It requires all 30 existing tuning
+fits, their unchanged registered configurations, native validation exports and
+the same verified training qualification. It makes no new fit or confirmation
+request and reads no test scores. Each setting uses the existing LR rule;
+cross-setting score ties prefer the shared full reference, then BCE-low,
+BCE-high, contrastive-low and contrastive-high in that fixed order. Undefined
+scores and zero defined coverage cannot win, while differing nonzero coverage
+remains explicit rather than being silently treated as an identical cohort.
+
+The A-validation choice is a diagnostic comparison with the deployment-oriented
+B-validation choice. The report lists 15 tuning candidates per split, 30 unique
+fits including six shared full-reference fits, and the 20 confirmations already
+in the primary plan. If A selects a different LR from that setting's B-selected
+LR, only seed42 covers that A-selected configuration; the report must not borrow
+seed43/44 evidence at another LR. These validation choices do not establish test
+improvement or explain how the reference weights were chosen before this study.
+
 Checkpoint selection-rule and averaging contrasts use the same B-selected LR
 within each setting to isolate those changes. They do not independently retune
 the LR for each checkpoint rule. The original requested B reference remains a
