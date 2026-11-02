@@ -1340,6 +1340,32 @@
       "validation": "19 focused CPU tests using synthetic scalar exports and simulated fits passed. Supplemental export registration and rejection by the primary evaluator also checked. Atum read-only preflight verified frozen allocations and reported five incomplete tuning fits and no primary selection.",
       "evidence": "realization_selection_runtime/47bcd17/{deployment,preflight}.json on Atum",
       "scientific_execution": "No allocation LR selection or supplemental training has run. Allocation full losses, averaging, selected test evaluation and weight release remain pending."
+    },
+    "allocation_native_losses": {
+      "status": "implemented_and_data_qualified_scientific_execution_pending",
+      "code_commit": "2a7bfac934e8968a15124ad242fb9d2665ca2400",
+      "module": "RewardModel/experiments/paired_generalization/realization_losses.py",
+      "scope": "Native validation losses at all 15 checkpoints of allocation-selected B fits; preserves uniform-inference LR/macro choices, derives native-loss/patience rules and verified post-minimum weight averages. No test-role evaluation or weight release.",
+      "validation": "24 focused CPU tests passed, including actual tiny-model inference at all 15 epochs under reference and training-known masks, unchanged parameters, exact averages and corruption/coverage/provenance guards. Atum verified production token payloads and all three allocation validation views without loading a model.",
+      "production_views": {
+        "original_seed42": {
+          "rows": 136957,
+          "groups": 9280,
+          "units": 4032
+        },
+        "equal_size_seed43": {
+          "rows": 136957,
+          "groups": 9448,
+          "units": 4031
+        },
+        "equal_size_seed44": {
+          "rows": 136957,
+          "groups": 9475,
+          "units": 4032
+        }
+      },
+      "evidence": "realization_losses_runtime/2a7bfac/{deployment,view_qualification}.json on Atum",
+      "remaining": "Scientific loss trajectories and averages await completed fits and frozen allocation LR decisions. Selected test evaluation, allocation/seed comparisons and weight release remain pending."
     }
   },
   "deployment": "unseen molecules from a molecule generator",

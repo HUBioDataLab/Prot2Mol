@@ -544,6 +544,23 @@ Full-loss evaluation, averaging and selected test comparisons for these
 allocations remain pending. Experiment/question completion counts are unchanged.
 Evidence: `realization_selection_runtime/47bcd17/{deployment,preflight}.json`.
 
+The allocation-native validation-loss and averaging stage is implemented in
+`realization_losses.py` (commit `2a7bfac`). It evaluates all 15 checkpoints only
+at each allocation's frozen selected LR, retains the existing uniform-inference
+Spearman choices, and derives loss/patience rules and post-minimum averages from
+that allocation's native validation losses. Identical averaging windows share
+one verified artifact; test roles and checkpoint release remain separate.
+All 24 focused CPU tests passed, including real tiny-model native inference for
+15 epochs under both mask policies, unchanged weights, verified averages,
+registration/coverage checks and rejection of CPU artifacts as GPU results.
+Atum then verified the complete production token caches and row/label/unit
+alignment of all three validation views: each has 136,957 rows; original/seed43/
+seed44 contain 9,280/9,448/9,475 assays and 4,032/4,031/4,032 indivisible units.
+This qualification loaded no model and computed no loss or test score. The
+scientific stage waits for completed fits and frozen allocation LR selections;
+no experiment or question is newly closed. Evidence:
+`realization_losses_runtime/2a7bfac/{deployment,view_qualification}.json`.
+
 The downstream primary-grid evaluator had the same unresolved-versus-resolved
 encoder-width mismatch. It was reproduced with a saved-model fixture and
 repaired in commit `ed4393f`: only unspecified launch widths may resolve to
