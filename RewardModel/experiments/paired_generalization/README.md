@@ -227,6 +227,28 @@ those handles after any coordinator interruption before launching other work.
 The coordinator's CPU-only environment is explicitly removed from GPU children;
 the next scientific training run uses online W&B with no inherited run ID.
 
+`control_queue.py` provides a separate, bounded continuation after the matched
+B reference `full__B__seed42__lr1p0`. It queues exactly the four already registered
+full-arm tuning fits, in order: A/B at LR multiplier 0.3, then A/B at multiplier 3.
+It stops before confirmation runs or postselection; this adds no scientific
+settings or LambdaMART fits. Prepare it with the live B `--driver-pid` and
+`--training-pid`, then invoke `run` once. Its CPU coordinator requires
+`CUDA_VISIBLE_DEVICES=''`, `ACCELERATE_USE_CPU=false` and `WANDB_MODE=online`;
+the existing driver exposes only the four authorized UUIDs to its children.
+
+The queue pins all six original process identities, the host boot, registered
+jobs/configs, specification, qualified training sources and runtime packages.
+It waits for the original driver, launcher and ranks to terminate, then verifies
+the predecessor's completion receipt, including allocation exports and retention.
+Every successor uses the existing driver under the global training lock, with
+the same baseline/data/runtime checks. It requires both physical space and
+remaining account quota of at least 30 GiB on the archive and 4 GiB on home before
+each fit. Busy GPUs, lock contention and low storage wait; source changes,
+missing completion, nonzero child exits and existing outputs stop for inspection.
+No partial fit or interrupted coordinator is automatically retried. Receipts and
+live status are under `controlled/full_tuning_queue/`; completion of this finite
+queue does not establish scientific experiment or study completion.
+
 `native_analysis.py --job-id full__A__seed42__lr1p0` incrementally audits
 completed native validation and fixed training-probe snapshots on CPU while
 training continues. It verifies row identities, labels, dataset fingerprints,
