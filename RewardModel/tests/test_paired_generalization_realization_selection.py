@@ -169,10 +169,15 @@ def test_exact_supplements_run_once_and_union_completion_checks_exports(prepared
         calls.append(metadata)
         assert metadata['regime']=='B' and metadata['phase']=='allocation_confirmation'
         run=Path(metadata['output_dir'])
+        launch=dict(config_sha256=metadata['config_sha256'],
+            config=module.yaml.safe_load(Path(metadata['config_path']).read_text()))
+        assert predictions.validate_run_registration(run,launch)['family']=='controlled'
         write_json(run/'experiment_summary.json',dict(config_sha256=metadata['config_sha256'],test_evaluated=False,test_metrics={}))
         for rank in range(4):write_json(run/f'rank_{rank}_complete.json',dict(rank=rank,world_size=4,config_sha256=metadata['config_sha256']))
         write_json(run/'retained/retention.json',dict(config_sha256=metadata['config_sha256'],selections={}))
         export_fixture(metadata,prepared['contract_path'],prepared['rows']);mark_complete(metadata)
+        with pytest.raises(ValueError,match='Unexpected tuning'):
+            module.postselection.registered_job(prepared['directory'],metadata['id'],plan)
         return dict(phase='training_complete_test_not_scored')
     monkeypatch.setattr(control_driver,'execute_job',execute)
     for _ in range(4):assert module.run_next('full')['phase']=='one_allocation_confirmation_complete'

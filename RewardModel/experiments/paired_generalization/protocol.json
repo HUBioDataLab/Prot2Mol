@@ -1331,6 +1331,15 @@
       "maximum_native_macro_difference": 1.1102230246251565e-16,
       "test_predictions_read": false,
       "parameters_unchanged": true
+    },
+    "allocation_validation_selection": {
+      "status": "implemented_and_deployed_waiting_for_primary_tuning",
+      "code_commit": "47bcd1783fda45455477ebb10052defbab390892",
+      "module": "RewardModel/experiments/paired_generalization/realization_selection.py",
+      "scope": "Independent validation-only LR decisions for the three dependent B allocations; seed43/44 union with exact primary B reuse and supplemental B fits only. At most one extra fit per invocation after all four primary confirmations. Primary A/B decisions remain unchanged.",
+      "validation": "19 focused CPU tests using synthetic scalar exports and simulated fits passed. Supplemental export registration and rejection by the primary evaluator also checked. Atum read-only preflight verified frozen allocations and reported five incomplete tuning fits and no primary selection.",
+      "evidence": "realization_selection_runtime/47bcd17/{deployment,preflight}.json on Atum",
+      "scientific_execution": "No allocation LR selection or supplemental training has run. Allocation full losses, averaging, selected test evaluation and weight release remain pending."
     }
   },
   "deployment": "unseen molecules from a molecule generator",

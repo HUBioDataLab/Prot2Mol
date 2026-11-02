@@ -527,6 +527,23 @@ or partial fits stop for inspection. No LR has yet been selected and no
 confirmation fit has started. This is scheduling preparation, not a new result.
 Evidence: `controlled/full_confirmation_queue/{plan,preflight,launch_process,launch_verification}.json`.
 
+The allocation-specific LR selector and supplemental-fit runner are implemented
+in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
+allocations uses its own validation trajectory across the same three LRs. The
+seed-43/44 requests cover the union of winning LRs and reuse exactly matching
+primary B fits; supplemental fits do not create matched A results. The runner
+waits for all four primary confirmations and executes at most one additional B
+fit under the shared lock and existing GPU/quota checks. All 19 focused CPU
+tests passed with synthetic scalar exports and simulated training; the export
+registration accepts supplemental fits while the primary evaluator rejects them.
+Atum's read-only preflight at commit `47bcd17` verified the three frozen
+allocations and identical training support, then reported five incomplete tuning
+fits and no primary LR selection. It created no selection, fit or test score.
+All live training/queue identities and their pinned sources survived deployment.
+Full-loss evaluation, averaging and selected test comparisons for these
+allocations remain pending. Experiment/question completion counts are unchanged.
+Evidence: `realization_selection_runtime/47bcd17/{deployment,preflight}.json`.
+
 The downstream primary-grid evaluator had the same unresolved-versus-resolved
 encoder-width mismatch. It was reproduced with a saved-model fixture and
 repaired in commit `ed4393f`: only unspecified launch widths may resolve to
