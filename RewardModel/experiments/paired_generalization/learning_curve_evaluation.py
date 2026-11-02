@@ -136,8 +136,14 @@ def training_evidence(metadata, primary_digest, expected_view=None):
             raise ValueError('Qualified training implementation changed')
         evidence[str(path)] = digest
     summary_path = output/'experiment_summary.json'; summary = read(summary_path)
-    if summary['test_evaluated'] or summary['test_metrics']:
-        raise ValueError('Curve training must not have evaluated test data')
+    if summary['config_sha256'] != metadata['config_sha256'] or summary['test_evaluated'] or summary['test_metrics']:
+        raise ValueError('Training summary config changed or test data were evaluated')
+    state = read(output/'trainer_state.json')
+    history = [r for r in state['log_history'] if 'eval_macro_spearman' in r and 'eval_loss' in r]
+    if (state['epoch'] != 15 or [r['epoch'] for r in history] != list(range(1, 16)) or
+        state['global_step'] != history[-1]['step'] or
+        any(a['step'] >= b['step'] for a, b in zip(history, history[1:]))):
+        raise ValueError('Every tuning, confirmation and shared endpoint fit must finish all fifteen epochs')
     for rank in range(4):
         path = output/f'rank_{rank}_complete.json'; done = read(path)
         if (done['rank'], done['world_size'], done['config_sha256']) != (rank, 4, metadata['config_sha256']):
@@ -148,7 +154,7 @@ def training_evidence(metadata, primary_digest, expected_view=None):
         raise ValueError('Completed training did not use the registered subset and labels')
     if expected_view is None and summary.get('training_view') is not None:
         raise ValueError('Primary full endpoint unexpectedly used a training subset')
-    for path in (summary_path, output/'controlled_training_complete.json',
+    for path in (summary_path, output/'trainer_state.json', output/'controlled_training_complete.json',
                  Path(metadata['config_path']), output/'retained/retention.json'):
         evidence[str(path)] = sha256(path)
     return runtime, evidence

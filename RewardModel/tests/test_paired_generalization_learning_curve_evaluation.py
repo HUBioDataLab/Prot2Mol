@@ -242,6 +242,17 @@ def test_grid_rejects_extra_fit_budget_model_or_full_endpoint_changes(grid):
     assert {str(p): sha256(p) for p in grid['work'].rglob('*') if p.is_file()} == before
 
 
+def test_rehashed_partial_nonselected_candidate_cannot_enter_lr_selection(grid):
+    run = grid['work']/'learning_curves/runs'/job_id('B', lr=3.)
+    path = run/'trainer_state.json'; state = module.read(path)
+    state['epoch'] = 14; state['global_step'] = 140; state['log_history'].pop(); write_json(path, state)
+    path = run/'controlled_training_complete.json'; done = module.read(path)
+    done['evidence_sha256']['trainer_state.json'] = sha256(run/'trainer_state.json'); write_json(path, done)
+    with pytest.raises(ValueError, match='finish all fifteen epochs'):
+        module.prepare(job_id())
+    assert not list((grid['work']/'learning_curve_evaluation').glob('*/plan.json'))
+
+
 def test_real_saved_tiny_weights_evaluate_heldout_rows_without_training(grid, monkeypatch):
     import reward_model.model as model_api
     from reward_model.model import LoadedEncoder
