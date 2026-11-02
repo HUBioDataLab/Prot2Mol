@@ -716,6 +716,32 @@ and 133 pinned inputs. Evidence:
 `encoder_analysis_runtime/56e8cb8/{deployment,preflight}.json` on Atum;
 preflight SHA256 `8b5f5da5eca4683c783aba48ab9f0f6201a17b798f677e04227c9903ec82c0f9`.
 
+E42–E47 reporting is implemented in `objective_controls_analysis.py` (commit
+`a0ed17b`). The five contrastive settings require 50 existing primary fits; the
+seven ranking settings require 70. Their ten full-reference fits are shared,
+so the two families cover 110 unique planned fits, not 120 or any new fits.
+Four contrastive and six ranking contrasts preserve their intended references:
+uniform/top weights both use pairwise objectives; noise-soft/hard targets both
+use zero margin; margin removal and assay balancing receive separate contrasts.
+The exact model-only changes, train-derived noise temperature, common training
+budget and canonical primary evaluation provenance are checked before reporting.
+
+All settings, three scorer outputs, five checkpoint rules and same-LR seed42
+results remain visible. Paired contrasts use mutually defined eligible assays
+and whole-unit intervals; seed42 exposure, confirmation-only seed spread and
+descriptive A-minus-B changes remain separate. Each setting retains its own
+B-validation-selected LR, so these are comparisons of selected procedures.
+They do not by themselves establish false-negative causality, calibration or
+gradient mechanisms. All 30 focused tests passed, including correct contrast
+signs/references, changed or incomplete evidence and child-artifact mutation
+during reporting. Atum's CPU-only preflight verified 66 distinct registered
+tuning configurations and found zero primary summaries for either family.
+No training, family selection or scientific comparison was created; E42–E47
+remain pending. Deployment preserved eleven live handles and 138 pinned inputs.
+Evidence: `objective_controls_analysis_runtime/a0ed17b/{deployment,preflight}.json`
+on Atum; preflight SHA256
+`14af559a927351225ce28019906b35df1929ec42b17677b15df0aec12804926d`.
+
 The allocation-specific LR selector and supplemental-fit runner are implemented
 in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
 allocations uses its own validation trajectory across the same three LRs. The
