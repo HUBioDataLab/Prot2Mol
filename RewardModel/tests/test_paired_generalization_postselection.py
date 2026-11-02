@@ -4,6 +4,7 @@ The retained training histories are synthetic fixtures. Inference uses actual
 saved tiny ESM/RoBERTa weights and the native Trainer; it is not science evidence.
 """
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -20,6 +21,56 @@ from test_paired_generalization_control_plan import noise_fixture
 from test_paired_generalization_retention import make_run
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_saved_config_accepts_inferred_or_explicit_widths_without_mutating_inputs():
+    model = make_model(None, {})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    saved = json.loads(json.dumps(model.config.to_dict()))
+    before = copy.deepcopy((saved, launch.to_dict()))
+    for expected in (launch, model.config):
+        postselection.verify_model_config(saved, expected)
+        postselection.verify_model_config(saved, expected,
+            encoder_widths={'protein':12, 'molecule':16})
+    assert (saved, launch.to_dict()) == before
+
+
+@pytest.mark.parametrize('change', [
+    {'protein_hidden_size':15}, {'molecule_hidden_size':20},
+    {'dropout':.05}, {'contrastive_loss_weight':.5},
+    {'ranking_head_hidden_dims':[9]}, {'molecule_model_name_or_path':'other/model'},
+])
+def test_config_resolution_does_not_allow_other_launch_changes(change):
+    model = make_model(None, {})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None, **{
+        k:v for k,v in change.items() if k not in ('protein_hidden_size','molecule_hidden_size')})
+    for key in ('protein_hidden_size','molecule_hidden_size'):
+        if key in change:
+            setattr(launch, key, change[key])
+    with pytest.raises(ValueError, match='differs from the launch'):
+        postselection.verify_model_config(model.config.to_dict(), launch)
+
+
+@pytest.mark.parametrize('width', [None, 0, -1, True, 12.5])
+def test_saved_width_must_be_resolved(width):
+    model = make_model(None, {})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    saved = model.config.to_dict()
+    saved['protein_hidden_size'] = width
+    with pytest.raises(ValueError, match='resolved positive integer'):
+        postselection.verify_model_config(saved, launch)
+
+
+def test_missing_null_field_and_changed_encoder_cannot_pass_config_verification():
+    model = make_model(None, {})
+    launch = replace(model.config, protein_hidden_size=None, molecule_hidden_size=None)
+    saved = model.config.to_dict()
+    with pytest.raises(ValueError, match='loaded encoder'):
+        postselection.verify_model_config(saved, launch,
+            encoder_widths={'protein':15, 'molecule':16})
+    del saved['protein_tokenizer_name_or_path']
+    with pytest.raises(ValueError, match='fields differ'):
+        postselection.verify_model_config(saved, launch)
 
 
 def complete_fixture(metadata, model):
@@ -87,6 +138,9 @@ def grid(tmp_path, monkeypatch, request):
             **{f'{s}_parquet_path':str(tmp_path/'data'/f'{s}.parquet') for s in sources})
     for job in plan['tuning_jobs']:
         job['config']['model'] = model.config.to_dict()
+        # Production launch configs infer these widths from the encoders; saved
+        # checkpoints contain the resolved integers. Exercise that real path.
+        job['config']['model'].update(protein_hidden_size=None, molecule_hidden_size=None)
         job['config']['data'] = copy.deepcopy(plan['bases'][job['regime']]['data'])
         job['config']['training'].update(num_train_epochs=6, bf16=False, fp16=False,
             dataloader_num_workers=0, protein_shuffle_sensitivity=False)
@@ -127,6 +181,17 @@ def test_plan_compares_all_rules_only_at_selected_lr_and_deduplicates_same_epoch
     assert not other['selected_learning_rate']
     assert set(other['rules']) == {'best_macro'}
     assert len(other['checkpoints']) == 1
+
+
+def test_checkpoint_configuration_must_match_the_run_config(grid):
+    directory, _, _, _ = grid
+    target = selected_job(grid)
+    path = Path(target['output_dir'])/'checkpoint-50/config.json'
+    config = postselection.read_json(path)
+    config['protein_hidden_size'] += 3
+    write_json(path, config)
+    with pytest.raises(ValueError, match='Retained model configuration changed'):
+        postselection.build_evaluation_plan(directory, target['id'])
 
 
 @pytest.mark.parametrize('damage', ['missing_rank', 'changed_config', 'changed_selection',

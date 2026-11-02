@@ -36,6 +36,31 @@ def immutable_json(path, value):
     _write_immutable(path, json.dumps(value, indent=2, sort_keys=True, allow_nan=False)+'\n')
 
 
+def verify_model_config(saved, launch_config, *, encoder_widths=None):
+    """Accept only encoder resolution of unspecified launch widths.
+
+    Planning can validate the serialized configuration without loading weights.
+    The inference worker additionally checks widths against the loaded encoders.
+    No launch or saved configuration is mutated.
+    """
+    actual = json.loads(json.dumps(saved))
+    expected = json.loads(json.dumps(launch_config.to_dict()))
+    if actual.keys() != expected.keys():
+        raise ValueError('Saved model configuration fields differ from the launch')
+    for side in ('protein', 'molecule'):
+        key = side+'_hidden_size'
+        width = actual[key]
+        if type(width) is not int or width <= 0:
+            raise ValueError(f'Saved {key} is not a resolved positive integer')
+        if encoder_widths is not None and width != encoder_widths[side]:
+            raise ValueError(f'Saved {key} differs from its loaded encoder')
+        if expected[key] is None:
+            expected[key] = width
+    differing = sorted(key for key in actual if actual[key] != expected[key])
+    if differing:
+        raise ValueError(f'Saved model configuration differs from the launch: {differing}')
+
+
 def registered_job(directory, identity, plan):
     """Check registration against the frozen configuration, not only its hash."""
     directory = Path(directory)
@@ -105,9 +130,8 @@ def build_evaluation_plan(directory, identity):
         raise ValueError('Checkpoint rules differ from validation history')
     from reward_model.training.config import load_reward_training_config
     config = load_reward_training_config(metadata['config_path'])
-    model_config = json.loads(json.dumps(config.model.to_dict()))
-    if read_json(run/'config.json') != model_config:
-        raise ValueError('Saved model configuration differs from the training configuration')
+    model_config = read_json(run/'config.json')
+    verify_model_config(model_config, config.model)
     names = list(retained['selections']) if selected else ['best_macro']
     rules, checkpoints = {}, {}
     preserved = {item['path']: item['sha256'] for item in retained['preserved_weights']}
@@ -250,8 +274,11 @@ def evaluate_worker(path, index, workers, *, cpu_qualification=False):
                 raise RuntimeError(f'Partial evaluation requires inspection: {output}')
             if model is None:
                 model = load_reward_model(checkpoint['path'], device=torch.device('cpu'))
-                if model.config.to_dict() != config.model.to_dict():
-                    raise ValueError('Loaded model configuration changed')
+                verify_model_config(model.config.to_dict(), config.model, encoder_widths={
+                    side:getattr(model, side+'_encoder').config.hidden_size
+                    for side in ('protein', 'molecule')})
+                if json.loads(json.dumps(model.config.to_dict())) != read_json(Path(checkpoint['path'])/'config.json'):
+                    raise ValueError('Loaded model configuration differs from its saved checkpoint')
                 model.to('cpu' if cpu_qualification else 'cuda')
             evaluate_fixed_model(model, datasets[split], config, output,
                 prefix='eval' if split == 'val' else 'test', known_positive_index=known, source=source,
