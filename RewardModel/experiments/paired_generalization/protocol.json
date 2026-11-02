@@ -293,7 +293,9 @@
       "question": "What ranking quality does each loss deliver alone, and in each pair, on each split?",
       "rationale": "A loss-subset grid measures each loss's contribution and their interactions directly. Arms without the ranking head are scored by the BCE logit or the contrastive similarity.",
       "interpretation": "An interaction term that is positive on Split A and negative on Split B means the auxiliary losses help in-distribution but hurt transfer (hypothesis).",
-      "status": "pending"
+      "status": "pending",
+      "reporting_preparation": "loss_subset_analysis.py (074f5aa) requires all seven verified primary-arm summaries with declared readouts and matched per-setting budgets:42 tuning+28 confirmation fits including10 shared full-reference fits. R/RB/RC/RBC auxiliary effects and conditional RBC-RB-RC+R use common eligible/defined assays and2000 paired whole-unit draws including zero-eligible units. Selected LRs/checkpoints remain explicit; seed42 exposure, seed43/44 confirmations, conditional unit intervals and A/B population differences stay separate. All27 focused tests passed. Atum CPU preflight found0 summaries and created0 fits/selections/scientific comparisons. This prepares reporting, not a scientific answer; Q30 remains pending.",
+      "reporting_evidence": "loss_subset_analysis_runtime/074f5aa/{deployment,preflight}.json on Atum"
     },
     {
       "id": "Q31",
@@ -1871,7 +1873,9 @@
       "key": "loss_subsets",
       "experiment": "Evaluate R, B, C, RB, RC, BC and RBC",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "reporting_preparation": "Seven-system reporting and ranking-head conditional auxiliary-loss contrasts implemented in074f5aa;27 focused CPU tests passed. Atum preflight found no completed primary summaries. Training, selected evaluation and scientific loss comparisons remain pending; no new fit or selection created.",
+      "reporting_evidence": "loss_subset_analysis_runtime/074f5aa/{deployment,preflight}.json on Atum"
     },
     {
       "id": "E39",

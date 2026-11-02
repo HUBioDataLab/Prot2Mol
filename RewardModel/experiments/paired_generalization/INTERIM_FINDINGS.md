@@ -561,6 +561,23 @@ fits; it created no selection. This prepares the comparison rather than answerin
 Q34 or completing E39. Evidence:
 `weight_selection_runtime/c13c5e9/{deployment,preflight}.json`.
 
+Q30/E38's seven-loss report is implemented in `loss_subset_analysis.py`
+(commit `074f5aa`). It requires all seven verified primary-arm summaries, covering
+42 tuning and 28 confirmation fits including the ten shared full-reference fits.
+Declared ranking-head/BCE-logit/cosine outputs stay explicit. R/RB/RC/RBC also
+receive four auxiliary-effect contrasts and the conditional interaction
+RBC−RB−RC+R on their common eligible, mutually defined assay cohort. The 2,000
+paired whole-unit bootstrap draws retain zero-eligible units; seed spread,
+confirmation-only spread and different A/B populations stay distinct. These
+comparisons include each arm's validation-selected LR/checkpoint and do not
+establish gradient conflict. All 27 focused tests passed, including independent
+unit-resampling arithmetic, cohort/scope rejection and cached-report integrity.
+Atum's CPU-only preflight found no primary-arm summaries and created no fit,
+selection or scientific comparison. Deployment preserved all nine live process
+identities and 105 pinned inputs. Q30 and E38 remain pending; completion counts
+are unchanged. Evidence:
+`loss_subset_analysis_runtime/074f5aa/{deployment,preflight}.json`.
+
 The allocation-specific LR selector and supplemental-fit runner are implemented
 in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
 allocations uses its own validation trajectory across the same three LRs. The
