@@ -1790,6 +1790,38 @@ runtime `tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json`,
 completion receipt SHA256
 `958fc8f3d84dc19ce90ff3d7344df241a51ea06740aad30a14f68c612cbafe24`.
 
+The batch execution/reporting worker is implemented at `803f83a` in
+`objective_probe_execution.py`. It checks each reconstructed batch against the
+native tensor/metadata fingerprints, then uses the Trainer's input adapter to
+remove export bookkeeping before calling the model. The CPU integration caught
+and fixed that adapter requirement before production use. Every pair retains
+its block-gradient statistics, transfer values and context hashes; a saved summary is
+recomputed from those records and rejects changed model/rate/context evidence.
+Undefined cosines, disconnected paths and ineffective steps remain explicit.
+The worker preserves parameters, RNG and module modes, restores global precision
+settings even on failure, and refuses to overwrite partial output.
+
+All34 focused worker/protocol/numerical checks passed. The11 new worker checks
+were rerun after adding source-hash verification and also passed. A standalone
+local CPU qualification loaded an actual saved tiny checkpoint and executed two
+synthetic native training/validation batch pairs, including all three objectives
+and scopes. Its result was reloaded and its descriptive distributions recomputed;
+all seven worker source hashes and both saved pair hashes match. These are
+synthetic implementation checks, not production measurements or evidence of
+gradient conflict in any trained reference model.
+
+Local evidence: `artifacts/objective_probe_execution_803f83a/qualification.json`,
+SHA256 `e13468a5eff473585384bd33522c783e59c06cb490aa7169b2de454a7616c564`;
+`pairs/complete.json`, SHA256
+`5bfad9b561c8443e8e4619d4ab336367a4af79167bccb8c78e1427453c23e1cf`.
+The code is pushed to the experiment branch. Atum pull and CPU qualification
+are pending: the configured SSH gateway closes before authentication and the
+shared control socket is absent, including after the requested reconnect retry.
+No remote job was restarted. The last verified Atum head is `39882b5`, and the
+last verified current training position is10.12/15. E56/E57/Q33 remain pending;
+the worker provides no scientific launcher or waiver of Tier3, checkpoint/token
+provenance, GPU numerical qualification or the shared GPU lock.
+
 ## A-versus-B variant reporting preparation — scientific results pending
 
 `variant_relation.py` (source `a1aeafb`) prepares the primary-grid component of

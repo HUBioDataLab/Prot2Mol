@@ -1715,6 +1715,31 @@
       "scientific_probe_results": 0,
       "executable_gpu_queue": false,
       "remaining": "Tier3 completion, selected checkpoint/configuration evidence, complete token-payload verification, production float32 GPU numerical qualification and actual gradient/transfer measurements."
+    },
+    "objective_probe_execution_worker": {
+      "status": "local_cpu_qualified_remote_pull_pending",
+      "code_commit": "803f83ab527be22cf1e3b5d50b9d8caf5c40b8f2",
+      "experiment_ids": [
+        "E56",
+        "E57"
+      ],
+      "local_focused_checks_passed": 34,
+      "new_worker_checks_rerun_after_source_hash_change": 11,
+      "scope": "Worker library checks native batch fingerprints, applies the actual Trainer input adapter, measures existing R/B/C and three scopes, saves each pair and recomputes descriptive distributions. Parameter/RNG/mode preservation, precision restoration, undefined/zero-step states and partial-output refusal verified on CPU.",
+      "local_standalone_qualification": {
+        "synthetic_batch_pairs": 2,
+        "saved_tiny_checkpoint_loaded": true,
+        "pair_artifacts_rehashed": 2,
+        "worker_sources_rehashed": 7,
+        "evidence": "artifacts/objective_probe_execution_803f83a/{qualification.json,pairs/complete.json} in local Prot2Mol",
+        "qualification_sha256": "e13468a5eff473585384bd33522c783e59c06cb490aa7169b2de454a7616c564",
+        "complete_sha256": "5bfad9b561c8443e8e4619d4ab336367a4af79167bccb8c78e1427453c23e1cf"
+      },
+      "atum_deployment": "Pending: configured SSH gateway closes before authentication and shared control socket is absent, including after user requested retry. Last verified remote head39882b5; current fit last verified10.12/15. No remote restart or pull attempted successfully for this worker.",
+      "new_fits_created": 0,
+      "scientific_probe_results": 0,
+      "production_gpu_qualified": false,
+      "remaining": "Restore Atum access, pull and CPU-qualify worker. Scientific execution still requires Tier3 completion, selected checkpoint and full token provenance, GPU numerical qualification and shared GPU lock. No scientific launcher added."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -2379,7 +2404,9 @@
       "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
       "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum",
       "protocol_preparation": "Checkpoint/step rules frozen at635f323: six existing full R+B+C A/B references at common B-selected LR, seeds42/43/44, own best-macro checkpoints. One nominal Trainer-rate weighted-SGD step per source/scope; float32 without autocast/TF32. All23 focused tests passed and Atum CPU preparation exited0. Six checkpoint slots remain unresolved; no selection, new fits, GPU queue, gradient or transfer results.",
-      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275"
+      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275",
+      "worker_preparation": "Execution/reporting library803f83a passed34 focused checks; final11 worker checks rerun successfully after source-hash binding. Local standalone native tiny-checkpoint/two-pair CPU qualification passed; no scientific results. Native Trainer input adaptation, exact collated fingerprints, undefined-state distributions, preservation and partial-output checks included. Atum pull/qualification pending SSH restoration; Tier3/checkpoint/token/GPU gates remain.",
+      "worker_evidence": "Local artifacts/objective_probe_execution_803f83a/{qualification.json,pairs/complete.json}; qualification SHA256e13468a5eff473585384bd33522c783e59c06cb490aa7169b2de454a7616c564"
     },
     {
       "id": "E57",
@@ -2395,7 +2422,9 @@
       "reconstruction_qualification": "All128 production contexts match native dataset items and collator tensors/metadata exactly, covering2304 fields. Source70c3252 passed30 focused local tests and Atum CPU verification exited0. Selected tokens and cached tokenizer metadata were read; no model weights, test data, loss, gradient or fitting. Full token-payload integrity, GPU numerics and Tier3/selected-checkpoint evidence remain required.",
       "reconstruction_evidence": "tier4/objective_probe_batches/reconstruction_verification.json; tier4/objective_probe_reconstruction_runtime/70c3252/{complete,exit}.json on Atum",
       "protocol_preparation": "Checkpoint/step rules frozen at635f323: six existing full R+B+C A/B references at common B-selected LR, seeds42/43/44, own best-macro checkpoints. One nominal Trainer-rate weighted-SGD step per source/scope; float32 without autocast/TF32. All23 focused tests passed and Atum CPU preparation exited0. Six checkpoint slots remain unresolved; no selection, new fits, GPU queue, gradient or transfer results.",
-      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275"
+      "protocol_evidence": "tier4/objective_probe_protocol/{plan,complete}.json; tier4/objective_probe_protocol_runtime/635f323/{complete,exit}.json on Atum; plan SHA256ecf6496e49ff5f1882f6405b6b54777b6bf6fc17e9ad9bf20412624d7c97c275",
+      "worker_preparation": "Execution/reporting library803f83a passed34 focused checks; final11 worker checks rerun successfully after source-hash binding. Local standalone native tiny-checkpoint/two-pair CPU qualification passed; no scientific results. Native Trainer input adaptation, exact collated fingerprints, undefined-state distributions, preservation and partial-output checks included. Atum pull/qualification pending SSH restoration; Tier3/checkpoint/token/GPU gates remain.",
+      "worker_evidence": "Local artifacts/objective_probe_execution_803f83a/{qualification.json,pairs/complete.json}; qualification SHA256e13468a5eff473585384bd33522c783e59c06cb490aa7169b2de454a7616c564"
     },
     {
       "id": "E58",
