@@ -1699,11 +1699,47 @@ detached contrastive encoders), with checkpoint state and RNG unchanged. These
 are implementation checks, not scientific gradient or transfer measurements.
 
 E56/E57 and Q33 remain **pending**. Scientific execution still needs the Tier 3
-results, fixed batch/candidate identities and step sizes, checkpoint/token
+results, fixed step sizes, checkpoint/token
 provenance, and numerical qualification on the permitted GPUs. Sources:
 `tier4/objective_probe_design/{complete.json,verification.json}` and
 `tier4/objective_probes/qualification_cpu_add5162.json` on Atum; copied evidence
 and current local source hashes match.
+
+Fixed diagnostic batches are now prepared by `objective_probe_batches.py`
+(source `cd4ac87`). Each regime has32 training/cold-validation batch pairs,
+128 batches in total. The training contexts follow the native epoch-zero,
+seed42,12-item sampler. Cold-validation contexts apply the native assay-list
+builder inside the previously frozen cold cohort, with12-item local batches.
+This gives differentiable R/B/C objectives for the probe; it is distinct from
+the ordinary32-row validation metric pass. Contexts are selected at evenly
+spaced batch indices before observing any gradients or scores and shared across
+later checkpoint/seed comparisons. They do not change the training runs.
+
+| Context | Source batches | Selected batches | Selected rows | Selected units |
+| --- | ---: | ---: | ---: | ---: |
+| A training | 12,820 | 32 | 3,830 | 1,219 assays |
+| A cold validation | 57 | 32 | 3,386 | 371 assays |
+| B training | 14,020 | 32 | 3,660 | 16 components |
+| B cold validation | 978 | 32 | 4,401 | 676 components |
+
+Every selected batch contains at least one flagged ranking list and one strict
+active contrastive row; this is feasibility, not evidence of a nonzero gradient.
+The diagnostic batches are not independent split units or full-dataset metrics.
+The small B training-unit count reflects its concentrated training support.
+Source/cache identities and float32 labels, whole-unit cold-cohort membership,
+list boundaries and original cache indices were checked during preparation.
+All28 focused local tests passed, including exact native feature/collator parity,
+reordered caches, and retention of zero-signal contexts. The Atum worker exited0;
+28 input files,8 source files and8 output artifacts were rehashed. No token
+payloads, test data or models were consumed by preparation. No gradient cosine
+or transfer value was produced, and no experiment/question completion is added.
+
+Evidence: `tier4/objective_probe_batches/complete.json`, SHA256
+`acc44c0028ef8fffb2c00917f506b17fb279e3e353055e93c996244d5f981c50`;
+runtime receipt `tier4/objective_probe_batches_runtime/cd4ac87/complete.json`,
+SHA256 `1bed336b7a4272e01c85e5e77c0f76b732ce928f084841fdd8783f3b926e49df`.
+Complete token-payload verification and production reconstruction/GPU numerical
+qualification remain required before scientific probes.
 
 ## A-versus-B variant reporting preparation — scientific results pending
 
