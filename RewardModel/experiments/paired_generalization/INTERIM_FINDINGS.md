@@ -705,8 +705,8 @@ validation rho lower by0.04848 and probe rho lower by0.07968. Its validation
 aggregate loss is4.11930 versus2.93847, and eligible NDCG@1/3/5 is also lower
 (0.63377/0.69218/0.73471 versus0.67335/0.71781/0.75630).
 
-This is early learning-rate sensitivity on one seed and one A split. The LR0.3
-fit is still running: these five epochs do not establish its final peak, a
+This is early learning-rate sensitivity on one seed and one A split. At this
+five-epoch audit the LR0.3 fit was still running; the prefix does not establish a
 preferred LR, final overfitting behavior, test generalization or seed variance.
 The training probe is descriptive. Neither the registered training schedule nor
 the B-validation selection rule was changed in response to these observations.
@@ -724,6 +724,21 @@ Trajectory SHA256 `95abce78a3a1ac386fa2b4e9571725f11d949d436c130f0325643b9cc73f0
 verification SHA256 `c713c2e7c190ef9c97ffebc29f3a21f900aeddd2054458001cf932efaf1e128e`;
 matched evidence SHA256 `8c5d47fee2df1321891a00327aa5fe3894c7bf0e2c302b600f6f32f7d191660d`.
 Q04 and the incomplete metric/controlled-comparison experiments remain partial.
+
+The LR0.3 fit has since completed all15 epochs/12,030 optimizer steps. Its native
+validation macro peaks at epoch14/step11,228: **0.28035523**, with all7,997
+eligible assays defined. Epoch15 gives0.27927916 and the minimum aggregate loss,
+3.29775214 (BCE0.45061868, ranking2.50890136, contrastive2.55787206;
+AUROC0.81272319). The native best-macro checkpoint is retained. The existing
+completion/retention verifier passed; training-completion SHA256 is
+`01430261a06ff4159a3465436cf3cc8d18040a01261ddcba9895b11c03164a78`
+and retention SHA256 is
+`0338d7df7caef0bc7f6a20d2ea742873cd4de64144995777bd1499da9c09faf8`.
+These are native Trainer results, not yet the independent fifteen-epoch audit.
+The pre-existing CPU handoff is live and analyzing that trajectory. The existing
+tuning queue then launched `full__B__seed42__lr0p3` on physical GPUs0,2,5,6;
+its launcher and all four exact ranks were verified live. No common LR choice,
+confirmation seed, selected test comparison or new experiment closure follows.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
@@ -1814,13 +1829,21 @@ Local evidence: `artifacts/objective_probe_execution_803f83a/qualification.json`
 SHA256 `e13468a5eff473585384bd33522c783e59c06cb490aa7169b2de454a7616c564`;
 `pairs/complete.json`, SHA256
 `5bfad9b561c8443e8e4619d4ab336367a4af79167bccb8c78e1427453c23e1cf`.
-The code is pushed to the experiment branch. Atum pull and CPU qualification
-are pending: the configured SSH gateway closes before authentication and the
-shared control socket is absent, including after the requested reconnect retry.
-No remote job was restarted. The last verified Atum head is `39882b5`, and the
-last verified current training position is10.12/15. E56/E57/Q33 remain pending;
-the worker provides no scientific launcher or waiver of Tier3, checkpoint/token
-provenance, GPU numerical qualification or the shared GPU lock.
+Atum access is restored, and the worker was pulled through Git after checking
+all205 existing pinned inputs and the live coordinators. Its standalone CPU
+qualification also passed on Atum: an actual saved tiny checkpoint, two native
+synthetic batch pairs, all three objectives/scopes, unchanged parameters/RNG,
+and reloaded/recomputed distributions. The worker exited0 and was verified
+absent; both pair artifacts and all seven worker sources were rehashed.
+Evidence: `tier4/objective_probe_execution_runtime/803f83a/`
+`{cpu_complete,cpu_exit}.json` and `qualification_cpu/qualification.json`;
+qualification SHA256
+`c70461f93de67e9aa44e93091e5861e9ccc123dee6c15863f8d46253c963fc6c`,
+runtime receipt SHA256
+`196931da7e44ea232ab16dc26f47cdb356df92f1f3bac2a968d64bf56cbbeeea`.
+No training job was restarted and no scientific probe was run. E56/E57/Q33
+remain pending; the worker provides no scientific launcher or waiver of Tier3,
+checkpoint/token provenance, GPU numerical qualification or the shared GPU lock.
 
 ## A-versus-B variant reporting preparation — scientific results pending
 
