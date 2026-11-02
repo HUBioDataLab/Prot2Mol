@@ -784,9 +784,9 @@ SHA256 `e931f093e3f156c4c1ba08642c83632a2c04f2deccaaae15b6676cbea81427e9`;
 execution SHA256 `bd9328e23c887dd43124cc192948f1d9452d901843656a76341af9cfd86e780f`,
 verification SHA256 `7db2bdb7deefcfecad5a116854ce7de745e2dc77f65e2e5748ea771c205e8192`.
 
-Automatic CPU audits are now queued for the three remaining, already registered
+Automatic CPU audits were queued for the three remaining, already registered
 full-arm tuning fits: B LR0.3, then A/B LR3.0. The separate worker
-`native_tuning_audits.py` (source `2f586fd`) is live and waiting for the current
+`native_tuning_audits.py` (source `2f586fd`) initially waited for the
 B fit, with no visible GPUs and two CPU threads per numerical library. It
 requires completed training, four rank receipts and retention before analyzing
 all15 validation/probe epochs. It makes no fit, inference, test-scoring or LR
@@ -796,8 +796,8 @@ All65 focused worker/handoff tests passed. Atum preparation froze85 inputs,
 21 analysis/worker sources and the existing43 training sources; its completion
 reader also accepted the already independently verified A LR0.3 fit without
 rerunning that audit. The live training launcher and four permitted GPU ranks
-were unchanged. This is automation preparation, with zero additional fits or
-completed scientific audits and no change to experiment/question counts.
+were unchanged. At activation this was automation preparation, with zero
+additional fits or completed scientific audits and no change to experiment/question counts.
 Evidence: `tier1/native_remaining_tuning_audits/{plan,launch_process,started}.json`
 and `tier1/native_tuning_audits_runtime/2f586fd/`
 `{deployment,preflight,activation,completion_reader_qualification}.json` on Atum.
@@ -805,6 +805,43 @@ Plan SHA256 `493afe4a28e02efa54b22e4ce309fbd48571b7a750d197c11e80e117c40d03f6`;
 activation SHA256 `8d17f23ed730d0fd0df73bd4d8b233f6f281ca3f85614348efd4962ef333c4c1`;
 reader qualification SHA256
 `563ff600030c36678b09c18364f22c380b782c593d3f1108707b199983337dba`.
+
+The B LR0.3 fit has now completed all 15 epochs/13,155 optimizer steps, its
+scheduled allocation exports and checkpoint retention. Best native validation
+macro is **0.18322109 at epoch 12/step 10,524**; the final epoch scores
+**0.18051769** and minimizes aggregate validation loss at **6.92203045**
+(BCE 0.44447416, ranking 2.79370379, contrastive 6.11248589; AUROC 0.76762593).
+The saved root model and epoch-12 weights have the same SHA256,
+`9eb3f1fea142bd1cdc08e313f29c176bc057441b99a153ccda292437b7099570`.
+All 15 epoch weights remain protected for the pending allocation analyses.
+Of 3,969 eligible validation assays, 3,968 have defined correlations at epochs
+1, 3 and 5; all 3,969 are defined at every other epoch. Undefined assays remain
+excluded from the native macro with their coverage reported.
+
+The existing CPU worker independently checked all 30 validation/probe snapshots:
+509,760 group/scorer correlations and 900 sampled noise-band pair counts.
+From epoch 12 to 15, fixed training-probe macro rises 0.36193716→0.37511298
+while validation changes 0.18322109→0.18051769. Final BCE/cosine label macros
+are 0.12382694/0.07383095. These compare separate fixed cohorts and pathways;
+they do not identify a causal mechanism. Bootstrap intervals, calibration and
+NDCG are not independently reconstructed by this verifier.
+
+Evidence on Atum: `controlled/runs/full__B__seed42__lr0p3/`
+`{controlled_training_complete.json,retained/retention.json}`, SHA256
+`2be77d9e4c726411f58da31078379aecc86c0fb80b91ef01e3080c62c1d339ba`
+and `01d3a6f559bce3c6dd82b9ebb446938ee9bc3c3844d2b644c3532b971f48df19`;
+`tier1/native_remaining_tuning_audits/jobs/full__B__seed42__lr0p3/complete.json`,
+SHA256 `b201186e5b3b04767093e4d8b577da0a3533045090617b5239511e7dfb0bc8e6`;
+`tier1/native_trajectories/full__B__seed42__lr0p3/6349989d65c2f7ef/`
+`{trajectory_through_epoch15,verification_through_epoch15}.json`, SHA256
+`ce30524c1a301e80fd62b336ecfc39d3c787b2a9906c59a8d2aaa746817d499d`
+and `5e087a1705fe5e3a09a12a147faf30758caa7907a99c943c3869d3c3fb0f3730`.
+The audit completed at Unix 1793646616.31; its receipts were rehashed on read.
+The same queue now runs `full__A__seed42__lr3p0` (W&B `6w5p03mw`), with B LR3.0
+next. Four controlled fits are complete, but the common LR, confirmation seeds
+and selected controlled test results remain pending. Experiment/question
+completion counts are unchanged. Per the user's monitoring preference, idle
+periods use interruptible sleeps followed by isolated milestone checks.
 
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch

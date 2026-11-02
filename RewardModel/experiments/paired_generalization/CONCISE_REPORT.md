@@ -22,13 +22,20 @@ remaining replicated experiments. Only Tier 2 is fully complete.
 **Training results:** The requested fresh 15-epoch scaffold baseline is complete.
 Its best validation-macro checkpoint is epoch 6: validation 0.18460 and test 0.17688
 ([run 4d1vkheo](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/4d1vkheo)).
-Three controlled fits are also complete: base-LR A and B, and A LR0.3. Their
-best validation macros are 0.34368 at 14,0.18458 at 6, and0.28036 at 14 respectively.
-The A LR0.3 fit scores below base LR at every matched epoch. These are validation
-results from one seed, not a selected controlled test comparison. The existing
-B LR0.3 fit is running on GPUs 0, 2, 5, 6 with batch 12 × 4 × 4; the remaining registered
-tuning fits and CPU audits are queued. No common LR or confirmation-seed result
-is available yet.
+Four controlled seed42 fits are complete, including their native trajectory audits:
+
+| Split / learning rate | Best epoch | Best validation macro | Final validation macro |
+| --- | ---: | ---: | ---: |
+| A / base | 14 | 0.34368 | 0.34332 |
+| B / base | 6 | 0.18458 | 0.17975 |
+| A / ×0.3 | 14 | 0.28036 | 0.27928 |
+| B / ×0.3 | 12 | 0.18322 | 0.18052 |
+
+The A LR0.3 fit scores below base LR at every matched epoch. B LR0.3 peaks later
+than base LR, with a slightly lower best macro and slightly higher final macro.
+These are descriptive single-seed validation results, not a selected controlled
+test comparison. The existing queue is now running A LR3.0 on GPUs 0, 2, 5, 6,
+with B LR3.0 next. No common LR or confirmation-seed result is available yet.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
