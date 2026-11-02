@@ -530,6 +530,23 @@ or partial fits stop for inspection. No LR has yet been selected and no
 confirmation fit has started. This is scheduling preparation, not a new result.
 Evidence: `controlled/full_confirmation_queue/{plan,preflight,launch_process,launch_verification}.json`.
 
+The full-arm evaluation/reporting handoff is now waiting behind that exact
+confirmation coordinator. `full_evaluation_queue.py` (commit `d8beca3`) requires
+its verified terminal completion and frozen B-validation LR decision before
+evaluating exactly the six tuning plus four confirmation fits. It then runs
+per-fit CPU diagnostics and the complete primary summary. All 21 orchestration
+tests passed using real selection/configuration generation and simulated
+evaluation, including live-parent waiting, resource gates, partial-output
+refusal and changed-evidence rejection. Native inference and reporting have
+their separate qualifications above/below; these orchestration tests are not
+scientific GPU results. Atum verified 105 pinned inputs and launched coordinator
+PID1438015/start153986235 with no visible GPUs. Its observed phase is
+`waiting_for_confirmation_coordinator`; all eight prior handles remained live.
+It adds no training settings, selects no test result, releases no weights and
+does not execute additional allocations. No scientific primary evaluation or
+summary has started, and experiment/question counts are unchanged. Evidence:
+`controlled/full_evaluation_queue/{plan,preflight,launch_process,launch_verification}.json`.
+
 The allocation-specific LR selector and supplemental-fit runner are implemented
 in `realization_selection.py` (commit `47bcd17`). Each of the three dependent B
 allocations uses its own validation trajectory across the same three LRs. The

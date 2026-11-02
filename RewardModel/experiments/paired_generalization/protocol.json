@@ -1393,6 +1393,19 @@
       "validation": "19 focused CPU tests passed, including actual tiny-model inference under both masks, exact role/label/fingerprint checks, unchanged upstream evidence and rejection of invalid/partial inputs. Atum verified all six role views over273913 unique held-out rows without model inference or test metrics.",
       "evidence": "realization_postselection_runtime/2b4ce42/{deployment,input_qualification}.json on Atum",
       "remaining": "Scientific evaluation awaits completed fits, allocation LR selection, native validation losses and averages. Statistical allocation/seed comparisons and weight release remain pending."
+    },
+    "full_primary_evaluation_handoff": {
+      "status": "live_waiting_for_confirmation_coordinator",
+      "code_commit": "d8beca31b80ea4d7b2543284ef363a402b04ccef",
+      "module": "RewardModel/experiments/paired_generalization/full_evaluation_queue.py",
+      "plan_sha256": "09a0465a1f5083abbce1884328cb281deda3be706dc42aeb0e8ef984ec746294",
+      "pid": 1438015,
+      "start_ticks": 153986235,
+      "pinned_inputs": 105,
+      "scope": "Wait for exact owned confirmation coordinator and verified completion of all ten full-primary fits, then native fixed-checkpoint evaluation, per-fit CPU diagnostics and complete primary summary. No training, new selection, other arm, additional allocation or weight release.",
+      "validation": "21 orchestration CPU tests passed with actual selection/config generation and simulated evaluation. Atum prepared and validated frozen inputs and launched a GPU-free coordinator; all nine training/queue handles verified live. Native inference and metric modules have separate qualification evidence.",
+      "evidence": "controlled/full_evaluation_queue/{plan,preflight,launch_process,launch_verification}.json on Atum; full_evaluation_queue_runtime/d8beca3/deployment.json",
+      "remaining": "Current and queued full fits, their selected native evaluations and scientific summary remain pending; this waiting handoff does not close any experiment or question."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
