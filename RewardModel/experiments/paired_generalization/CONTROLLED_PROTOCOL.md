@@ -347,6 +347,19 @@ comparisons still require full loss evaluation, which scalar exports alone do
 not provide. Measured inference runtime/storage and any remaining affordability
 limits must be reported; none of these pending comparisons is declared complete.
 
+`realization_selection.py` implements this separate validation-only LR decision.
+It requires all six primary tuning fits and the frozen primary LR decision,
+verifies every allocation export against completed retention evidence, and freezes
+the three allocation decisions plus their union of confirmation requests. Matching
+primary B seed-43/44 fits are reused; only missing B fits are supplemental. They
+do not create matched A results at those additional LRs. `run-next` waits for all
+four primary confirmations, holds the shared driver lock, and runs at most one
+supplement using the existing four-GPU driver. It refuses partial-run retries and
+checks quota, GPU ownership and frozen configurations. `preflight` is read-only;
+`prepare` freezes selection, and `verify` reconstructs it. This does not score
+test roles, evaluate allocation full losses, average or release weights, or close
+the realization experiment by itself.
+
 ## Whole-unit learning curves
 
 `learning_curve_plan.py` fixes nested 10%, 25%, 50% and 100% unit prefixes from
