@@ -673,6 +673,29 @@ fits; it created no selection. This prepares the comparison rather than answerin
 Q34 or completing E39. Evidence:
 `weight_selection_runtime/c13c5e9/{deployment,preflight}.json`.
 
+The static-weight selected-results report is now implemented in
+`objective_controls_analysis.py` (commit `71778a0`). It requires all five
+canonical primary summaries (30 tuning and 20 confirmation fits, including the
+ten shared full-reference fits) and the independently verified, validation-only
+A/B weight-selection receipt. Four alternative-minus-reference comparisons use
+each setting's frozen B-selected LR, all five checkpoint rules, paired whole-unit
+intervals and separate seed42/confirmation-seed summaries. The A-selected choice
+is shown diagnostically; if its LR differs, the existing B-selected confirmation
+results do not evaluate that A-selected procedure. No cross-regime independence
+or historical reference-weight tuning is inferred. All settings remain visible,
+and test scores cannot choose the family winner.
+
+All 49 objective-report tests and the existing 20 weight-selector tests passed.
+Atum preflight verified the five settings and four contrasts, with one completed
+weight-grid fit, 29 unfinished fits and zero primary summaries. Across weights,
+contrastive and ranking controls, this reporter covers 90 distinct tuning fits
+and 150 total existing primary fits after removing shared-reference duplication;
+it adds no fits. Deployment preserved eleven live process identities and 138
+pinned inputs. No scientific weight comparison was produced; Q34/E39 and all
+completion counts remain unchanged. Evidence:
+`objective_controls_analysis_runtime/71778a0/{deployment,preflight}.json` on Atum;
+preflight SHA256 `87a6ee1cbf100e4da256d52bd61ed77c0e6e335131c3df09f4f86e774013c6a7`.
+
 Q30/E38's seven-loss report is implemented in `loss_subset_analysis.py`
 (commit `074f5aa`). It requires all seven verified primary-arm summaries, covering
 42 tuning and 28 confirmation fits including the ten shared full-reference fits.

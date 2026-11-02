@@ -338,7 +338,9 @@
       "interpretation": "If the weights change when tuned on Split-B-style validation data, the value of the auxiliary losses depends on the shift.",
       "status": "pending",
       "reporting_preparation": "weight_selection.py (c13c5e9) compares A-validation and B-validation choices over the existing five weight settings and three LRs. Requires all30 tuning fits, unchanged native validation evidence and matching training qualifications. Reports coverage and missing A-selected-LR confirmation coverage. No new fit or test-driven selection. All20 focused CPU tests passed; Atum preflight verified1 complete training receipt and29 unfinished fits without creating a choice. Original pre-study weight-tuning history is not established by this sweep.",
-      "reporting_evidence": "weight_selection_runtime/c13c5e9/{deployment,preflight}.json on Atum"
+      "reporting_evidence": "weight_selection_runtime/c13c5e9/{deployment,preflight}.json on Atum",
+      "selected_reporting_preparation": "objective_controls_analysis.py (71778a0) links the frozen A/B validation-only weight choices to all five canonical primary summaries. Four weight-minus-full contrasts use each setting's B-selected LR, five checkpoint rules, paired whole-unit intervals and separate tuning/confirmation seed spread. An A-selected LR without existing confirmations is not represented as evaluated by B-selected confirmations; no cross-regime independence or historical tuning is inferred. All49 objective-report and20 selector tests passed. Atum verified five settings/four contrasts, one completed tuning fit,29 unfinished and zero summaries. No new fit, selection or scientific comparison; Q34 remains pending.",
+      "selected_reporting_evidence": "objective_controls_analysis_runtime/71778a0/{deployment,preflight}.json on Atum; preflight SHA25687a6ee1cbf100e4da256d52bd61ed77c0e6e335131c3df09f4f86e774013c6a7"
     }
   ],
   "baseline_status": "complete",
@@ -1935,7 +1937,9 @@
       "key": "static_loss_weight_sweep",
       "experiment": "Evaluate a static loss-weight sweep with equal tuning budgets",
       "status": "pending",
-      "conditional": false
+      "conditional": false,
+      "reporting_preparation": "Selected-results reporter in objective_controls_analysis.py (71778a0) requires all five canonical primary summaries and verified A/B validation-only weight choices. Covers30 tuning+20 confirmation existing fits including10 shared full-reference fits; four weight-minus-full paired contrasts retain each setting's B-selected LR and all checkpoint rules. A-selected choices remain diagnostic. All49 objective-report and20 selector tests passed; Atum found1 completed tuning fit,29 unfinished and0 summaries. No new fits or scientific weight comparison; E39 remains pending.",
+      "reporting_evidence": "objective_controls_analysis_runtime/71778a0/{deployment,preflight}.json on Atum"
     },
     {
       "id": "E40",
