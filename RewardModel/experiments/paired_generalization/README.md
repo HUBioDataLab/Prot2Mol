@@ -146,6 +146,16 @@ and synthetic support only. Scientific GPU fitting, the adaptation
 budget/validation-selection protocol and the Tier-3 gate remain separate
 requirements; this worker and its qualification do not complete E49–E52.
 
+`ADAPTATION_PROTOCOL.md` and `adaptation_protocol.py` freeze the remaining
+optimization and selection rules against those prepared views. The full-arm
+selected bases and their optimizer settings are inherited, with no additional
+LR search. Each kind/scope/k chooses an epoch from B seed42 validation only,
+then applies it to the matched A/B comparisons and seeds43/44. Complete eligible
+assay inventories are required at every epoch; undefined predictions retain
+their explicit coverage. The manifest counts every independent support fit and
+records infeasible budgets. Preparing it starts no fitting or inference and
+does not resolve the still-pending base-checkpoint and production-GPU gates.
+
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,
 unique-protein and unique-molecule views, capped at 25,600 each. The latter two
