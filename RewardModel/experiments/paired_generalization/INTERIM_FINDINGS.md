@@ -456,7 +456,7 @@ point estimates passed. Earlier checks are inherited only after exact source,
 prefix and table verification. This verification does not independently
 reconstruct bootstrap intervals, calibration fits or all NDCG values.
 
-The controlled B run now has a separately verified **five-epoch prefix**.
+The controlled B run now has a separately verified **ten-epoch prefix**.
 Its probe uses the same fixed 2,048-eligible-assay rule as A, unlike the original
 B baseline's uniformly sampled assay probe. The sampled assays still differ.
 
@@ -467,20 +467,26 @@ B baseline's uniformly sampled assay probe. The sampled assays still differ.
 | 3 | 0.24317 | 0.16912 | 0.27084 | 0.29117 |
 | 4 | 0.26145 | 0.16577 | 0.30188 | 0.33091 |
 | 5 | 0.27953 | 0.17172 | 0.33753 | 0.37329 |
+| 6 | 0.28843 | 0.18458 | 0.36608 | 0.39862 |
+| 7 | 0.30188 | 0.17889 | 0.38964 | 0.42904 |
+| 8 | 0.31324 | 0.18049 | 0.40509 | 0.44715 |
+| 9 | 0.31908 | 0.17596 | 0.42791 | 0.46300 |
+| 10 | 0.32604 | 0.17776 | 0.45533 | 0.48243 |
 
-At epoch 5, probe-minus-validation rho is 0.05800 on A and 0.20157 on B,
-up from 0.02767/0.12206 at epoch 3. B validation dips at epoch4 and recovers
-at epoch5, while its probe continues to rise. These are descriptive probe gaps,
+At epoch 10, probe-minus-validation rho is 0.12929 on A and 0.30467 on B,
+up from 0.05800/0.20157 at epoch5. B's best validation score within the observed
+prefix is at epoch6 (0.18458). From6 to10, its probe rises0.39862→0.48243 while
+validation falls0.18458→0.17776. These are descriptive probe gaps,
 not full-training generalization gaps or evidence of a final plateau. A/B have
 different assay populations and 802/877 optimizer steps per epoch. B's probe
 contains 43,115 rows from only 25 scaffold-assay components, so its 2,048 assays
 are not independent sampling units. B validation has 136,957 rows and 3,969
-eligible assays. All 169,920 assay/scorer correlations across ten snapshots and
-300 sampled pair-count checks passed independent verification. This does not
+eligible assays. All 339,840 assay/scorer correlations across twenty snapshots and
+600 sampled pair-count checks passed independent verification. This does not
 independently verify the bootstrap intervals, calibration fits or all NDCGs.
 The remaining B epochs and repeated controlled fits remain pending. Evidence:
 `tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/`
-with `trajectory_through_epoch05.json` and `verification_through_epoch05.json`.
+with `trajectory_through_epoch10.json` and `verification_through_epoch10.json`.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
@@ -546,6 +552,22 @@ It adds no training settings, selects no test result, releases no weights and
 does not execute additional allocations. No scientific primary evaluation or
 summary has started, and experiment/question counts are unchanged. Evidence:
 `controlled/full_evaluation_queue/{plan,preflight,launch_process,launch_verification}.json`.
+
+The next E33 stage is queued in `regularization_queue.py` (commit `5face02`).
+It waits for that exact full-evaluation process and its verified ten-fit report,
+then executes the already registered weight-decay0.001 and0.1 settings. Each has
+six tuning and four confirmation fits, followed by selected native evaluation
+and a primary report; the weight-decay0.01 reference is reused. The 20 fits are
+already in the frozen primary plan, with no additional setting or tuning budget.
+All 24 CPU orchestration tests passed with real configuration/validation-choice
+reconstruction and simulated training/evaluation. Atum's actual preflight passed
+for both settings and storage quotas. Coordinator PID1486155/start154274700 was
+verified live in `waiting_for_full_reference_report`, exposing no GPUs and
+pinning133 inputs. The current training holders remain on GPUs0,2,5,6. Existing
+or failed outputs stop for inspection, and the queue stops after these two arms.
+No regularization fit has started and no experiment/question is newly complete.
+Evidence: `controlled/regularization_queue/{plan,preflight,launch_process,launch_verification}.json`
+and `regularization_queue_runtime/5face02/deployment.json`.
 
 Q34/E39's validation-only weight comparison is implemented in
 `weight_selection.py` (commit `c13c5e9`). It reuses the five registered axis-sweep
