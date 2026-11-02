@@ -276,7 +276,7 @@ def test_complete_report_assembly_requires_all_fractions_and_preserves_artifacts
     monkeypatch.setattr(module, 'analysis_inputs', lambda identity: (
         {}, {}, {}, {'core_metric_software': module.selected_analysis.software()}))
     monkeypatch.setattr(module, 'verify_record', lambda path, *args: module.read(path))
-    monkeypatch.setattr(module.evaluation, 'view_contract', lambda curve, primary, regime, fraction: dict(
+    monkeypatch.setattr(module, 'size_contract', lambda curve, primary, regime, fraction: dict(
         provenance=dict(statistics=statistics[regime][module.curve_plan.fraction_name(fraction)]), input_sha256={}))
     path = module.analyze(curve_paths, endpoint_path)
     report = module.read(path)
@@ -293,3 +293,22 @@ def test_complete_report_assembly_requires_all_fractions_and_preserves_artifacts
     (path.parent/'learning_curves.svg').write_text('corrupt')
     with pytest.raises(ValueError, match='artifact changed'):
         module.analyze(curve_paths, endpoint_path)
+
+
+@pytest.mark.parametrize('damage', [None, 'rows', 'units', 'row_fraction', 'unit_fraction'])
+def test_reported_axes_must_match_selected_rows_and_whole_unit_counts(tmp_path, monkeypatch, damage):
+    metadata = tmp_path/'metadata.parquet'; indices = tmp_path/'indices.npy'
+    pd.DataFrame(dict(unit=['giant', 'giant', 'giant', 'small', 'other'])).to_parquet(metadata)
+    np.save(indices, np.array([0, 1, 2, 3]))
+    manifest = tmp_path/'view.json'
+    write_json(manifest, dict(source_metadata=dict(path=str(metadata)), indices=dict(path=str(indices))))
+    statistics = dict(rows=4, units=2, row_fraction=.8, unit_fraction=2/3)
+    if damage:
+        statistics[damage] += .1
+    view = dict(provenance=dict(manifest_path=str(manifest), statistics=statistics))
+    monkeypatch.setattr(module.evaluation, 'view_contract', lambda *args: view)
+    if damage:
+        with pytest.raises(ValueError, match='actual selected'):
+            module.size_contract({}, {}, 'B', .1)
+    else:
+        assert module.size_contract({}, {}, 'B', .1) == view

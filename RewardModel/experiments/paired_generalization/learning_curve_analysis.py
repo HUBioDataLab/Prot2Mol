@@ -187,6 +187,19 @@ def segment(first, second, first_size, second_size):
             for axis, d in denominators.items()})
 
 
+def size_contract(curve, primary, regime, fraction):
+    view = evaluation.view_contract(curve, primary, regime, fraction)
+    manifest = read(view['provenance']['manifest_path'])
+    units = pd.read_parquet(manifest['source_metadata']['path'], columns=['unit']).unit
+    indices = np.load(manifest['indices']['path'], allow_pickle=False)
+    rows, selected_units = len(indices), int(units.iloc[indices].nunique())
+    expected = dict(rows=rows, units=selected_units, row_fraction=rows/len(units),
+        unit_fraction=selected_units/units.nunique())
+    if any(view['provenance']['statistics'][key] != value for key, value in expected.items()):
+        raise ValueError('Reported curve axes differ from actual selected rows or units')
+    return view
+
+
 def series(points):
     if [p['fraction'] for p in points] != list(FRACTIONS):
         raise ValueError('Need all four curve fractions in registered order')
@@ -319,7 +332,7 @@ def analyze(paths, endpoint_path):
         decision = dict(read(path), arm='unit_curve_'+curve_plan.fraction_name(fraction))
         summaries[fraction] = controlled_summary.summarize_records(chosen, decision, sha256(path))
     # Revalidate actual sizes/labels even for the shared full endpoint.
-    views = {r: {f: evaluation.view_contract(curve, primary, r, f) for f in FRACTIONS} for r in ('A', 'B')}
+    views = {r: {f: size_contract(curve, primary, r, f) for f in FRACTIONS} for r in ('A', 'B')}
     statistics = {r: {curve_plan.fraction_name(f): views[r][f]['provenance']['statistics'] for f in FRACTIONS} for r in views}
     curves = scalar_curves(summaries, statistics)
     paired, cache, table_hashes = {}, {}, {}
