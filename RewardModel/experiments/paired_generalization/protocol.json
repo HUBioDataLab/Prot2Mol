@@ -1855,7 +1855,28 @@
       "scientific_query_evaluations": 0,
       "production_gpu_qualified": false,
       "scope": "Query-only worker for the frozen E49-E52 protocol. Verified support-fit/base binding, query role and complete assay identities, native float32-label metrics for all three pathways, explicit undefined/ineligible assay rows, k0 baseline, and base/mode/RNG restoration on success or failure. No epoch selection, launcher, queue expansion or scientific completion credit.",
-      "remaining": "Tier 3 completion, selected base-checkpoint/source/token binding, production GPU qualification, orchestration and all scientific adaptation results."
+      "remaining": "Tier 3 completion, selected base-checkpoint/source/token binding, production GPU qualification, orchestration and all scientific adaptation results.",
+      "runtime_qualification": {
+        "source_commit": "81ad6b6623b0facb7fdce6816d2920afe7d80b6e",
+        "source_sha256": "18837c50e5ca01e8e0e5f66026b8da0b8cbd7ebbd50148bed27940ad40c4f42a",
+        "runtime": "tier4/adaptation_query_runtime/81ad6b6",
+        "cpu_pid": 2115913,
+        "cpu_start_ticks": 158159054,
+        "returncode": 0,
+        "local_runtime_checks": 2,
+        "synthetic_support_fits": 8,
+        "query_exports_verified": 24,
+        "assay_pathway_checks": 432,
+        "artifacts_verified": 184,
+        "sources_verified": 26,
+        "qualification_sha256": "e6806d083e2d3512ce57bd829750f5d21d809afd650413d16e4d1e17f93d658a",
+        "verification_sha256": "5d23fd25fd6ece1a7bc6ae215a779080ffde24d67d259cd6aa4473397c70013c",
+        "runtime_receipt_sha256": "c1c61c9ce741713d84b5d38b06c3927cf95449bf582d92b011530f5914b014e3",
+        "scientific_fits": 0,
+        "scientific_query_evaluations": 0,
+        "production_gpu_qualified": false,
+        "limitation": "Synthetic two-epoch CPU runtime only. No scientific dataset, selected checkpoint, 15-epoch selection or GPU qualification. Tier3, checkpoint/token provenance, orchestration and all scientific adaptation results remain pending."
+      }
     }
   },
   "deployment": "unseen molecules from a molecule generator",
@@ -2438,7 +2459,8 @@
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
       "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
-      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
+      "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
     {
       "id": "E50",
@@ -2450,7 +2472,8 @@
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
       "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
-      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
+      "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
     {
       "id": "E51",
@@ -2462,7 +2485,8 @@
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
       "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
-      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
+      "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
     {
       "id": "E52",
@@ -2474,7 +2498,8 @@
       "preparation_scope": "Verified disjoint unit-role assignments, original test-group preservation, nested whole-assay k prefixes and fixed within-unit support/query memberships. A within-unit assay adaptation is impossible under its existing unit definition; B feasibility and rank-evaluable cohorts are explicit. Training-ready token/label views, fitting protocol, Tier3 gate and every adaptation performance result remain pending.",
       "preparation_evidence": "tier4/adaptation_design/{complete.json,verification.json} on Atum",
       "local_view_preparation": "Compact token/label views implemented and pushed on isolated codex/paired-adaptation-views commit98bb8b5;28 CPU tests pass across design/views. Separate within-unit tasks, fixed queries/k0 baselines, raw-precision subset-local labels and cache-buffer sharing checked. Not deployed or production-qualified; no adaptation fit/result. Tier3 and fitting/runtime gates remain.",
-      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending."
+      "query_scoring_preparation": "adaptation_query.py query-only library passed15 new and58 combined local CPU checks with actual tiny-model support fitting and native evaluation. Exact direct-restoration prediction parity, reserved-query isolation, changed exports, undefined coverage and failure restoration checked. No scientific query result, epoch selection, GPU qualification or new job; status remains pending.",
+      "query_cpu_qualification": "Atum synthetic CPU qualification81ad6b6 passed:8 tiny support fits,24 query exports,432 independent assay/pathway checks,184 artifacts and26 sources verified. Worker exited0. No scientific result or production GPU qualification; status remains pending."
     },
     {
       "id": "E53",

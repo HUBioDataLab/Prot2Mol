@@ -167,8 +167,16 @@ fit, snapshot, query identities and native labels, exports all three pathways,
 and retains ineligible/undefined assay rows with their unit identities. Each
 call restores the base parameters, modes and random state. Selection remains a
 separate operation requiring the complete B/42 validation inventory across all
-15 epochs. This library has local tiny-model CPU tests; it adds no launcher,
-scientific query result or production-GPU qualification.
+15 epochs. The local tests and standalone Atum CPU qualification passed;
+scientific query results and production-GPU qualification remain pending.
+
+`PYTHONPATH=RewardModel python -m experiments.paired_generalization.adaptation_query_qualification
+qualify-cpu --output PATH` runs only synthetic two-epoch CPU checks with GPUs
+hidden, `ACCELERATE_USE_CPU=true`, and `WANDB_MODE=disabled`. It builds verified
+synthetic A/B views, checks both adaptation scopes and k=0, and independently
+reconstructs assay metrics from the saved query exports. `verify-cpu` verifies
+the same output without fitting. Existing qualification outputs are never
+implicitly reused or overwritten.
 
 `representation_geometry.py` prepares only fixed identity-based cohorts for
 E54/E55. Each A/B train/validation/test partition has separate observation,

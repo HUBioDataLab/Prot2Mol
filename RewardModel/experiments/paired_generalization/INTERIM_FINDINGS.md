@@ -1716,6 +1716,20 @@ selection or GPU qualification occurred. E49–E52 remain pending. The query
 worker source SHA256 is recorded in `protocol.json`; production orchestration,
 base-checkpoint verification and the Tier-3 gate remain outstanding.
 
+The standalone CPU qualification from commit `81ad6b6` subsequently passed on
+Atum. Eight tiny two-epoch support fits covered both scopes, A/B across-unit
+queries, and B validation/test within-unit queries. There were 24 native query
+exports including k=0 comparisons. Independent reconstruction checked 432
+assay/pathway records, 184 artifact hashes and 26 source hashes. The dedicated
+worker exited successfully; no scientific data, selected checkpoint or GPU was
+used. Two additional local checks cover the complete qualification and refusal
+when GPUs are visible; artifact corruption is rejected. Evidence on Atum:
+`tier4/adaptation_query_runtime/81ad6b6/{cpu_complete,exit}.json` and
+`qualification_cpu/{qualification,verification}.json`. Runtime receipt SHA256:
+`c1c61c9ce741713d84b5d38b06c3927cf95449bf582d92b011530f5914b014e3`.
+This qualifies the tiny CPU runtime only; E49–E52 and production GPU execution
+remain pending.
+
 ## Representation geometry preparation — inference pending
 
 E54/E55 have fixed, label-free sampling cohorts for each A/B train, validation
