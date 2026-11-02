@@ -456,7 +456,7 @@ point estimates passed. Earlier checks are inherited only after exact source,
 prefix and table verification. This verification does not independently
 reconstruct bootstrap intervals, calibration fits or all NDCG values.
 
-The controlled B run now has a separately verified **three-epoch prefix**.
+The controlled B run now has a separately verified **five-epoch prefix**.
 Its probe uses the same fixed 2,048-eligible-assay rule as A, unlike the original
 B baseline's uniformly sampled assay probe. The sampled assays still differ.
 
@@ -465,19 +465,22 @@ B baseline's uniformly sampled assay probe. The sampled assays still differ.
 | 1 | 0.16488 | 0.10992 | 0.16214 | 0.17815 |
 | 2 | 0.21244 | 0.14458 | 0.22805 | 0.24104 |
 | 3 | 0.24317 | 0.16912 | 0.27084 | 0.29117 |
+| 4 | 0.26145 | 0.16577 | 0.30188 | 0.33091 |
+| 5 | 0.27953 | 0.17172 | 0.33753 | 0.37329 |
 
-At epoch 3, probe-minus-validation rho is 0.02767 on A and 0.12206 on B.
-Both validation curves are still improving. These are descriptive probe gaps,
+At epoch 5, probe-minus-validation rho is 0.05800 on A and 0.20157 on B,
+up from 0.02767/0.12206 at epoch 3. B validation dips at epoch4 and recovers
+at epoch5, while its probe continues to rise. These are descriptive probe gaps,
 not full-training generalization gaps or evidence of a final plateau. A/B have
 different assay populations and 802/877 optimizer steps per epoch. B's probe
 contains 43,115 rows from only 25 scaffold-assay components, so its 2,048 assays
 are not independent sampling units. B validation has 136,957 rows and 3,969
-eligible assays. All 101,952 assay/scorer correlations across six snapshots and
-180 sampled pair-count checks passed independent verification. This does not
+eligible assays. All 169,920 assay/scorer correlations across ten snapshots and
+300 sampled pair-count checks passed independent verification. This does not
 independently verify the bootstrap intervals, calibration fits or all NDCGs.
 The remaining B epochs and repeated controlled fits remain pending. Evidence:
 `tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/`
-with `trajectory_through_epoch03.json` and `verification_through_epoch03.json`.
+with `trajectory_through_epoch05.json` and `verification_through_epoch05.json`.
 
 The automatic handoff stopped when its contrastive audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch

@@ -383,6 +383,19 @@ training, and explicit CPU qualification artifacts cannot count as scientific
 GPU results. Selected test evaluation, seed/allocation summaries and any weight
 release remain separate requirements.
 
+`realization_postselection.py` requires the verified native validation trajectory
+and completed averages before it freezes any test tasks. It reconstructs the
+checkpoint rules and averaging windows from that validation evidence. Rules
+choosing the same epoch share inference; existing epoch validation outputs are
+reused, while each selected average receives validation and test evaluation.
+Every test role uses its frozen allocation indices. All predictions are checked
+against the actual row identities, float32 labels and dataset fingerprint,
+including reused validation outputs. The runner uses the shared GPU lock and
+records output costs. Training-known positives remain training-only. Neither
+test scores nor this evaluator change any LR, epoch, average or training budget.
+Scientific seed/allocation comparisons and weight release still require their
+own completed evidence.
+
 ## Whole-unit learning curves
 
 `learning_curve_plan.py` fixes nested 10%, 25%, 50% and 100% unit prefixes from

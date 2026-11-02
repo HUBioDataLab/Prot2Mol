@@ -82,11 +82,13 @@
       "rationale": "This separates fitting non-transferable features from a limit on signal or capacity.",
       "interpretation": "Training Spearman rising while Split B stays flat from early on suggests fitting specific to training units. Both flat suggests little learnable signal.",
       "status": "answered_with_limits",
-      "answer": "Across epochs1->15, A fixed eligible-assay training-probe macro Spearman rises0.16214->0.49208 and validation rises0.16488->0.34332 (peak0.34368 at14). Original B probe rises0.18336->0.53189 while validation rises0.11006->0.17561, peaking0.18460 at6. Later B training improvements transfer poorly in this fit; A validation keeps improving much longer. These are descriptive fixed probes, not full-training metrics. A samples eligible assays whereas the original B probe samples assays uniformly, so those absolute A/B training gaps are not matched estimates. The new controlled B prefix uses the same 2048-eligible-assay probe rule as A: probe0.17815->0.29117 and validation0.10992->0.16912 over epochs1->3. Epoch3 probe-minus-validation gaps are A0.02767/B0.12206, with different sampled assays and 802/877 optimizer steps per epoch. B's probe spans only25 scaffold-assay components. Both validation curves still improve; final controlled B and repeated comparisons remain pending.",
+      "answer": "Across epochs1->15, A fixed eligible-assay training-probe macro Spearman rises0.16214->0.49208 and validation rises0.16488->0.34332 (peak0.34368 at14). Original B probe rises0.18336->0.53189 while validation rises0.11006->0.17561, peaking0.18460 at6. Later B training improvements transfer poorly in this fit; A validation keeps improving much longer. These are descriptive fixed probes, not full-training metrics. A samples eligible assays whereas the original B probe samples assays uniformly, so those absolute A/B training gaps are not matched estimates. The new controlled B prefix uses the same 2048-eligible-assay probe rule as A: probe0.17815->0.37329 and validation0.10992->0.17172 over epochs1->5. At epoch5, probe-minus-validation gaps are A0.05800/B0.20157, with different sampled assays and802/877 optimizer steps per epoch. B validation dips at4 and recovers at5 while its probe keeps rising. B probe spans only25 scaffold-assay components. Final controlled B and repeated comparisons remain pending; this prefix does not identify a final plateau or causal mechanism.",
       "evidence": "tier1/scorer_agreement_float32/complete.json; baseline_scaffold_seed42_15ep/checkpoint-13155/trainer_state.json; tier1/baseline_trajectory_summary_v2.json; tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
       "native_A_trajectory_update": "A epochs1-15 validation and fixed training-probe metrics are complete and independently checked for correlations, sampled pair counts and composition-weighted point estimates. Macro selection is epoch14; minimum total loss is epoch15. No A test has been scored; directional contrastive exports are complete; repeated controlled comparisons remain pending.",
       "native_A_trajectory_evidence": "tier1/native_trajectories/full__A__seed42__lr1p0/6349989d65c2f7ef/trajectory_through_epoch15.json on Atum",
-      "controlled_B_prefix_evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch03,verification_through_epoch03}.json on Atum; 101952 correlations and 180 sampled pair-count checks verified; no test predictions read"
+      "controlled_B_prefix_evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch05,verification_through_epoch05}.json on Atum;169920 correlations and300 sampled pair-count checks verified; no test predictions read",
+      "native_B_prefix_epoch05_update": "Independently verified B epochs1-5 show probe macro rho0.17815->0.37329 and validation0.10992->0.17172, with an epoch4 validation dip. At epoch5 probe-minus-validation is0.20157 on B versus0.05800 on matched A. Both probes use2048 eligible assays but distinct sampled groups; B covers only25 scaffold-assay components. This is a conditional observed prefix, not a full-training generalization estimate, final plateau or causal diagnosis.",
+      "native_B_prefix_epoch05_evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch05,verification_through_epoch05}.json on Atum"
     },
     {
       "id": "Q09",
@@ -1366,6 +1368,18 @@
       },
       "evidence": "realization_losses_runtime/2a7bfac/{deployment,view_qualification}.json on Atum",
       "remaining": "Scientific loss trajectories and averages await completed fits and frozen allocation LR decisions. Selected test evaluation, allocation/seed comparisons and weight release remain pending."
+    },
+    "native_B_prefix_epoch05": {
+      "status": "verified_observed_prefix_only",
+      "epochs": 5,
+      "validation_macro_spearman": 0.1717191765954298,
+      "probe_macro_spearman": 0.3732853262475091,
+      "independent_correlation_checks": 169920,
+      "sampled_pair_count_checks": 300,
+      "trajectory_sha256": "35e0f6a1f03b5c3df13840583674e677aa079be16e4db6da1cbc6ede981ee51c",
+      "verification_sha256": "1301281957f2909ada42859352574daaf827dd511ff2fa4b618cc29cea700ebc",
+      "evidence": "tier1/native_trajectories/full__B__seed42__lr1p0/6349989d65c2f7ef/{trajectory_through_epoch05,verification_through_epoch05}.json on Atum",
+      "limitations": "Single fitted seed/allocation, fixed eligible-assay probe with25 B components, unequal A/B steps per epoch. No test predictions read. Bootstrap intervals, temperature fits and NDCG not independently reconstructed by this verifier. Full horizon and repeated fits pending."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
