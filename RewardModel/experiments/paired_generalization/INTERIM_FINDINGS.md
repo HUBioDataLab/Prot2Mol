@@ -503,6 +503,20 @@ qualified training sources, the six original B process identities and the live
 queue. This fixes an evaluation blocker, not a scientific result. Evidence:
 `postselection_runtime/ed4393f/{deployment,qualification}.json`.
 
+The CPU analysis of completed primary-grid evaluations is implemented in
+`selected_analysis.py` (commit `38f1196`). It requires the frozen validation-only
+selection and every checkpoint/partition receipt before reading predictions.
+It computes the MD's rank, pair, noise-band, size, scaffold, composition,
+calibration, BBSE and pathway-agreement diagnostics, with whole-unit intervals.
+Matched A/B comparisons use the same arm, seed, learning rate and checkpoint
+rule; test scores cannot select a configuration. All 12 focused tests passed,
+including actual tiny native exports and independent rank/pair calculations.
+Atum verified all 662,218 rows across A/B validation/test against the design and
+cache metadata; both validation fingerprints matched native training exports.
+No selected-model scientific predictions or scores were produced. Deployment
+preserved active training and its queue. Evidence:
+`selected_analysis_runtime/38f1196/{deployment,input_qualification}.json`.
+
 Q11's scalar localization audit covers all 15 initial B validation epochs and
 all 15 verified A validation epochs. B's BCE rises by 0.03768 from its overall minimum at
 epoch 2 to epoch 15, with a positive point change in every fixed size bin.
