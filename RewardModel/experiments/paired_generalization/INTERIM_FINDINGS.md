@@ -513,6 +513,20 @@ coordinator and its receipts were verified and recorded without restarting it.
 This is execution preparation, not another completed scientific experiment.
 Evidence: `controlled/full_tuning_queue/{plan,preflight,launch_process,launch_verification}.json`.
 
+A bounded follow-up coordinator (`confirmation_queue.py`, commit `b8169b7`)
+waits for that exact tuning coordinator and all six verified full-arm fits.
+It then applies the existing B-validation-only learning-rate selection and runs
+exactly A/B seeds 43 and 44 at that shared rate. It stops after those four fits,
+before test evaluation or another model arm. All 16 CPU orchestration tests
+passed, using the real selection/configuration code and simulated training.
+Atum verified PID1338025 waiting on PID1260221 at Unix1793582959.97, with GPUs
+hidden from the coordinator and the original four training GPU holders unchanged.
+The plan pins 85 inputs, including the 43 qualified training source files;
+global-lock, physical-space and account-quota checks precede each fit. Failed
+or partial fits stop for inspection. No LR has yet been selected and no
+confirmation fit has started. This is scheduling preparation, not a new result.
+Evidence: `controlled/full_confirmation_queue/{plan,preflight,launch_process,launch_verification}.json`.
+
 The downstream primary-grid evaluator had the same unresolved-versus-resolved
 encoder-width mismatch. It was reproduced with a saved-model fixture and
 repaired in commit `ed4393f`: only unspecified launch widths may resolve to
