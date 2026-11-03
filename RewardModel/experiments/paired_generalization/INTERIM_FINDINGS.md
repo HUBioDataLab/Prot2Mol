@@ -919,10 +919,10 @@ B-validation selector chose **base LR (×1.0)**: candidate peaks are 0.18457785
 coverage at its selected epoch. This choice was reconstructed from the native
 validation snapshots and retention records, without test scores. It applies to
 both A and B confirmations. The original tuning coordinator finished with its
-verified completion receipt and is absent; the existing confirmation coordinator
-is running `full__A__seed43__lr1p0` (W&B `hnnyo965`) on GPUs 0, 2, 5, 6.
-The remaining registered order is B seed43, A seed44, B seed44. No confirmation
-or selected controlled-test result is available yet.
+verified completion receipt and is absent. At selection time the existing
+confirmation coordinator started `full__A__seed43__lr1p0` (W&B `hnnyo965`)
+on GPUs 0, 2, 5, 6, followed by B seed43, A seed44 and B seed44. Confirmation
+and selected controlled-test results were then pending.
 
 Selection evidence: `controlled/selections/full.json`, SHA256
 `7ccd63ecdd1ece26e2df45ec654b60e38443ea8b51d663adbf02140bfc986d70`;
@@ -932,6 +932,37 @@ Selection evidence: `controlled/selections/full.json`, SHA256
 `b83719020ccc651244c87bca6b9569f5e2db59bb40b110f797b4edbb533ec9e5`.
 Six completed fits do not finish the replicated experiments; question and
 experiment completion counts remain unchanged.
+
+The first confirmation, `full__A__seed43__lr1p0` (W&B `hnnyo965`), has now
+completed all 15 epochs/12,030 optimizer steps and checkpoint retention.
+Best and final native validation macro are **0.34493525 at epoch 15**;
+aggregate validation loss also reaches its minimum at 15: **2.36235642**
+(BCE 0.43771893, ranking 2.41682124, contrastive 1.64872134;
+AUROC 0.83988365). Among 7,997 eligible validation assays, 7,996 are defined
+at epochs 4 and 7, 7,995 at epoch 13, and all 7,997 at the other epochs.
+All 15 saved native validation metrics match finalized Trainer history.
+Root and epoch-15 weights share SHA256
+`6ea396207d72a389340d347a9e302cb9527e2719b122a58017fb44ee5fb29072`.
+
+The four-rank training completion and retained best checkpoint were verified,
+with the original launcher absent. This is a completed confirmation fit,
+separate from the six tuning fits and the initial requested baseline. Its
+native peak is close to A seed42's base-LR peak 0.34367521, but one confirmation
+does not establish seed variability. This read checked saved metric consistency
+and checkpoint provenance; it did not independently reconstruct correlations
+from predictions. The existing selected-evaluation pipeline follows all four
+confirmation fits. Independent trajectory analysis, selected controlled tests
+and paired seed43 A/B comparisons remain pending.
+
+Evidence on Atum: `controlled/runs/full__A__seed43__lr1p0/`
+`{controlled_training_complete.json,retained/retention.json,trainer_state.json}`,
+SHA256 `34743d890316f85addafc191d344690a36d7adaf6c592d1e4e6dbb2e0b260fb6`,
+`08311fd81b38d747540f1bc35867c85d7f8fa4237f04d445a1d9e60fa1743924`
+and `460e7165cf6f78bc65060b5d4a61624a829da54fbdf69a25df5d9ffe5cb06047`.
+The existing confirmation queue now runs `full__B__seed43__lr1p0`
+(W&B `8k6easjx`) on GPUs 0, 2, 5, 6; A/B seed44 remain next. Seven controlled
+fits are complete, of which one is a confirmation. Question and experiment
+completion counts remain unchanged.
 
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch

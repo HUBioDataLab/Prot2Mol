@@ -40,10 +40,14 @@ B LR3.0 has a lower peak and final macro than either other B learning rate.
 These are descriptive single-seed validation results, not a selected controlled
 test comparison. The registered B-validation rule selected **base LR** for both
 A and B: B peaks are 0.18458 (base), 0.18322 (×0.3) and 0.17310 (×3).
-No test scores entered this selection. The existing queue is now running A
-seed43 at base LR on GPUs 0, 2, 5, 6
-([run hnnyo965](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/hnnyo965));
-B seed43 and A/B seed44 follow. Confirmation results remain pending.
+No test scores entered this selection. **One of four confirmation fits is complete:**
+A seed43 has best and final validation macro **0.34494 at epoch 15**, versus
+seed42's best 0.34368. Its 15 saved native validation metrics match Trainer
+history and its retained best checkpoint is verified; independent trajectory
+analysis and selected-test comparisons remain pending. The existing queue is now
+running B seed43 at base LR on GPUs 0, 2, 5, 6
+([run 8k6easjx](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/8k6easjx));
+A/B seed44 follow. One completed confirmation does not establish seed variability.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
