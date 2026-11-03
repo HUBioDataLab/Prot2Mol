@@ -99,6 +99,14 @@ Failures stop the controller for inspection; it does not restart failed jobs
 or invoke a legacy search queue. This handoff leaves adaptation, geometry,
 gradient/transference probes and remaining audit work explicitly pending.
 
+`requested_geometry.py` runs E54/E55 on the two full-reference best-macro
+checkpoints after that Tier 3 handoff. Two independent workers export the six
+frozen train/validation/test cohorts under the shared GPU lock. They verify
+source data, token payloads, cohort identity and native projection-score parity,
+and preserve the model weights. Both pooled and projected representations,
+observation and unique-entity views, and active/all-pair alignment are retained.
+Preparing or qualifying this runner does not count as scientific geometry.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
