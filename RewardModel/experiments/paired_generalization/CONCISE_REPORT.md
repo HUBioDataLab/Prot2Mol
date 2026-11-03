@@ -6,8 +6,8 @@ The [evidence ledger](protocol.json) records every question and all 70 experimen
 entries, including 12 conditional interventions. Artifact locations, hashes and
 qualification limits are in [detailed findings](INTERIM_FINDINGS.md).
 
-**Progress:** 23 experiments complete, 12 partial and35 pending. Questions:
-12 answered, 15 answered with limits, 3 partial and4 pending. “With limits” means
+**Progress:** 23 experiments complete, 12 partial and 35 pending. Questions:
+12 answered, 15 answered with limits, 3 partial and 4 pending. “With limits” means
 an observed or descriptive answer is available; it does not complete the
 remaining replicated experiments. Only Tier 2 is fully complete.
 
@@ -56,9 +56,15 @@ protocol to **two training seeds total, 42 and 43**, overriding the MD's minimum
 of three. A seed44 was cancelled while partial; B seed44 never started. Seed44
 is excluded from selection and scientific comparisons. Seed42 is tuning-exposed;
 seed43 is the single confirmation, so confirmation-seed variance is unavailable.
-Checkpoint evaluation is running for these eight completed fits. The next E33
-queue is adapted to the same two registered alternative weight decays, with
-six tuning fits and two confirmations per setting (16 new fits total).
+That two-seed policy is now superseded. The user stopped the checkpoint and
+E33 queues, cancelled parameter optimization, and requested **seed42 only**
+for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
+Seed42 has the higher existing B base-LR validation peak (0.18458 versus
+0.17739). The new fixed-configuration queue contains 24 fits (12 requested
+variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
+Preparation and local scheduling tests add no scientific completion credit.
+The complete historical ledger is retained; unrequested experiments are not
+silently marked complete. See [the current scope](REQUESTED_SINGLE_SEED.md).
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results

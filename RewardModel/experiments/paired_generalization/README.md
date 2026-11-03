@@ -1,17 +1,22 @@
 # Paired input ranking generalization
 
-**Active seed amendment (2026-11-03):** the user requested two training seeds
-total, **42 and 43**. This overrides the MD minimum of three. Seed42 is
-tuning-exposed and seed43 is the only confirmation; no confirmation-seed
-variance is available. Partial A44 is excluded and B44 was not started.
-Historical three-seed registrations remain immutable. Use `two_seed_policy.py`,
-`two_seed_full_evaluation_queue.py` and `two_seed_summary.py` for the amended
-full-model evaluation. `two_seed_regularization_queue.py` and
-`two_seed_regularization_analysis.py` cover the two existing E33 settings and
-their comparison with full-model weight decay: 16 new fits, 24 including the
-shared reference. The replacement waits for the full-model report. Do not
-restart the retired three-seed queues. Other downstream execution/reporting
-paths require the same amendment before use.
+**Active scope amendment (2026-11-03):** the user cancelled parameter
+optimization and requested E34–E36, E44–E47, then E49–E58, plus E01–E05,
+E08–E09 and E19–E20. Use **seed42 only**, with the original base learning
+rates and other fixed settings. Seed42 had the higher already observed
+base-LR B validation macro (0.18458 versus seed43's 0.17739). No new seed
+comparisons are authorized. Prior validation exposure remains a limitation;
+no independent training-seed uncertainty will be estimated.
+
+`requested_single_seed.py` runs the 12 requested registered training variants
+once on each split: **24 new 15-epoch fits**, reusing the completed full A/B42
+references. Requested LoRA ranks and matched ranking controls remain scientific
+comparisons; they are not a search for new hyperparameters. See
+[the exact execution scope](REQUESTED_SINGLE_SEED.md). All previous tuning,
+confirmation and checkpoint queues remain stopped; their registrations and
+partial outputs are preserved. Historical `phase=tuning` metadata is retained
+only as provenance. Evaluations, audits and Tier 4 probes remain required and
+need the same fixed-seed scope before execution.
 
 The governing specification is `/Paired input ranking generalization.md`. Do not
 expand the scientific scope. Answer its 34 questions and execute its suggested
@@ -92,9 +97,9 @@ Results are saved in `tier1/observation_process/`; no training data are changed.
 Execution order: prepare data; validate four-GPU training/evaluation/checkpoint
 loading with a two-step smoke run; complete the 15-epoch baseline; then perform
 the specification's Tier 1 audits, Tier 2 baselines, Tier 3 controlled retraining,
-Tier 4 mechanistic probes, and supported conditional interventions. Tier 3 uses
-both splits, equal tuning budgets and at least three seeds; additional Split B
-realizations are subject to the specification's affordability condition.
+Tier 4 mechanistic probes. The active user amendment above overrides the MD's
+tuning and seed budgets and limits execution to the listed experiments;
+additional Split B realizations retain the specification's affordability condition.
 
 Runtime artifacts and logs live in `RewardModel/outputs/paired_generalization`.
 Scientific experiments are not complete merely because preparation or the
