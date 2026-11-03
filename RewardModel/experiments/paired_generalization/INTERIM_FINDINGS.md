@@ -995,6 +995,45 @@ The existing queue now runs `full__A__seed44__lr1p0` (W&B `j5hc20fr`) on GPUs
 0, 2, 5, 6; B seed44 follows. Eight controlled fits are complete, including
 two of four confirmations. Question and experiment completion counts are unchanged.
 
+### User amendment: two training seeds total
+
+The user subsequently instructed: **“2 seeds are enough, skip seed stuff.”**
+The active training-seed scope is now **42 and 43** for all remaining experiments,
+overriding the MD's minimum of three. This changes training repetitions; it does
+not remove experiments, LR candidates, held-out allocations or adaptation units.
+Seed42 remains tuning-exposed; seed43 is the only confirmation. Reports cannot
+estimate variability across confirmation seeds. Partial seed44 results are
+excluded from selection and scientific comparisons.
+
+The exact A44 launcher/ranks and the three obsolete dependent coordinators were
+terminated after identity, ownership, command and evidence checks. All eight
+completed fits and partial A44 output were preserved; B44 never started. All
+target handles were verified absent and the four approved GPUs were idle.
+Cancellation evidence: `protocol_amendments/two_seed_20261103/`
+`{cancellation_intent,cancellation_complete}.json`; completion SHA256
+`4fdad8030a05fcfda3c1f9af46442d9b57c92081e6d3f792ebc64a2f9969efcc`.
+
+Historical plans, source qualification and completed artifacts remain immutable.
+The new `two_seed_policy.py` binds the user amendment to that cancellation and
+the original primary plan; future confirmation registration admits seed43 only.
+The primary grid consequently has 168 tuning plus 56 confirmation fits, **224
+total**, instead of 280. This accounting is not a launch authorization or a
+claim that the remaining work is affordable. The open compute-budget decision
+still governs expansion beyond the already queued scope.
+
+`two_seed_full_evaluation_queue.py` uses the unchanged native evaluator and
+per-fit analysis for exactly the eight completed full-model fits, with no new
+training or selection. `two_seed_summary.py` retains all checkpoint rules,
+pathways, paired whole-unit contrasts, composition comparisons and LR
+sensitivity; seed42/43 summaries and the single confirmation remain distinct.
+The new summary namespace is `controlled_summaries_two_seed`. All 19 focused
+tests passed, including exact fit accounting, exclusion of seed44, immutable
+selection, cancellation/identity gates, missing evidence, source changes,
+resource waits, partial-output refusal and report artifact binding. These
+software checks do not complete a scientific experiment. Existing three-seed
+downstream reporting and training coordinators must use amended replacements;
+the retired coordinators must not be restarted.
+
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
 values). No checkpoint was changed and no next training was started. The

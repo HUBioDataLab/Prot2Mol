@@ -1,5 +1,14 @@
 # Paired input ranking generalization
 
+**Active seed amendment (2026-11-03):** the user requested two training seeds
+total, **42 and 43**. This overrides the MD minimum of three. Seed42 is
+tuning-exposed and seed43 is the only confirmation; no confirmation-seed
+variance is available. Partial A44 is excluded and B44 was not started.
+Historical three-seed registrations remain immutable. Use `two_seed_policy.py`,
+`two_seed_full_evaluation_queue.py` and `two_seed_summary.py` for the amended
+full-model evaluation; do not restart the retired three-seed queues. Other
+downstream execution/reporting paths require the same amendment before use.
+
 The governing specification is `/Paired input ranking generalization.md`. Do not
 expand the scientific scope. Answer its 34 questions and execute its suggested
 experiments, distinguishing required comparisons, conditional interventions,

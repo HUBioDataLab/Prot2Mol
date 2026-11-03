@@ -448,7 +448,7 @@
       "factorized_scoring_B"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "At Unix1793737278.664618, full__A__seed44__lr1p0 (W&B j5hc20fr) was verified live in initial training, before its first native validation snapshot. Confirmation coordinator1338025/start153369663; torchrun3837272/start168805469; ranks3837293/3837294 start168805647 and3837295/3837296 start168805648 on authorized physicalGPUs0,2,5,6. Batch12x4x4, native macro checkpoint selection, evaluate_test=False. Eight controlled fits are complete: six seed42 tuning fits with native audits, plus A/B seed43 with verified four-rank completion, retention and saved-metric consistency. Their independent trajectory analysis and selected-test comparisons remain pending. Existing confirmation order now A44,B44; evaluation and regularization coordinators wait. Idle monitoring uses interruptible sleeps and isolated milestone checks.",
+    "current_controlled_launch": "User amendment: two training seeds total,42/43. A44 and the old three-seed confirmation/evaluation/regularization coordinators were cancelled with exact-process checks; B44 never started. All eight completed full-model fits and partial A44 outputs are preserved. No training remains active at this cancellation checkpoint. The new two-seed fixed-checkpoint evaluation/summary path is implemented and locally tested; its runtime preparation/activation receipts will record execution. Seed44 is excluded from future training, selection and scientific comparison.",
     "checkpoint_retention_review": "Static dependency review at source8298c8f and live gate inventory saved to resource_audits/checkpoint_retention_review/source_8298c8f.json on Atum, SHA2566a8f75cd21dcb9dcbebf1beaaef20e31c81064062c7bf8227041ffbab9f3c9d2. All10 process identities and133 pinned queue inputs verified. Scalar exports do not replace all15 source weights for allocation native losses and selected-window averaging. Downstream reports require selected weights/averages; generic retain rechecks every originally preserved weight and completed_job hashes the retention receipt. A separate verified release procedure is required before deleting intermediates, including later Tier4/conditional consumers; none is implemented. Full primary/allocation selections, selected evaluation completion and allocation averages were absent. No weight deletion, move, retention-policy change or experiment completion credit.",
     "encoder_reporting_preparation": "encoder_analysis.py (56e8cb8),27 focused tests passed. Covers only the existing36 tuning+24 confirmation fits across six encoder settings,10 shared full-reference fits. Validates exact encoder-only configuration changes, canonical native selected summaries, matching training/metric qualifications and complete15-epoch trajectory exports. All settings, three scorer outputs, five checkpoint rules, same-LR seed42 results and paired encoder-minus-full effects remain visible. Native trajectory extrema are descriptive; no causal drift claim or family winner. Atum preflight found0 summaries and matched the completed A reader against30 independently rescored snapshots. Evidence: encoder_analysis_runtime/56e8cb8/{deployment,preflight}.json. All10 live handles and133 pins preserved. No encoder queue or fit launched; E34-E37 and Q09 remain pending.",
     "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending.",
@@ -2139,6 +2139,51 @@
       "selected_controlled_test_results_available": false,
       "evidence": "controlled/runs/full__B__seed43__lr1p0/{controlled_training_complete.json,retained/retention.json,trainer_state.json,rank_0_complete.json,rank_1_complete.json,rank_2_complete.json,rank_3_complete.json,prediction_exports/trajectory/eval_step*.json}; realization_predictions/full__B__seed43__lr1p0/validation_complete.json on Atum",
       "interpretation": "Second of four confirmations at the common B-validation-selected base LR. B seed43 peak/final below tuning-exposed B seed42 base-LR0.18457785/0.17975193. Seed43 A/B own-checkpoint peaks0.34493525/0.17738602 use different populations and epochs15/5; descriptive only. Saved-metric consistency and checkpoint provenance verified; correlations not independently reconstructed. Seed44, independent analysis and selected tests pending.",
+      "scientific_completion_counts_changed": false
+    },
+    "two_seed_amendment": {
+      "user_instruction": "2 seeds are enough, skip seed stuff",
+      "active_training_seeds": [
+        42,
+        43
+      ],
+      "tuning_seed": 42,
+      "confirmation_seeds": [
+        43
+      ],
+      "skipped_seed": 44,
+      "overrides": "MD minimum of three training seeds; every remaining experiment uses two training seeds total.",
+      "unchanged_scope": "All listed experiments, learning-rate candidates, held-out allocation comparisons and adaptation/test units remain.",
+      "cancellation_complete_sha256": "4fdad8030a05fcfda3c1f9af46442d9b57c92081e6d3f792ebc64a2f9969efcc",
+      "cancellation_evidence": "protocol_amendments/two_seed_20261103/{cancellation_intent,cancellation_complete}.json on Atum",
+      "A44_partial_preserved_and_excluded": true,
+      "B44_not_started": true,
+      "completed_fits_preserved": 8,
+      "retired_coordinators": [
+        "full_confirmation_queue",
+        "full_evaluation_queue",
+        "regularization_queue"
+      ],
+      "all_target_handles_verified_absent": true,
+      "approved_gpus_idle_at_cancellation": true,
+      "primary_fit_accounting": {
+        "settings": 28,
+        "tuning_runs": 168,
+        "confirmation_runs": 56,
+        "total_runs": 224
+      },
+      "historical_plans_and_sources_unchanged": true,
+      "remaining_queue_expansion_requires_open_budget_decision": true,
+      "replacement_modules": [
+        "two_seed_policy.py",
+        "two_seed_full_evaluation_queue.py",
+        "two_seed_summary.py"
+      ],
+      "local_focused_tests_passed": 19,
+      "scope_of_new_evaluation_queue": "Exactly eight existing completed full-model fits; unchanged native evaluator/per-fit diagnostics; no training, new selection or additional arm.",
+      "confirmation_seed_variance_available": false,
+      "interpretation": "Seed42 was used for tuning; seed43 is the single confirmation. Any two-seed spread is descriptive and mixes these roles. Partial seed44 output is not scientific comparison evidence.",
+      "other_downstream_three_seed_paths_require_amended_replacements": true,
       "scientific_completion_counts_changed": false
     }
   },

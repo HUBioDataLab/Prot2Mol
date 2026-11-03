@@ -40,7 +40,7 @@ B LR3.0 has a lower peak and final macro than either other B learning rate.
 These are descriptive single-seed validation results, not a selected controlled
 test comparison. The registered B-validation rule selected **base LR** for both
 A and B: B peaks are 0.18458 (base), 0.18322 (×0.3) and 0.17310 (×3).
-No test scores entered this selection. **Two of four confirmation fits are complete:**
+No test scores entered this selection. **Both required seed43 confirmation fits are complete:**
 
 | Split / seed at base LR | Best epoch | Best validation macro | Final validation macro |
 | --- | ---: | ---: | ---: |
@@ -51,10 +51,12 @@ A seed43's peak is close to seed42's 0.34368; B seed43's peak is below
 seed42's 0.18458. A/B use different validation populations, so their gap remains
 descriptive. Both fits' 15 saved native validation metrics match Trainer history
 and their retained best checkpoints are verified. Independent trajectory
-analysis, selected-test comparisons and the full seed comparison remain pending.
-The existing queue is now running A seed44 at base LR on GPUs 0, 2, 5, 6
-([run j5hc20fr](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/j5hc20fr));
-B seed44 follows.
+analysis and selected-test comparisons remain pending. The user amended the
+protocol to **two training seeds total, 42 and 43**, overriding the MD's minimum
+of three. A seed44 was cancelled while partial; B seed44 never started. Seed44
+is excluded from selection and scientific comparisons. Seed42 is tuning-exposed;
+seed43 is the single confirmation, so confirmation-seed variance is unavailable.
+The next stage evaluates the retained checkpoints of these eight completed fits.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -98,11 +100,11 @@ does not imply an unseen scaffold.
 | **Q33 — Auxiliary gradient alignment?** | Pending | No scientific gradient-alignment or transfer result yet. Fixed batches and CPU implementation qualification are prepared; actual trained-checkpoint probes remain gated behind the preceding experiments. |
 | **Q34 — How were original weights selected?** | Answered | The user confirmed arbitrary selection of ranking/BCE/contrastive weights 0.25/0.25/1. W&B trials alone did not establish the decision. The prospective controlled weight and A/B validation-choice comparison remains pending under E39. |
 
-**Remaining work:** Finish the registered full-model confirmation and selected-test
-evaluations, then the unfinished controlled variants, dataset experiments and
+**Remaining work:** Finish full-model selected-test evaluations and analysis,
+then the unfinished controlled variants, dataset experiments and
 Tier 4 measurements. Conditional interventions depend on the prescribed earlier
-results. The existing training queue continues; expanding it awaits the open
-compute-budget decision. E40's proposed B within-component exception is also
+results. The cancelled training queue needs a two-seed replacement; expanding
+training awaits the open compute-budget decision. E40's proposed B within-component exception is also
 unselected. No additional LambdaMART fits are planned; the fixed depth 3 A/B
 test results0.12849/0.06071 are retained as the requested baseline evidence.
 
