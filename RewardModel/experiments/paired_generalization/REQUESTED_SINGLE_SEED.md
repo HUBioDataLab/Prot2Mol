@@ -59,6 +59,30 @@ configuration are fixed; no seed variance, test-selected winner or causal
 interpretation of A/B association is reported. Adaptation, geometry, gradients,
 transference and allocation comparisons remain separate required work.
 
+`requested_probe_protocol.py` narrows the existing E49–E52 and E56–E57
+protocols to seed42 and resolves the two full-reference base checkpoints.
+It preserves the frozen task/group memberships, k values, query cohorts,
+optimizer and step rules. E54–E55 use the same two reference models on all six
+own-regime train/validation/test geometry cohorts. The amended Tier 3 gate
+requires the 24 requested training completions and all 26 selected analyses.
+Preparing the protocol does not qualify or start scientific probe execution.
+
+The existing adaptation design contains 22 available kind/scope/k cells.
+With one seed, it requires 8,088 short support fits: 24 across-unit fits and
+8,064 within-unit fits. These update the heads, or heads plus cross-attention,
+under fixed settings; the encoders remain frozen. Each feasible scaffold unit
+has its own support fit. A within-assay adaptation is structurally unavailable,
+and unavailable large-k cohorts stay explicitly unavailable. No new k budget,
+learning rate, seed, task or unit is introduced by this amendment.
+
+The verified full-reference state dictionaries contain 6,898,572 raw bytes for
+each head-only snapshot and 13,198,220 bytes for heads plus cross-attention.
+Retaining all 15 B-validation snapshots and at most selected/final snapshots
+elsewhere requires at most 51,484 adapter snapshots, approximately 482 GiB of
+raw tensors. Metadata, predictions, logs and main-model checkpoints are extra.
+This is a storage estimate, not a reservation or a runtime estimate; the GPU
+execution stage must check actual quota. Existing checkpoints remain preserved.
+
 E49–E58 retain the MD's adaptation, pathway, geometry, gradient, transference
 and A/B variant-comparison requirements, under the same single-seed amendment.
 E01–E05, E08–E09 and E19–E20 reuse existing data/metric evidence and complete

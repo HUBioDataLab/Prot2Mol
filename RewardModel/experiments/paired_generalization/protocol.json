@@ -2289,6 +2289,33 @@
       "validation_limit": "Actual tiny CPU inference and simulated scheduler checks; no scientific selected-test result or GPU qualification claim.",
       "scientific_completion_counts_changed": false,
       "remaining": "Scientific evaluation/reporting, allocation comparisons, adaptation, geometry and gradient/transference probes."
+    },
+    "requested_probe_protocol_preparation": {
+      "module": "requested_probe_protocol.py",
+      "local_focused_tests_passed": 15,
+      "seed": 42,
+      "learning_rate_multiplier": 1.0,
+      "adaptation_cells": 22,
+      "adaptation_support_fits": 8088,
+      "across_unit_fits": 24,
+      "within_unit_fits": 8064,
+      "geometry_exports": 6,
+      "objective_model_slots": 2,
+      "objective_batch_pairs": 64,
+      "snapshot_raw_bytes_by_scope": {
+        "heads": 6898572,
+        "heads_cross_attention": 13198220
+      },
+      "maximum_adapter_snapshots": 51484,
+      "maximum_raw_adapter_bytes": 517331619664,
+      "scope": "Preserve all frozen task memberships, k values, cohorts, optimizer settings, step rates and unavailable cases. Only seed42/full A-B base-LR best-macro references. No new seed/LR search.",
+      "scope_gate": "All24 requested main fits and26 selected evaluation/analysis results before scientific probes.",
+      "model_fitting": false,
+      "model_inference": false,
+      "production_runtime_qualified": false,
+      "scientific_probe_results": false,
+      "scientific_completion_counts_changed": false,
+      "remaining": "Atum protocol preparation/verification, GPU orchestration/qualification, all scientific probe executions and reporting."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
