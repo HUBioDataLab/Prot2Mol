@@ -56,7 +56,9 @@ protocol to **two training seeds total, 42 and 43**, overriding the MD's minimum
 of three. A seed44 was cancelled while partial; B seed44 never started. Seed44
 is excluded from selection and scientific comparisons. Seed42 is tuning-exposed;
 seed43 is the single confirmation, so confirmation-seed variance is unavailable.
-The next stage evaluates the retained checkpoints of these eight completed fits.
+Checkpoint evaluation is running for these eight completed fits. The next E33
+queue is adapted to the same two registered alternative weight decays, with
+six tuning fits and two confirmations per setting (16 new fits total).
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -103,8 +105,8 @@ does not imply an unseen scaffold.
 **Remaining work:** Finish full-model selected-test evaluations and analysis,
 then the unfinished controlled variants, dataset experiments and
 Tier 4 measurements. Conditional interventions depend on the prescribed earlier
-results. The cancelled training queue needs a two-seed replacement; expanding
-training awaits the open compute-budget decision. E40's proposed B within-component exception is also
+results. The two-seed E33 replacement waits for the full-model report; expanding
+training beyond those two existing settings awaits the open compute-budget decision. E40's proposed B within-component exception is also
 unselected. No additional LambdaMART fits are planned; the fixed depth 3 A/B
 test results0.12849/0.06071 are retained as the requested baseline evidence.
 

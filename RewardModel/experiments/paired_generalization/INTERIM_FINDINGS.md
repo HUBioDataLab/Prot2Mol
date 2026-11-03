@@ -2227,3 +2227,39 @@ reader qualification SHA256:
 Deployment is unseen generated molecules. That does not establish whether their
 scaffolds are unseen. The report must distinguish unseen identity from unseen
 scaffold, rather than presume either split alone matches the generator.
+
+
+## Two-seed evaluation activation and E33 replacement
+
+The amended full-model evaluator was deployed as `650d76b`. Its runtime
+preflight preserved 538 prior source/evidence pins, and the CPU coordinator
+was launched once (PID3909811/start169257950). At Unix1793741881.716816 it was
+running fixed-checkpoint evaluation for `full__A__seed42__lr1p0`; live native
+workers were on authorized physical GPUs0,2,5. Zero per-fit evaluation/analysis
+completion receipts existed at that observation. This is execution progress,
+not a new scientific result. Evidence: `protocol_amendments/two_seed_20261103/`
+`650d76b/{deployment,activation}.json`; activation SHA256
+`724cb1a3ebdea11cd01e215dc4978926a39b6695966ec3ccbe3210922cb00ee8`.
+
+`two_seed_regularization_queue.py` replaces the cancelled E33 coordinator.
+It uses only the two already registered alternative decays,0.001 and0.1,
+with six seed42 tuning fits plus A/B seed43 confirmation fits for each setting:
+16 new fits,24 including the eight shared full-reference fits at decay0.01.
+Original configs, LR candidates and the B-validation-only selection rule remain
+bound to the historical plan. It waits for the exact full-evaluation process
+to finish and verifies all eight completed analyses before training. Existing
+outputs, any unexpected seed44 registration, changed evidence, resource/lock
+conflicts and failed work cannot silently trigger duplicate fitting.
+
+The companion `two_seed_regularization_analysis.py` retains every registered
+decay, all five checkpoint rules, conditional paired whole-unit comparisons,
+and the single validation-selected decay/LR decision. Seed43 is the only
+confirmation; confirmation-seed variance is unavailable. The family report
+runs after both new primary reports. No extra decay or training arm is added.
+All 56 local focused checks passed. They exercise orchestration and real
+configuration/selection validation with simulated workers, plus paired report
+IO; they do not establish
+scientific GPU performance. Runtime preparation and activation are recorded
+separately under `regularization_two_seed_runtime/<commit>/` and
+`controlled/regularization_two_seed_queue/` on Atum. E33 and all scientific
+completion counts remain unchanged until the prescribed results are verified.

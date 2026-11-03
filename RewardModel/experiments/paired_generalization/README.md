@@ -6,8 +6,12 @@ tuning-exposed and seed43 is the only confirmation; no confirmation-seed
 variance is available. Partial A44 is excluded and B44 was not started.
 Historical three-seed registrations remain immutable. Use `two_seed_policy.py`,
 `two_seed_full_evaluation_queue.py` and `two_seed_summary.py` for the amended
-full-model evaluation; do not restart the retired three-seed queues. Other
-downstream execution/reporting paths require the same amendment before use.
+full-model evaluation. `two_seed_regularization_queue.py` and
+`two_seed_regularization_analysis.py` cover the two existing E33 settings and
+their comparison with full-model weight decay: 16 new fits, 24 including the
+shared reference. The replacement waits for the full-model report. Do not
+restart the retired three-seed queues. Other downstream execution/reporting
+paths require the same amendment before use.
 
 The governing specification is `/Paired input ranking generalization.md`. Do not
 expand the scientific scope. Answer its 34 questions and execute its suggested
