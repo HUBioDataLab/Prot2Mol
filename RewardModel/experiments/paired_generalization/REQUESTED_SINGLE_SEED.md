@@ -144,6 +144,23 @@ still must check quota, hold the global GPU lock, verify production qualificatio
 and aggregate W&B results and scientific reports; this worker module alone
 does not activate the scientific adaptation queue.
 
+`requested_adaptation_queue.py` supplies that coordinator and report. It holds
+the shared GPU lock through each stage, reserves space from the real adapter
+sizes and frozen query counts, and releases the lock during ten-minute resource
+waits. A failed worker stops the queue without retry. Its production qualification
+checks the two real B across-k1 fits, exact optimizer scope, unchanged frozen
+parameters, all 15 saved epochs, native query precision/restoration and GPU
+memory evidence before the larger selection stage can start. The final report
+verifies all native operation payloads, preserves undefined scores, compares
+budgets on available/common-unit/common-defined cohorts, compares scopes on
+paired assays, and records sampler counts and observed optimizer steps. Counts
+do not claim unique sampled molecules or realized nonzero-gradient pair counts.
+One aggregate W&B run records cell results and unchanged baselines and uploads
+the concise report plus full statistics, selections and provenance. No per-unit
+W&B runs or additional fits are introduced. Preparation still requires all 26
+Tier 3 analyses; a waiting supervisor must connect this runner to the existing
+reporting queue before unattended scientific execution is active.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
