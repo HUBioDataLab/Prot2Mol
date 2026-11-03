@@ -89,6 +89,16 @@ E01–E05, E08–E09 and E19–E20 reuse existing data/metric evidence and compl
 the selected prediction-based comparisons. Their execution and reporting must
 also be adapted before use; this training queue does not run them.
 
+`requested_reporting_queue.py` binds to the exact live requested-training
+controller and waits for all 24 native training completions. Its waiting checks
+run every ten minutes without loading models or exposing GPUs. It then calls
+the fixed-checkpoint evaluator in batches of at most four models under the
+shared GPU lock, analyzes their saved predictions, and writes the 26-fit
+comparison and Tier 3 handoff. Process exit alone never counts as completion.
+Failures stop the controller for inspection; it does not restart failed jobs
+or invoke a legacy search queue. This handoff leaves adaptation, geometry,
+gradient/transference probes and remaining audit work explicitly pending.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
