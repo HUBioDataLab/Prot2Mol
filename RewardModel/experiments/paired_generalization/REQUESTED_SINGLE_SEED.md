@@ -37,6 +37,28 @@ or failed work. It neither traverses the former tuning grid nor creates new
 confirmation seeds. Its training completion does not mean the experiments or
 selected-test comparisons are complete.
 
+`requested_evaluation.py` evaluates only the best validation-macro checkpoint
+of each of the 26 requested/reference fits. It does not require or create other
+learning-rate candidates. Each fixed-model worker uses one authorized GPU;
+up to four completed models can be evaluated together under the shared training
+lock. Existing complete native validation output from full A42 is reusable
+after checking its original plan, weights, data and receipt. Its interrupted
+test output remains preserved; the amended evaluation uses a separate path.
+The worker stops on partial output in its own path. Local checks cover actual
+tiny-model full, frozen, LoRA and training-known-positive inference, without
+claiming scientific GPU results.
+
+`requested_results.py` applies the existing native metric, noise-band,
+similarity and composition diagnostics to the selected validation/test
+predictions and checks all 15 saved native validation/training-probe epochs.
+It reports all three scoring pathways. Across the 13 requested/reference
+settings it retains every A/B point, matched variant-minus-full effects, and
+the separate uniform/top and soft/hard contrasts. E58's plot includes the
+common-defined-eligible-assay sensitivity within each split. The seed and
+configuration are fixed; no seed variance, test-selected winner or causal
+interpretation of A/B association is reported. Adaptation, geometry, gradients,
+transference and allocation comparisons remain separate required work.
+
 E49–E58 retain the MD's adaptation, pathway, geometry, gradient, transference
 and A/B variant-comparison requirements, under the same single-seed amendment.
 E01–E05, E08–E09 and E19–E20 reuse existing data/metric evidence and complete

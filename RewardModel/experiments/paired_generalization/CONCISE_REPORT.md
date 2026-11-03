@@ -62,6 +62,10 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
+The first requested fit, frozen-encoder A42, has started on the four authorized
+GPUs ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
+The selected-checkpoint evaluation and comparison reports are now implemented
+for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
 The complete historical ledger is retained; unrequested experiments are not
 silently marked complete. See [the current scope](REQUESTED_SINGLE_SEED.md).

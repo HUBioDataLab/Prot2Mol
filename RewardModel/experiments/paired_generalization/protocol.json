@@ -448,7 +448,7 @@
       "factorized_scoring_B"
     ],
     "leak_design": "Version 2 matched data and A production training views complete; B whole-assay exception remains a proposal awaiting choice. No E40 scientific fitting or performance results.",
-    "current_controlled_launch": "Previous checkpoint and E33 queues stopped by user request; outputs preserved. Requested single-seed queue implemented and locally tested, not yet deployed or launched at this source snapshot.",
+    "current_controlled_launch": "Requested fixed-configuration seed42 queue launched at source47018f4. First fit frozen__A__seed42__lr1p0 was verified training on all four authorized GPU UUIDs, W&B khvzu281. Controller3949393/start169514103; launcher3949717/start169516248. Previous parameter-search/seed queues remain stopped. This launch is not experimental completion.",
     "checkpoint_retention_review": "Static dependency review at source8298c8f and live gate inventory saved to resource_audits/checkpoint_retention_review/source_8298c8f.json on Atum, SHA2566a8f75cd21dcb9dcbebf1beaaef20e31c81064062c7bf8227041ffbab9f3c9d2. All10 process identities and133 pinned queue inputs verified. Scalar exports do not replace all15 source weights for allocation native losses and selected-window averaging. Downstream reports require selected weights/averages; generic retain rechecks every originally preserved weight and completed_job hashes the retention receipt. A separate verified release procedure is required before deleting intermediates, including later Tier4/conditional consumers; none is implemented. Full primary/allocation selections, selected evaluation completion and allocation averages were absent. No weight deletion, move, retention-policy change or experiment completion credit.",
     "encoder_reporting_preparation": "encoder_analysis.py (56e8cb8),27 focused tests passed. Covers only the existing36 tuning+24 confirmation fits across six encoder settings,10 shared full-reference fits. Validates exact encoder-only configuration changes, canonical native selected summaries, matching training/metric qualifications and complete15-epoch trajectory exports. All settings, three scorer outputs, five checkpoint rules, same-LR seed42 results and paired encoder-minus-full effects remain visible. Native trajectory extrema are descriptive; no causal drift claim or family winner. Atum preflight found0 summaries and matched the completed A reader against30 independently rescored snapshots. Evidence: encoder_analysis_runtime/56e8cb8/{deployment,preflight}.json. All10 live handles and133 pins preserved. No encoder queue or fit launched; E34-E37 and Q09 remain pending.",
     "postselection_execution": "Immutable primary-grid checkpoint evaluation planner and native worker implemented. Validation-only LR reconstruction, retained-weight integrity, shared training lock, authorized GPUs and training-only positive-index reconstruction are covered by local qualification. Scientific execution, statistical checkpoint contrasts and multi-seed reporting remain pending.",
@@ -2266,10 +2266,29 @@
       "old_stop_evidence": "protocol_amendments/stop_hpo_20261103/{stop_intent,stop_complete}.json on Atum",
       "source_module": "requested_single_seed.py",
       "local_focused_tests_passed": 24,
-      "training_started": false,
+      "training_started": true,
       "evaluations_and_probes_require_separate_amended_execution": true,
       "scientific_completion_counts_changed": false,
-      "scope_document": "REQUESTED_SINGLE_SEED.md"
+      "scope_document": "REQUESTED_SINGLE_SEED.md",
+      "deployment_sha256": "3764253a8b4e69a63ed045f8b05852af07297e67179a9bd3bf11f589ea82c0c9",
+      "activation_sha256": "369052291afefbf18a85065a2c094310bde0fcb630a2caecd0603adf89827248",
+      "first_fit_live_sha256": "188c9830c2555fd179bef46cd22df76641ada273aedd0c3e8694245e6e96e92e",
+      "training_plan_sha256": "e51796cde2b6ce3ccfcb7e410225c4e3b88b92c2c01f8fe5def7cfc8b881383c",
+      "launch_evidence": "requested_single_seed_runtime/47018f4/{deployment,activation,first_fit_live}.json on Atum"
+    },
+    "requested_selected_reporting": {
+      "modules": [
+        "requested_evaluation.py",
+        "requested_results.py"
+      ],
+      "scope": "Best validation-macro checkpoint for the26 requested/reference seed42/baseLR fits; no additional training, LR reconstruction or seed search.",
+      "existing_full_A_validation_reuse": "Verified completed native validation may be reused. Interrupted old test directories are preserved; new selected evaluation uses a separate directory.",
+      "reporting": "Native selected validation/test metric, noise, composition and three-pathway diagnostics; full15-epoch native trajectories; all13 settings; matched uniform/top and noise-soft/hard contrasts; own-defined and common-defined-eligible A/B plots.",
+      "local_evaluation_tests_passed": 22,
+      "local_reporting_tests_passed": 11,
+      "validation_limit": "Actual tiny CPU inference and simulated scheduler checks; no scientific selected-test result or GPU qualification claim.",
+      "scientific_completion_counts_changed": false,
+      "remaining": "Scientific evaluation/reporting, allocation comparisons, adaptation, geometry and gradient/transference probes."
     }
   },
   "deployment": "unseen molecules from a molecule generator",
