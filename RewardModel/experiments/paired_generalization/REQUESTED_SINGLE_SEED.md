@@ -107,6 +107,17 @@ and preserve the model weights. Both pooled and projected representations,
 observation and unique-entity views, and active/all-pair alignment are retained.
 Preparing or qualifying this runner does not count as scientific geometry.
 
+`requested_objectives.py` runs E56/E57 behind the same Tier 3 prerequisite.
+It binds the two full-reference checkpoints to all 64 frozen batch pairs and
+the original nominal component rates. Before each model's scientific pass,
+two measurements of its first frozen pair check float32 forwards, disabled
+TF32/autocast, repeatability, effective steps, memory use and weight preservation.
+The fixed numerical check records small transfer sign changes and observed
+precision limits; it never chooses new step sizes or excludes pairs. Failed
+qualification stops execution with its evidence retained. The subsequent
+measurements preserve all per-block norms/cosines, transfer values and undefined
+states, with no fitting, test-data access or independent-batch uncertainty claim.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
