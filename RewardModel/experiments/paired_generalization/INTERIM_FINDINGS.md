@@ -843,6 +843,43 @@ and selected controlled test results remain pending. Experiment/question
 completion counts are unchanged. Per the user's monitoring preference, idle
 periods use interruptible sleeps followed by isolated milestone checks.
 
+The A LR3.0 fit (`full__A__seed42__lr3p0`, W&B `6w5p03mw`) has also completed
+all 15 epochs/12,030 optimizer steps and its independent native audit. Both
+best and final validation macro are **0.37531688 at epoch 15/step 12,030**.
+The minimum aggregate validation loss is also at 15: **2.25452399**
+(BCE 0.43168974, ranking 2.39050078, contrastive 1.54897630; AUROC 0.85745553).
+The root model and epoch-15 checkpoint share SHA256
+`c14cd77b1bc3703a113855281fbbc6087d83c2a6cbaa5a4091ea8095a3cc7763`.
+Of 7,997 eligible validation assays, 7,996 have defined correlations at epoch 5;
+all 7,997 are defined at the other epochs. The fixed training-probe final macro
+is 0.57819093 on 2,048 assays/39,740 rows. Final validation BCE/cosine label
+macros are 0.31171948/0.17898956.
+
+The independent audit checked all 30 validation/probe snapshots, 831,555
+group/scorer correlations and 900 sampled noise-band pair counts. It finished
+at Unix 1793668988.65; the trajectory, verification and completion receipts
+were rehashed on read. Bootstrap intervals, calibration and NDCG are not
+independently reconstructed by this verifier. Compared descriptively with the
+completed A base-LR run, the native peak is higher by 0.03164167 and the final
+macro by 0.03199949. This is one seed under a fixed 15-epoch budget; the peak at
+the final epoch does not establish what longer training would do or select the
+common LR for deployment.
+
+Evidence on Atum: `controlled/runs/full__A__seed42__lr3p0/`
+`{controlled_training_complete.json,retained/retention.json}`, SHA256
+`59eac1be7ea547102fe7144c6731a44edadd6d876ccd342b66558b2e1ff37e27`
+and `17ac01d6290a9f843be44467109bf5ab4512ed784d2a1897778f4699e54c93da`;
+`tier1/native_remaining_tuning_audits/jobs/full__A__seed42__lr3p0/complete.json`,
+SHA256 `e436874fd329d6d5faf7351891aa686b61327fbfd69350bdaf66d2ca4862a8e8`;
+`tier1/native_trajectories/full__A__seed42__lr3p0/6349989d65c2f7ef/`
+`{trajectory_through_epoch15,verification_through_epoch15}.json`, SHA256
+`29cbce6666310e20bc61234c0433de64d1e3d1c27bf658c5fcd47e7c1cfe2da4`
+and `1a43d9ef58cd837396029fd786982e4896e8caac40562f4f3c0ba6a347b6721b`.
+The same queue has started `full__B__seed42__lr3p0` (W&B `op384ho2`) on the
+four authorized GPUs. Five controlled fits are complete; common-LR selection,
+confirmation seeds and selected controlled test results remain pending.
+Question and experiment completion counts are unchanged.
+
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
 values). No checkpoint was changed and no next training was started. The

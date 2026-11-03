@@ -1,6 +1,6 @@
 # Paired-input ranking generalization: interim evidence report
 
-Snapshot: 2026-11-02. **The study is not complete.** This report follows the
+Snapshot: 2026-11-03. **The study is not complete.** This report follows the
 [34 questions and experiment specification](<../../../Paired input ranking generalization.md>).
 The [evidence ledger](protocol.json) records every question and all 70 experiment
 entries, including 12 conditional interventions. Artifact locations, hashes and
@@ -22,7 +22,7 @@ remaining replicated experiments. Only Tier 2 is fully complete.
 **Training results:** The requested fresh 15-epoch scaffold baseline is complete.
 Its best validation-macro checkpoint is epoch 6: validation 0.18460 and test 0.17688
 ([run 4d1vkheo](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/4d1vkheo)).
-Four controlled seed42 fits are complete, including their native trajectory audits:
+Five controlled seed42 fits are complete, including their native trajectory audits:
 
 | Split / learning rate | Best epoch | Best validation macro | Final validation macro |
 | --- | ---: | ---: | ---: |
@@ -30,12 +30,14 @@ Four controlled seed42 fits are complete, including their native trajectory audi
 | B / base | 6 | 0.18458 | 0.17975 |
 | A / ×0.3 | 14 | 0.28036 | 0.27928 |
 | B / ×0.3 | 12 | 0.18322 | 0.18052 |
+| A / ×3 | 15 | 0.37532 | 0.37532 |
 
 The A LR0.3 fit scores below base LR at every matched epoch. B LR0.3 peaks later
 than base LR, with a slightly lower best macro and slightly higher final macro.
+A LR3.0 has the highest observed A peak, 0.03164 above the base-LR peak.
 These are descriptive single-seed validation results, not a selected controlled
-test comparison. The existing queue is now running A LR3.0 on GPUs 0, 2, 5, 6,
-with B LR3.0 next. No common LR or confirmation-seed result is available yet.
+test comparison. The existing queue is now running B LR3.0 on GPUs 0, 2, 5, 6.
+No common LR or confirmation-seed result is available yet.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
