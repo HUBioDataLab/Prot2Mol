@@ -837,10 +837,10 @@ SHA256 `b201186e5b3b04767093e4d8b577da0a3533045090617b5239511e7dfb0bc8e6`;
 `ce30524c1a301e80fd62b336ecfc39d3c787b2a9906c59a8d2aaa746817d499d`
 and `5e087a1705fe5e3a09a12a147faf30758caa7907a99c943c3869d3c3fb0f3730`.
 The audit completed at Unix 1793646616.31; its receipts were rehashed on read.
-The same queue now runs `full__A__seed42__lr3p0` (W&B `6w5p03mw`), with B LR3.0
-next. Four controlled fits are complete, but the common LR, confirmation seeds
-and selected controlled test results remain pending. Experiment/question
-completion counts are unchanged. Per the user's monitoring preference, idle
+At that snapshot the queue started `full__A__seed42__lr3p0` (W&B `6w5p03mw`),
+with B LR3.0 next. Four controlled fits were complete; common LR, confirmation
+seeds and selected controlled test results were pending. Experiment/question
+completion counts were unchanged. Per the user's monitoring preference, idle
 periods use interruptible sleeps followed by isolated milestone checks.
 
 The A LR3.0 fit (`full__A__seed42__lr3p0`, W&B `6w5p03mw`) has also completed
@@ -875,10 +875,63 @@ SHA256 `e436874fd329d6d5faf7351891aa686b61327fbfd69350bdaf66d2ca4862a8e8`;
 `{trajectory_through_epoch15,verification_through_epoch15}.json`, SHA256
 `29cbce6666310e20bc61234c0433de64d1e3d1c27bf658c5fcd47e7c1cfe2da4`
 and `1a43d9ef58cd837396029fd786982e4896e8caac40562f4f3c0ba6a347b6721b`.
-The same queue has started `full__B__seed42__lr3p0` (W&B `op384ho2`) on the
-four authorized GPUs. Five controlled fits are complete; common-LR selection,
-confirmation seeds and selected controlled test results remain pending.
-Question and experiment completion counts are unchanged.
+At that snapshot the queue started `full__B__seed42__lr3p0` (W&B `op384ho2`)
+on the four authorized GPUs, with five controlled fits complete. Common-LR
+selection, confirmation seeds and selected controlled tests were pending.
+
+The B LR3.0 fit has since completed all 15 epochs/13,155 optimizer steps,
+allocation exports, retention and its independent native audit. Best validation
+macro is **0.17310025 at epoch 6/step 5,262**; final macro is **0.16400919**.
+Aggregate validation loss also reaches its minimum at epoch 6: **7.21106720**,
+then finishes at **7.63197660** (BCE 0.57388800, ranking 3.10172462,
+contrastive 6.71307325; AUROC 0.75424943). Root and epoch-6 weights share
+SHA256 `e89262ae7f44c301420d6f8240ee5a86c7d9b1b62f9654c5319e29a2f1ffbf00`.
+All 15 epoch weights remain protected. Of 3,969 eligible validation assays,
+3,968 have defined correlations at epoch 11; all 3,969 are defined otherwise.
+
+All 30 validation/probe snapshots passed the independent audit: 509,760
+group/scorer correlations and 900 sampled noise-band pair counts. Final fixed
+training-probe macro is 0.59629982 on 2,048 assays/43,115 rows; final validation
+BCE/cosine label macros are 0.13624922/0.07550496. Bootstrap intervals,
+calibration and NDCG were not independently reconstructed. Compared with B base
+LR, both native peak and final macro are lower, despite the higher final probe
+macro. A LR3.0 improved A validation, whereas B LR3.0 degraded B validation;
+these single-seed observations do not establish a mechanism or variant-wide
+association.
+
+Evidence on Atum: `controlled/runs/full__B__seed42__lr3p0/`
+`{controlled_training_complete.json,retained/retention.json}`, SHA256
+`9a4554eb53f128e06be0374b3ea57db4d912134094f326709b4ebae5a3d40075`
+and `bafab69f9aa24558e299273056832111ab2b84e8c7a1d0363dff184ea1a66aec`;
+`tier1/native_remaining_tuning_audits/jobs/full__B__seed42__lr3p0/complete.json`,
+SHA256 `1d3a09a2bf7a84942352bd53c507b5bce59fa53882718cdd5b47c9f38688b72e`;
+`tier1/native_trajectories/full__B__seed42__lr3p0/6349989d65c2f7ef/`
+`{trajectory_through_epoch15,verification_through_epoch15}.json`, SHA256
+`fbf3a9eb8314f08cfdd351b91b519c84c6b1efe28a6b7ef6b4a5e57f2136726e`
+and `f5a95395c4accbe2438d84ecf3ac85ae0eeebc52052dffb37e1ebf820a69ccdb`.
+The audit worker finished all three registered audits and exited 0 at
+Unix 1793692166.52; its process was verified absent. Its overall completion
+SHA256 is `e8fa06c420f79bd6cbab7a1fc4cf86ace1cf3be7fb91e9d1037d46a9e4e1bd05`.
+
+All six full-model seed42 tuning fits are now complete and audited. The existing
+B-validation selector chose **base LR (×1.0)**: candidate peaks are 0.18457785
+(base), 0.18322109 (×0.3) and 0.17310025 (×3), each with full defined-assay
+coverage at its selected epoch. This choice was reconstructed from the native
+validation snapshots and retention records, without test scores. It applies to
+both A and B confirmations. The original tuning coordinator finished with its
+verified completion receipt and is absent; the existing confirmation coordinator
+is running `full__A__seed43__lr1p0` (W&B `hnnyo965`) on GPUs 0, 2, 5, 6.
+The remaining registered order is B seed43, A seed44, B seed44. No confirmation
+or selected controlled-test result is available yet.
+
+Selection evidence: `controlled/selections/full.json`, SHA256
+`7ccd63ecdd1ece26e2df45ec654b60e38443ea8b51d663adbf02140bfc986d70`;
+`controlled/full_confirmation_queue/selection.json`, SHA256
+`faa97952273faaebfc381ed3b30ddc0a45798e22b64353bcf6eec4cd3867c7c7`;
+`controlled/full_tuning_queue/complete.json`, SHA256
+`b83719020ccc651244c87bca6b9569f5e2db59bb40b110f797b4edbb533ec9e5`.
+Six completed fits do not finish the replicated experiments; question and
+experiment completion counts remain unchanged.
 
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch

@@ -22,7 +22,7 @@ remaining replicated experiments. Only Tier 2 is fully complete.
 **Training results:** The requested fresh 15-epoch scaffold baseline is complete.
 Its best validation-macro checkpoint is epoch 6: validation 0.18460 and test 0.17688
 ([run 4d1vkheo](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/4d1vkheo)).
-Five controlled seed42 fits are complete, including their native trajectory audits:
+All six full-model seed42 tuning fits are complete, including their native trajectory audits:
 
 | Split / learning rate | Best epoch | Best validation macro | Final validation macro |
 | --- | ---: | ---: | ---: |
@@ -31,13 +31,19 @@ Five controlled seed42 fits are complete, including their native trajectory audi
 | A / ×0.3 | 14 | 0.28036 | 0.27928 |
 | B / ×0.3 | 12 | 0.18322 | 0.18052 |
 | A / ×3 | 15 | 0.37532 | 0.37532 |
+| B / ×3 | 6 | 0.17310 | 0.16401 |
 
 The A LR0.3 fit scores below base LR at every matched epoch. B LR0.3 peaks later
 than base LR, with a slightly lower best macro and slightly higher final macro.
 A LR3.0 has the highest observed A peak, 0.03164 above the base-LR peak.
+B LR3.0 has a lower peak and final macro than either other B learning rate.
 These are descriptive single-seed validation results, not a selected controlled
-test comparison. The existing queue is now running B LR3.0 on GPUs 0, 2, 5, 6.
-No common LR or confirmation-seed result is available yet.
+test comparison. The registered B-validation rule selected **base LR** for both
+A and B: B peaks are 0.18458 (base), 0.18322 (×0.3) and 0.17310 (×3).
+No test scores entered this selection. The existing queue is now running A
+seed43 at base LR on GPUs 0, 2, 5, 6
+([run hnnyo965](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/hnnyo965));
+B seed43 and A/B seed44 follow. Confirmation results remain pending.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -81,7 +87,7 @@ does not imply an unseen scaffold.
 | **Q33 — Auxiliary gradient alignment?** | Pending | No scientific gradient-alignment or transfer result yet. Fixed batches and CPU implementation qualification are prepared; actual trained-checkpoint probes remain gated behind the preceding experiments. |
 | **Q34 — How were original weights selected?** | Answered | The user confirmed arbitrary selection of ranking/BCE/contrastive weights 0.25/0.25/1. W&B trials alone did not establish the decision. The prospective controlled weight and A/B validation-choice comparison remains pending under E39. |
 
-**Remaining work:** Finish the registered tuning, confirmation and selected-test
+**Remaining work:** Finish the registered full-model confirmation and selected-test
 evaluations, then the unfinished controlled variants, dataset experiments and
 Tier 4 measurements. Conditional interventions depend on the prescribed earlier
 results. The existing training queue continues; expanding it awaits the open
