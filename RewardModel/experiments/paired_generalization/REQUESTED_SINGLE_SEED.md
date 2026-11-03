@@ -161,6 +161,22 @@ W&B runs or additional fits are introduced. Preparation still requires all 26
 Tier 3 analyses; a waiting supervisor must connect this runner to the existing
 reporting queue before unattended scientific execution is active.
 
+`requested_probe_queue.py` provides the waiting supervisor. Its preparation
+binds the existing reporting process by PID, start time, owner, working directory
+and exact command. It checks the handle and completion receipt every ten minutes
+without exposing GPUs. A transient process-inspection failure is retried against
+the same handle; a missing/reused process without a valid completion stops the
+supervisor. Only verified completion of all 26 fixed-model analyses and their
+comparison report opens the adaptation → geometry → objective-probe sequence.
+Each executor retains its native input, runtime and GPU-lock checks. The
+supervisor never relaunches upstream training, retries failed scientific work,
+adds seeds/rates, or starts unrequested allocation experiments. Its completion
+still requires a final selected-experiment and 34-question evidence audit.
+
+E20 denotes uncertainty from resampling indivisible units, as recorded in the
+MD-derived ledger. It is covered by the selected-prediction analysis and must
+not be interpreted as authorization for extra split-allocation experiments.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight

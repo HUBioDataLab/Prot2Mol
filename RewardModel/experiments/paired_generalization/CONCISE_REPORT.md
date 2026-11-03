@@ -1,6 +1,6 @@
 # Paired-input ranking generalization: interim evidence report
 
-Snapshot: 2026-11-03. **The study is not complete.** This report follows the
+Snapshot: 2026-11-04. **The study is not complete.** This report follows the
 [34 questions and experiment specification](<../../../Paired input ranking generalization.md>).
 The [evidence ledger](protocol.json) records every question and all 70 experiment
 entries, including 12 conditional interventions. Artifact locations, hashes and
@@ -80,7 +80,7 @@ does not imply an unseen scaffold.
 | **Q01 — Which Spearman?** | Answered | Checkpoint selection uses the unweighted mean of eligible, defined per-assay correlations. `eval_spearman` is instead observation-count weighted. Neither is a pooled correlation. |
 | **Q02 — Eligibility, constants and ties?** | Answered | Headline eligibility is n≥3 and label span≥0.5, using float32 labels and average ranks. Undefined correlations are excluded with coverage reported. Eligible test assays: A 50.38%, B 41.47%. Float64 export arithmetic changes one B eligibility decision. |
 | **Q03 — Different test composition?** | Answered | Yes. Median assay sizes are A 3/B 2; mean within-assay variance is 0.3046/0.1809. Replicate counts and tie distributions also differ. These differences do not establish their causal contribution to the performance gap. |
-| **Q04 — Seed, bootstrap and split spread?** | Partial | Whole-unit intervals exist conditional on fitted models. Original splitter seeds 42/43/44 give identical assignments. Two dependent held-out reallocations preserve training support; their selected performance and training-seed spread remain pending. The A LR comparison does not measure seed variance. |
+| **Q04 — Seed, bootstrap and split spread?** | Partial | Whole-unit intervals exist conditional on fitted models. Original splitter seeds 42/43/44 give identical assignments. Two dependent held-out reallocations preserve training support but have no selected-performance result. Additional seeds and allocation searches are outside the current requested scope. E20 will report conditional whole-unit uncertainty for the selected fixed-seed models; the A LR comparison does not measure seed variance. |
 | **Q05 — Noise-tolerant and top-weighted metrics?** | With limits | Spearman has no noise band. Initial-B test ordering accuracy changes 0.5892→0.6581 when pairs inside the training replicate-RMS band are excluded, changing the denominator. Controlled-B NDCG@1/3/5 peaks at 6/13/8; all finish below their epoch 6 values. Different metric optima are descriptive, not proof of reproducible objective conflict. |
 | **Q06 — Which loss rises first?** | With limits | Initial-B BCE has minimum 2, ranking minimum 5, and learned molecule→protein contrastive minimum 5; the total contrastive minimum is 15. BCE can worsen while AUROC improves. A ranking and both contrastive directions decrease overall throughout 15 epochs. These single-run extrema are not statistical change points. |
 | **Q07 — Loss or Spearman checkpoint?** | With limits | Controlled A/B select validation macro Spearman at 14/6. Minimum aggregate loss is 15 on both. The different checkpoint locations are established; selected controlled test effects and seed variation remain pending. |
@@ -105,20 +105,23 @@ does not imply an unseen scaffold.
 | **Q26 — Projections before or after fusion?** | Answered | Contrastive projections precede cross-attention and use separate pooled encoder outputs. Ranking and BCE use fused representations. Cross-pair contrastive scores therefore use embedding products. |
 | **Q27 — Ranking-loss normalization?** | Answered | The reference sums weighted Plackett–Luce selections, then averages sampled lists without normalizing by retained weight sum. Larger assays get more bounded-list opportunities, so original assays are not equally weighted. Normalization variants' performance remains pending. |
 | **Q28 — Protein-frequency skew?** | With limits | The top 1% of proteins supply 30.07%/30.64% of A/B assay-list opportunities. The reference has no log-Q correction. Skew is established; use of a learned popularity shortcut is not. |
-| **Q29 — Whole-unit subsets?** | Partial | E41 views use whole assays on A and whole components on B. B's10% of units retains98.86% of rows, limiting saturation conclusions. E40 A views are qualified; strict B matching has no whole-component exchange. Performance experiments and the proposed B exception remain unresolved. |
-| **Q30 — Loss-alone and pairwise combinations?** | Pending | No completed controlled comparison of the required loss subsets yet. Full-model observations cannot identify each loss's contribution. |
+| **Q29 — Whole-unit subsets?** | Partial | E41 views use whole assays on A and whole components on B. B's10% of units retains98.86% of rows, limiting saturation conclusions. E40 A views are qualified; strict B matching has no whole-component exchange. E40/E41 performance experiments and the proposed B exception are outside the narrowed active scope; no performance conclusion is claimed. |
+| **Q30 — Loss-alone and pairwise combinations?** | Pending | No completed loss-subset comparison exists. That grid is outside the narrowed active scope. Full-model observations cannot identify each loss's contribution; the requested ranking variants and contrastive detachment address different comparisons. |
 | **Q31 — Do scorer orders agree?** | With limits | Controlled-B ranking/BCE agreement falls0.67647→0.59235, while ranking/cosine agreement rises0.07402→0.23018. Final BCE/cosine label macros0.13944/0.07754 remain below ranking0.17975. Prediction agreement does not measure gradient conflict. |
 | **Q32 — Protein-only BCE performance?** | With limits | Frozen-feature protein-only models recover about 48.9%/54.6% of excess validation AUROC above chance for A/initial B. Their scores are constant within assays. This comparison of separate predictors is not a causal fraction of the full model's signal. |
 | **Q33 — Auxiliary gradient alignment?** | Pending | No scientific gradient-alignment or transfer result yet. Fixed batches and CPU implementation qualification are prepared; actual trained-checkpoint probes remain gated behind the preceding experiments. |
-| **Q34 — How were original weights selected?** | Answered | The user confirmed arbitrary selection of ranking/BCE/contrastive weights 0.25/0.25/1. W&B trials alone did not establish the decision. The prospective controlled weight and A/B validation-choice comparison remains pending under E39. |
+| **Q34 — How were original weights selected?** | Answered | The user confirmed arbitrary selection of ranking/BCE/contrastive weights 0.25/0.25/1. W&B trials alone did not establish the decision. E39's prospective weight search is excluded from the active scope. |
 
-**Remaining work:** Finish full-model selected-test evaluations and analysis,
-then the unfinished controlled variants, dataset experiments and
-Tier 4 measurements. Conditional interventions depend on the prescribed earlier
-results. The two-seed E33 replacement waits for the full-model report; expanding
-training beyond those two existing settings awaits the open compute-budget decision. E40's proposed B within-component exception is also
-unselected. No additional LambdaMART fits are planned; the fixed depth 3 A/B
-test results0.12849/0.06071 are retained as the requested baseline evidence.
+**Remaining active work:** Complete the 24 fixed-seed requested variant fits,
+the selected-model evaluations for those fits and the two existing full references,
+and the requested adaptation, geometry and gradient/transference probes. Verify
+E01–E05, E08–E09, E19 and E20 against those saved predictions, then update all
+34 answers with the results and explicit limits. E20 is whole-unit bootstrap
+uncertainty, not an allocation search. The old E33, multi-seed and parameter-search
+queues are stopped; no compute-budget or within-component exception is awaiting
+approval for this active scope. Unrequested experiments remain incomplete in the
+historical ledger and will not be run. No additional LambdaMART fits are planned;
+the fixed depth 3 A/B test results0.12849/0.06071 remain the requested baseline evidence.
 
 Original random-split pair-median labeling changed 5,289 training labels using
 held-out measurements; the corresponding scaffold count was zero. Controlled
