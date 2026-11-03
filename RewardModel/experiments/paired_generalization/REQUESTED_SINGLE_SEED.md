@@ -118,6 +118,16 @@ qualification stops execution with its evidence retained. The subsequent
 measurements preserve all per-block norms/cosines, transfer values and undefined
 states, with no fitting, test-data access or independent-batch uncertainty claim.
 
+`requested_adaptation_tasks.py` enumerates every support fit and deduplicates
+unchanged k=0 baselines only when their query views are identical. Its task
+runtime resets the allowed head/fusion parameters to the same base after each
+fit and rejects changes in frozen state. Query verification checks the exact
+base-plus-adapter parameter digest, source rows and labels, all three pathway
+scores, independent SciPy correlations and complete epoch-selection records.
+The scheduler still owns the Tier 3 gate, B-validation epoch choice, assigned
+GPUs, production qualification and aggregate reporting; this task library does
+not choose epochs or launch the adaptation inventory.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
