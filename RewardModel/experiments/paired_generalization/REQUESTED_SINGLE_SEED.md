@@ -128,6 +128,22 @@ The scheduler still owns the Tier 3 gate, B-validation epoch choice, assigned
 GPUs, production qualification and aggregate reporting; this task library does
 not choose epochs or launch the adaptation inventory.
 
+`requested_adaptation_execution.py` adds the immutable Tier 3-gated execution
+plan, stage partitioning, native-operation receipts, B42 validation epoch
+selection, and assigned-device workers. Its qualification prefix reuses the
+two existing B across-k1 fits (one per scope). The selection stage includes
+all 2,716 B-validation fits and every positive epoch; the remaining stage
+creates 5,372 independent fits and reuses the 12 B across-unit trajectories
+for their selected-epoch test queries. No extra fit is created for qualification,
+k=0, a different seed, or a different rate. If a cell has no defined validation
+epoch, its later adapted queries are explicitly unavailable without fallback.
+Raw predictions, native receipts and compact adapters are pinned before their
+metrics can supply selection. GPU identity is separate from the stable task
+source so a verified B fit can be queried on another approved GPU. A coordinator
+still must check quota, hold the global GPU lock, verify production qualification,
+and aggregate W&B results and scientific reports; this worker module alone
+does not activate the scientific adaptation queue.
+
 The user stopped the old full-checkpoint and E33 queues before this amendment.
 Keep all previous receipts, registrations and partial outputs. Do not restart
 legacy one-, two- or three-seed queues or launch LR, weight-decay, loss-weight
