@@ -40,14 +40,21 @@ B LR3.0 has a lower peak and final macro than either other B learning rate.
 These are descriptive single-seed validation results, not a selected controlled
 test comparison. The registered B-validation rule selected **base LR** for both
 A and B: B peaks are 0.18458 (base), 0.18322 (×0.3) and 0.17310 (×3).
-No test scores entered this selection. **One of four confirmation fits is complete:**
-A seed43 has best and final validation macro **0.34494 at epoch 15**, versus
-seed42's best 0.34368. Its 15 saved native validation metrics match Trainer
-history and its retained best checkpoint is verified; independent trajectory
-analysis and selected-test comparisons remain pending. The existing queue is now
-running B seed43 at base LR on GPUs 0, 2, 5, 6
-([run 8k6easjx](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/8k6easjx));
-A/B seed44 follow. One completed confirmation does not establish seed variability.
+No test scores entered this selection. **Two of four confirmation fits are complete:**
+
+| Split / seed at base LR | Best epoch | Best validation macro | Final validation macro |
+| --- | ---: | ---: | ---: |
+| A / 43 | 15 | 0.34494 | 0.34494 |
+| B / 43 | 5 | 0.17739 | 0.16830 |
+
+A seed43's peak is close to seed42's 0.34368; B seed43's peak is below
+seed42's 0.18458. A/B use different validation populations, so their gap remains
+descriptive. Both fits' 15 saved native validation metrics match Trainer history
+and their retained best checkpoints are verified. Independent trajectory
+analysis, selected-test comparisons and the full seed comparison remain pending.
+The existing queue is now running A seed44 at base LR on GPUs 0, 2, 5, 6
+([run j5hc20fr](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/j5hc20fr));
+B seed44 follows.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results

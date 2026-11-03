@@ -959,10 +959,41 @@ Evidence on Atum: `controlled/runs/full__A__seed43__lr1p0/`
 SHA256 `34743d890316f85addafc191d344690a36d7adaf6c592d1e4e6dbb2e0b260fb6`,
 `08311fd81b38d747540f1bc35867c85d7f8fa4237f04d445a1d9e60fa1743924`
 and `460e7165cf6f78bc65060b5d4a61624a829da54fbdf69a25df5d9ffe5cb06047`.
-The existing confirmation queue now runs `full__B__seed43__lr1p0`
-(W&B `8k6easjx`) on GPUs 0, 2, 5, 6; A/B seed44 remain next. Seven controlled
-fits are complete, of which one is a confirmation. Question and experiment
-completion counts remain unchanged.
+At that snapshot the confirmation queue started `full__B__seed43__lr1p0`
+(W&B `8k6easjx`) on GPUs 0, 2, 5, 6, with A/B seed44 next. Seven controlled
+fits were complete, including one confirmation.
+
+The second confirmation, B seed43, has since completed all 15 epochs/13,155
+optimizer steps, scheduled allocation exports and checkpoint retention. Best
+native validation macro is **0.17738602 at epoch 5/step 4,385**; final macro is
+**0.16829567**. Aggregate validation loss reaches its minimum at epoch 15:
+**6.64202976** (BCE 0.48945102, ranking 2.94575047, contrastive 5.78322935;
+AUROC 0.76699191). Of 3,969 eligible validation assays, 3,968 are defined at
+epoch 11 and all 3,969 at the other epochs. All 15 native validation metrics
+match finalized Trainer history. Root and epoch-5 weights share SHA256
+`ce6fb3ca5664e03ebf7dfbf0a7af79e1b78ccc5f9da489c16038e3d626678d7d`;
+all 15 epoch weights remain protected for the allocation analyses.
+
+B seed43 has lower peak and final native validation macro than the tuning-exposed
+B seed42 base-LR fit (0.18457785 and 0.17975193). The seed43 A/B own-checkpoint
+validation peaks are 0.34493525/0.17738602, on different validation populations
+and at epochs 15/5. These are descriptive comparisons; seed44, independent
+trajectory analysis and selected controlled-test comparisons remain pending.
+The completion check verified all four ranks, the finalized Trainer/native
+metric consistency and retained checkpoint provenance; it did not independently
+reconstruct correlations from predictions. Training and export launchers were
+verified absent before accepting managed completion.
+
+Evidence on Atum: `controlled/runs/full__B__seed43__lr1p0/`
+`{controlled_training_complete.json,retained/retention.json,trainer_state.json}`,
+SHA256 `8e2410eb9afd84fd49b628cc28ea35b30fb1459af0db8d6df7ef39794881f2b0`,
+`0b22359f250279c63efe6bed6aa561f1a2e42b3a5931619e4cd895ac54d936a2`
+and `187fb9122488bafe7c59a296df0c301a82cc74c5740e6cb70cbc006452b0cc6f`;
+`realization_predictions/full__B__seed43__lr1p0/validation_complete.json`, SHA256
+`ecde2cbef0220bf6f6571c6d150133aea41f3d757fbd8689ad17ad24cc5caca9`.
+The existing queue now runs `full__A__seed44__lr1p0` (W&B `j5hc20fr`) on GPUs
+0, 2, 5, 6; B seed44 follows. Eight controlled fits are complete, including
+two of four confirmations. Question and experiment completion counts are unchanged.
 
 The earlier reference-A contrastive handoff stopped when its audit rejected encoder
 widths filled in during model loading (480/768 versus unspecified launch
