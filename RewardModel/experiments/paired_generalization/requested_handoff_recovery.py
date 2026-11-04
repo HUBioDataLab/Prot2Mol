@@ -185,11 +185,19 @@ def validate(plan):
 
 
 def signal_held_parent(owner):
-    """A Linux pidfd prevents signaling a reused PID after identity verification."""
+    """Retire the exact held owner; use a pidfd when Python exposes that API."""
+    if not (hasattr(os, 'pidfd_open') and hasattr(signal, 'pidfd_send_signal')):
+        # Some deployed Python builds omit pidfd APIs. This parent is stopped
+        # and cannot voluntarily exit; revalidate UID, cwd, argv and start time
+        # immediately before the same exact-PID signal used by the old driver.
+        training.require_live(owner, 'T')
+        os.kill(owner['pid'], signal.SIGKILL)
+        return 'revalidated_held_pid'
     descriptor = os.pidfd_open(owner['pid'])
     try:
         training.require_live(owner, 'T')
         signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+        return 'pidfd'
     finally:
         os.close(descriptor)
 
@@ -209,10 +217,11 @@ def recover_retirement(plan, terminal, native):
         immutable(target/(role+'_retired.json'),dict(identity=held[role],
             terminal_observation=observations[role],signal_sent_by_recovery=False,
             earlier_retirement_intent_sha256=INTENT_SHA256,verified_not_live=True,checked_unix=time.time()))
-    owner=held['training_controller']; signal_held_parent(owner)
+    owner=held['training_controller']; mechanism=signal_held_parent(owner)
     observed=wait_terminal(owner)
     immutable(target/'training_controller_retired.json',dict(identity=owner,signal=int(signal.SIGKILL),
-        terminal_observation=observed,signal_sent_by_recovery=True,training_signals_sent=False,
+        terminal_observation=observed,signal_mechanism=mechanism,
+        signal_sent_by_recovery=True,training_signals_sent=False,
         verified_not_live=True,checked_unix=time.time()))
     result=dict(intent_sha256=sha256(target/'retirement_intent.json'),
         retired={role:sha256(target/(role+'_retired.json')) for role in failed['controllers']},

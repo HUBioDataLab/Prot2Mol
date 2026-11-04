@@ -9,6 +9,8 @@ from experiments.paired_generalization.run import sha256, write_json
 from test_paired_generalization_requested_scoped_training import scoped, terminal
 from test_paired_generalization_requested_single_seed import prepared
 
+REAL_SIGNAL = module.signal_held_parent
+
 
 @pytest.fixture
 def recovery(scoped,monkeypatch):
@@ -112,4 +114,19 @@ def test_observation_timeout_is_not_terminal_or_permission_to_signal(recovery,mo
 def test_reused_pid_is_never_signaled_by_terminal_observation(recovery):
     p=recovery;owner=p['held']['training_controller'];p['states'][700]['start_ticks']+=1
     assert module.wait_terminal(owner)['reason']=='pid_replaced'
+    assert not p['signals']
+
+
+def test_python_without_pidfd_revalidates_only_the_held_parent(recovery,monkeypatch):
+    p=recovery;owner=p['held']['training_controller']
+    monkeypatch.delattr(module.os,'pidfd_open',raising=False)
+    assert REAL_SIGNAL(owner)=='revalidated_held_pid'
+    assert p['signals']==[(700,signal.SIGKILL)]
+
+
+def test_fallback_rejects_changed_owner_before_signaling(recovery,monkeypatch):
+    p=recovery;owner=p['held']['training_controller']
+    monkeypatch.delattr(module.os,'pidfd_open',raising=False)
+    p['processes'][700]={**owner,'start_ticks':owner['start_ticks']+1}
+    with pytest.raises(ValueError,match='identity changed'):REAL_SIGNAL(owner)
     assert not p['signals']
