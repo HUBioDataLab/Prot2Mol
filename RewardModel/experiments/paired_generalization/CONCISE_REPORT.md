@@ -65,17 +65,44 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-The first requested fit, frozen-encoder A42, has started on the four authorized
-GPUs ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
+**1/24 requested variant fits is complete.** Frozen-encoder A42 completed all
+15 epochs and selected epoch15, validation macro **0.34118**
+([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
+It was preserved without retraining. Frozen B42 started on GPUs 0, 2, 5 and 6
+([run h2nhxuqv](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/h2nhxuqv));
+its last live verification was November 4 at 01:29 UTC, before its first validation.
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
 The complete historical ledger is retained; unrequested experiments are not
 silently marked complete. See [the current scope](REQUESTED_SINGLE_SEED.md).
-The replacement dispatcher and rebound reporting/probe queues were activated
-on November 4. They preserve the current A fit and exclude the legacy extra
-split-allocation inference and model averaging. This scheduling correction
-does not add any completed experiment or answered question.
+The recovery dispatcher and reporting/probe queues were verified active on
+November 4. A controller-exit observation race was repaired, and completed A
+was adopted; no training process was signaled or refitted. The queue excludes
+legacy extra split-allocation inference and model averaging. This scheduling
+correction adds no scientific completion credit.
+
+**Interim E34 A comparison:** Only both encoder-freeze flags and the output
+directory differ from full A42. Across all 15 epochs, validation and fixed
+training-probe fingerprints, ordered row identities and labels match exactly
+(195,618 validation rows; 39,740 probe rows).
+
+| A42 setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
+| --- | ---: | ---: | ---: |
+| Full encoders | 0.34368 (14) | 0.34332 | 0.49208 |
+| Frozen encoders | 0.34118 (15) | 0.34118 | 0.55463 |
+
+Frozen A is below full A's validation macro at every matched epoch; the best
+scores differ by −0.00249. Its larger final probe-minus-validation gap
+(0.21345 versus 0.14876) does not establish a generalization benefit from
+freezing. These are descriptive native metrics, not an independent metric
+recalculation or a statistical overfitting test. Validation has 7,997 defined
+eligible assays except frozen epoch3 (7,996); final and peak coverage agree.
+B and selected-test comparisons are pending, so E34 and Q09 remain open.
+Evidence on Atum: `requested_interim/frozen_A_seed42_native_20261104.json`,
+SHA256 `0ab551c69e8d64245123eb5ab44346236c916608961d5f6b012c87bd403a5968`.
+The artifact binds both native trajectories, their prediction payloads and
+configuration hashes. No additional inference or fitting was performed.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -92,7 +119,7 @@ does not imply an unseen scaffold.
 | **Q06 — Which loss rises first?** | With limits | Initial-B BCE has minimum 2, ranking minimum 5, and learned molecule→protein contrastive minimum 5; the total contrastive minimum is 15. BCE can worsen while AUROC improves. A ranking and both contrastive directions decrease overall throughout 15 epochs. These single-run extrema are not statistical change points. |
 | **Q07 — Loss or Spearman checkpoint?** | With limits | Controlled A/B select validation macro Spearman at 14/6. Minimum aggregate loss is 15 on both. The different checkpoint locations are established. Requested evaluation uses only best-macro checkpoints; comparing alternative selection rules and adding seed variation are outside the narrowed scope. |
 | **Q08 — Training versus validation?** | With limits | Controlled B 6→15 probe macro improves 0.39862→0.51969 while validation changes 0.18458→0.17975. Final probe/validation values are A 0.49208/0.34332 and B 0.51969/0.17975. These are distinct fixed eligible-assay probes, not full-training or matched causal gap estimates. |
-| **Q09 — Frozen-encoder behavior?** | Pending | No completed frozen-encoder performance comparison yet. Implemented or qualified training/reporting code is not experimental evidence. |
+| **Q09 — Frozen-encoder behavior?** | Pending full comparison | A-only evidence: frozen best validation macro 0.34118 versus full 0.34368; final fixed-probe macro is higher (0.55463 versus 0.49208), while final validation is slightly lower. Matched rows/labels are verified. Frozen ranking loss reaches its validation minimum at epoch12 versus full epoch15. B and selected-test comparisons remain pending; this does not establish an overfitting mechanism. |
 | **Q10 — Temperature and fixed candidates?** | With limits | Learned scales sharpen on A and initial B; candidate pools stay fixed across epochs. Fixed-scale13 rescoring raises A's final contrastive loss but lowers initial B's. Neither fresh reference shows a sustained overall contrastive-loss rise. Rescoring does not prove fixed-temperature training helps. |
 | **Q11 — Which sizes or similarity strata?** | With limits | In initial B 6→15, >25-item assays account for 80.2% of net ranking-loss increase, while three-item assays account for 76.1% of net macro decline. A cold-scaffold strata differ from shared strata. Localization is descriptive and conditional on these fitted trajectories. |
 | **Q12 — Deployment regime?** | Answered | Deployment is unseen generated molecules. Report unseen identity and unseen scaffold separately; the generator's future scaffold mixture is unknown. Neither split alone is established as an exact deployment match. |

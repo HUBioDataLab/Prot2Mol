@@ -52,6 +52,17 @@ executors and records the original plans, actual new commands, process
 identities and source hashes. Waiting checks are ten minutes apart. Training
 completion still does not mean selected-test comparisons or the study are done.
 
+The first handoff encountered a process-exit observation race after A finished
+successfully. `requested_handoff_recovery.py` records that failed handoff in a
+new namespace and reuses the unchanged scoped executors. It retired only the
+held legacy dispatcher, adopted completed A without a refit, and started B.
+Activation and retirement were verified on November 4; the active controllers
+use `requested_handoff_recovery run training|reporting|probes`, with plans in
+`controlled/requested_handoff_recovery_20261104`,
+`controlled/requested_recovered_reporting_20261104` and
+`controlled/requested_recovered_probes_20261104`. Historical failed plans and
+receipts remain preserved. No training launcher or rank was signaled.
+
 `requested_evaluation.py` evaluates only the best validation-macro checkpoint
 of each of the 26 requested/reference fits. It does not require or create other
 learning-rate candidates. Each fixed-model worker uses one authorized GPU;
