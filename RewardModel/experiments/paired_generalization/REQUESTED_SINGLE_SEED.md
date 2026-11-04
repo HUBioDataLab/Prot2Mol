@@ -30,12 +30,27 @@ are the requested comparisons, without an additional hyperparameter search.
 
 `requested_single_seed.py prepare` verifies the original configurations,
 completed references, original specification, existing four-GPU qualification,
-and receipts proving the old queues stopped. `run` executes only those 24
-configurations through the existing qualified native driver. It acquires the
-shared GPU driver lock, checks resources, and stops for inspection on partial
-or failed work. It neither traverses the former tuning grid nor creates new
-confirmation seeds. Its training completion does not mean the experiments or
-selected-test comparisons are complete.
+and receipts proving the old queues stopped. Its original scope and job
+configurations remain frozen. The old dispatcher was held while its first A
+fit continued because its shared executor would otherwise invoke additional
+split-allocation inference after each B fit, outside the narrowed scope.
+
+`requested_scoped_training.py` replaces that execution path. It waits for the
+exact current launcher's zero exit and all four native 15-epoch completion
+receipts, retires only the superseded controllers, and adopts the A fit without
+retraining. It runs the remaining 23 configurations with the same native
+Trainer and existing four-GPU qualification, under the shared GPU lock.
+`requested_retention.py` keeps best-macro and final weights, all native
+prediction trajectories and checkpoint metadata. It performs no allocation
+inference or model averaging. The original scope completion explicitly names
+the replacement plan and retirement evidence; original plans are preserved.
+Partial/failed work stops for inspection without automatic relaunch.
+
+`requested_scoped_pipeline.py` binds reporting and probes to the replacement
+controllers in new queue directories. It reuses their unchanged scientific
+executors and records the original plans, actual new commands, process
+identities and source hashes. Waiting checks are ten minutes apart. Training
+completion still does not mean selected-test comparisons or the study are done.
 
 `requested_evaluation.py` evaluates only the best validation-macro checkpoint
 of each of the 26 requested/reference fits. It does not require or create other
@@ -57,7 +72,8 @@ the separate uniform/top and soft/hard contrasts. E58's plot includes the
 common-defined-eligible-assay sensitivity within each split. The seed and
 configuration are fixed; no seed variance, test-selected winner or causal
 interpretation of A/B association is reported. Adaptation, geometry, gradients,
-transference and allocation comparisons remain separate required work.
+and transference remain separate required work. Extra split-allocation
+comparisons are outside the narrowed scope; E20 is whole-unit bootstrap.
 
 `requested_probe_protocol.py` narrows the existing E49–E52 and E56–E57
 protocols to seed42 and resolves the two full-reference base checkpoints.
