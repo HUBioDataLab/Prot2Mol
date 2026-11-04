@@ -8,9 +8,11 @@ qualification limits are in [detailed findings](INTERIM_FINDINGS.md).
 
 **Historical ledger:** 23 experiments complete, 12 partial and 35 pending across
 the original 70 entries. These counts include experiments the user subsequently
-excluded; they are not the remaining task list. Of the 34 questions, 12 are
-answered, 15 have answers with limits, 3 are partial, 3 await requested results
-(Q09, Q17, Q33), and Q30's loss-subset grid is excluded by the current scope.
+excluded; they are not the remaining task list. The current assessment in this
+report is: **12 answered, 16 answered with limits, 3 partial, 2 pending requested
+results (Q17, Q33), and Q30 excluded by the current scope.** Q09 now has a
+descriptive answer from the completed frozen A/B trajectories; the historical
+ledger and tier counts below retain their earlier snapshot.
 “With limits” means an observed or descriptive answer is available, without
 claiming independent replication. Only Tier 2 is fully complete.
 
@@ -65,12 +67,15 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**1/24 requested variant fits is complete.** Frozen-encoder A42 completed all
+**2/24 requested variant fits are complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
-It was preserved without retraining. Frozen B42 started on GPUs 0, 2, 5 and 6
-([run h2nhxuqv](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/h2nhxuqv));
-its last live verification was November 4 at 01:29 UTC, before its first validation.
+It was preserved without retraining. Frozen B42 also completed all 15 epochs:
+best validation macro **0.14643 at epoch6**, final **0.13679**
+([run h2nhxuqv](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/h2nhxuqv)).
+Both retained best-macro checkpoints are verified. The next fit, last-two-blocks
+A42, was verified running on GPUs 0, 2, 5 and 6 on November 4
+([run 7cjkhhsw](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/7cjkhhsw)).
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -82,27 +87,44 @@ was adopted; no training process was signaled or refitted. The queue excludes
 legacy extra split-allocation inference and model averaging. This scheduling
 correction adds no scientific completion credit.
 
-**Interim E34 A comparison:** Only both encoder-freeze flags and the output
-directory differ from full A42. Across all 15 epochs, validation and fixed
-training-probe fingerprints, ordered row identities and labels match exactly
-(195,618 validation rows; 39,740 probe rows).
+**Interim E34 comparison:** Within each split, only both encoder-freeze flags
+and the output directory differ from the full42 reference. Across all 15 epochs,
+validation and fixed training-probe fingerprints, ordered row identities and
+labels match exactly: A has 195,618/39,740 validation/probe rows; B has
+136,957/43,115. A and B remain different populations.
 
-| A42 setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
+| Split / setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
 | --- | ---: | ---: | ---: |
-| Full encoders | 0.34368 (14) | 0.34332 | 0.49208 |
-| Frozen encoders | 0.34118 (15) | 0.34118 | 0.55463 |
+| A / full encoders | 0.34368 (14) | 0.34332 | 0.49208 |
+| A / frozen encoders | 0.34118 (15) | 0.34118 | 0.55463 |
+| B / full encoders | 0.18458 (6) | 0.17975 | 0.51969 |
+| B / frozen encoders | 0.14643 (6) | 0.13679 | 0.58219 |
 
-Frozen A is below full A's validation macro at every matched epoch; the best
-scores differ by −0.00249. Its larger final probe-minus-validation gap
-(0.21345 versus 0.14876) does not establish a generalization benefit from
-freezing. These are descriptive native metrics, not an independent metric
-recalculation or a statistical overfitting test. Validation has 7,997 defined
-eligible assays except frozen epoch3 (7,996); final and peak coverage agree.
-B and selected-test comparisons are pending, so E34 and Q09 remain open.
-Evidence on Atum: `requested_interim/frozen_A_seed42_native_20261104.json`,
-SHA256 `0ab551c69e8d64245123eb5ab44346236c916608961d5f6b012c87bd403a5968`.
-The artifact binds both native trajectories, their prediction payloads and
-configuration hashes. No additional inference or fitting was performed.
+Frozen validation macro is below its full reference at every matched epoch in
+both splits; best-score changes are **A −0.00249, B −0.03815**. Final
+probe-minus-validation gaps are larger with freezing: A 0.21345 versus 0.14876;
+B 0.44540 versus 0.33994. Freezing did not improve these validation results.
+
+**Q09:** B's early validation ranking-loss rise survives freezing: its minimum
+is epoch2 (2.83134), then it rises at every epoch to 3.22761 at epoch15.
+Full B's ranking minimum is epoch3 (2.79424), ending at 2.92986. In A, ranking
+minima are frozen12/full15. Both B fits first show a BCE increase at 2→3 and
+a contrastive increase at 6→7, but total and contrastive loss still reach their
+overall minima at epoch15. Thus freezing does not remove the observed ranking
+pattern; these observations do not isolate a causal mechanism.
+
+These are native metrics with verified payload hashes, not independent metric
+recalculations or statistical change-point tests. A validation has 7,997
+defined eligible assays except frozen epoch3 (7,996); final and peak coverage
+agree. B validation has 3,969 and its probe 2,047 defined eligible assays in
+both fits throughout. Selected-test comparisons remain pending, so E34 is
+not complete. Evidence under `requested_interim/` on Atum:
+
+- `frozen_A_seed42_native_20261104.json`, SHA256 `0ab551c69e8d64245123eb5ab44346236c916608961d5f6b012c87bd403a5968`.
+- `frozen_B_seed42_native_20261104.json`, SHA256 `9c4eb2b7dec6e88b7ac81297415fb3594bc76428c801f2925691b9584ed30003`.
+
+These artifacts bind native trajectories, prediction payloads and configuration
+hashes. No additional inference or fitting was performed for this comparison.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -119,7 +141,7 @@ does not imply an unseen scaffold.
 | **Q06 — Which loss rises first?** | With limits | Initial-B BCE has minimum 2, ranking minimum 5, and learned molecule→protein contrastive minimum 5; the total contrastive minimum is 15. BCE can worsen while AUROC improves. A ranking and both contrastive directions decrease overall throughout 15 epochs. These single-run extrema are not statistical change points. |
 | **Q07 — Loss or Spearman checkpoint?** | With limits | Controlled A/B select validation macro Spearman at 14/6. Minimum aggregate loss is 15 on both. The different checkpoint locations are established. Requested evaluation uses only best-macro checkpoints; comparing alternative selection rules and adding seed variation are outside the narrowed scope. |
 | **Q08 — Training versus validation?** | With limits | Controlled B 6→15 probe macro improves 0.39862→0.51969 while validation changes 0.18458→0.17975. Final probe/validation values are A 0.49208/0.34332 and B 0.51969/0.17975. These are distinct fixed eligible-assay probes, not full-training or matched causal gap estimates. |
-| **Q09 — Frozen-encoder behavior?** | Pending full comparison | A-only evidence: frozen best validation macro 0.34118 versus full 0.34368; final fixed-probe macro is higher (0.55463 versus 0.49208), while final validation is slightly lower. Matched rows/labels are verified. Frozen ranking loss reaches its validation minimum at epoch12 versus full epoch15. B and selected-test comparisons remain pending; this does not establish an overfitting mechanism. |
+| **Q09 — Frozen-encoder behavior?** | With limits | Yes, the early ranking-loss rise survives on B: frozen minimum at epoch2, increasing every epoch thereafter; full B minimum at epoch3. Frozen B best macro is 0.14643 versus full 0.18458, with a larger final probe/validation gap. A ranking minima are frozen12/full15. Native curves and matched rows/labels are verified; no causal mechanism, independent replication or selected-test benefit is established. |
 | **Q10 — Temperature and fixed candidates?** | With limits | Learned scales sharpen on A and initial B; candidate pools stay fixed across epochs. Fixed-scale13 rescoring raises A's final contrastive loss but lowers initial B's. Neither fresh reference shows a sustained overall contrastive-loss rise. Rescoring does not prove fixed-temperature training helps. |
 | **Q11 — Which sizes or similarity strata?** | With limits | In initial B 6→15, >25-item assays account for 80.2% of net ranking-loss increase, while three-item assays account for 76.1% of net macro decline. A cold-scaffold strata differ from shared strata. Localization is descriptive and conditional on these fitted trajectories. |
 | **Q12 — Deployment regime?** | Answered | Deployment is unseen generated molecules. Report unseen identity and unseen scaffold separately; the generator's future scaffold mixture is unknown. Neither split alone is established as an exact deployment match. |
