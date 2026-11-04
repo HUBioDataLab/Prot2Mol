@@ -6,10 +6,13 @@ The [evidence ledger](protocol.json) records every question and all 70 experimen
 entries, including 12 conditional interventions. Artifact locations, hashes and
 qualification limits are in [detailed findings](INTERIM_FINDINGS.md).
 
-**Progress:** 23 experiments complete, 12 partial and 35 pending. Questions:
-12 answered, 15 answered with limits, 3 partial and 4 pending. “With limits” means
-an observed or descriptive answer is available; it does not complete the
-remaining replicated experiments. Only Tier 2 is fully complete.
+**Historical ledger:** 23 experiments complete, 12 partial and 35 pending across
+the original 70 entries. These counts include experiments the user subsequently
+excluded; they are not the remaining task list. Of the 34 questions, 12 are
+answered, 15 have answers with limits, 3 are partial, 3 await requested results
+(Q09, Q17, Q33), and Q30's loss-subset grid is excluded by the current scope.
+“With limits” means an observed or descriptive answer is available, without
+claiming independent replication. Only Tier 2 is fully complete.
 
 | Scope | Complete | Partial | Pending |
 | --- | ---: | ---: | ---: |
@@ -69,6 +72,10 @@ for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
 The complete historical ledger is retained; unrequested experiments are not
 silently marked complete. See [the current scope](REQUESTED_SINGLE_SEED.md).
+The replacement dispatcher and rebound reporting/probe queues were activated
+on November 4. They preserve the current A fit and exclude the legacy extra
+split-allocation inference and model averaging. This scheduling correction
+does not add any completed experiment or answered question.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
@@ -83,13 +90,13 @@ does not imply an unseen scaffold.
 | **Q04 — Seed, bootstrap and split spread?** | Partial | Whole-unit intervals exist conditional on fitted models. Original splitter seeds 42/43/44 give identical assignments. Two dependent held-out reallocations preserve training support but have no selected-performance result. Additional seeds and allocation searches are outside the current requested scope. E20 will report conditional whole-unit uncertainty for the selected fixed-seed models; the A LR comparison does not measure seed variance. |
 | **Q05 — Noise-tolerant and top-weighted metrics?** | With limits | Spearman has no noise band. Initial-B test ordering accuracy changes 0.5892→0.6581 when pairs inside the training replicate-RMS band are excluded, changing the denominator. Controlled-B NDCG@1/3/5 peaks at 6/13/8; all finish below their epoch 6 values. Different metric optima are descriptive, not proof of reproducible objective conflict. |
 | **Q06 — Which loss rises first?** | With limits | Initial-B BCE has minimum 2, ranking minimum 5, and learned molecule→protein contrastive minimum 5; the total contrastive minimum is 15. BCE can worsen while AUROC improves. A ranking and both contrastive directions decrease overall throughout 15 epochs. These single-run extrema are not statistical change points. |
-| **Q07 — Loss or Spearman checkpoint?** | With limits | Controlled A/B select validation macro Spearman at 14/6. Minimum aggregate loss is 15 on both. The different checkpoint locations are established; selected controlled test effects and seed variation remain pending. |
+| **Q07 — Loss or Spearman checkpoint?** | With limits | Controlled A/B select validation macro Spearman at 14/6. Minimum aggregate loss is 15 on both. The different checkpoint locations are established. Requested evaluation uses only best-macro checkpoints; comparing alternative selection rules and adding seed variation are outside the narrowed scope. |
 | **Q08 — Training versus validation?** | With limits | Controlled B 6→15 probe macro improves 0.39862→0.51969 while validation changes 0.18458→0.17975. Final probe/validation values are A 0.49208/0.34332 and B 0.51969/0.17975. These are distinct fixed eligible-assay probes, not full-training or matched causal gap estimates. |
 | **Q09 — Frozen-encoder behavior?** | Pending | No completed frozen-encoder performance comparison yet. Implemented or qualified training/reporting code is not experimental evidence. |
 | **Q10 — Temperature and fixed candidates?** | With limits | Learned scales sharpen on A and initial B; candidate pools stay fixed across epochs. Fixed-scale13 rescoring raises A's final contrastive loss but lowers initial B's. Neither fresh reference shows a sustained overall contrastive-loss rise. Rescoring does not prove fixed-temperature training helps. |
 | **Q11 — Which sizes or similarity strata?** | With limits | In initial B 6→15, >25-item assays account for 80.2% of net ranking-loss increase, while three-item assays account for 76.1% of net macro decline. A cold-scaffold strata differ from shared strata. Localization is descriptive and conditional on these fitted trajectories. |
 | **Q12 — Deployment regime?** | Answered | Deployment is unseen generated molecules. Report unseen identity and unseen scaffold separately; the generator's future scaffold mixture is unknown. Neither split alone is established as an exact deployment match. |
-| **Q13 — Similarity distribution and stratified quality?** | Partial | Binary scaffold support is measured:19.29% of A test rows have unseen scaffolds, versus all B rows. Depth3 A test rho is 0.1342 on shared-scaffold rows and0.0669 on unseen rows, versus B 0.0607; eligibility is reapplied. Restricted rows and intact assays are different cohorts. Selected neural test and repeated comparisons remain unfinished. |
+| **Q13 — Similarity distribution and stratified quality?** | Partial | Binary scaffold support is measured:19.29% of A test rows have unseen scaffolds, versus all B rows. Depth3 A test rho is 0.1342 on shared-scaffold rows and0.0669 on unseen rows, versus B 0.0607; eligibility is reapplied. Restricted rows and intact assays are different cohorts. Selected fixed-seed neural test comparisons remain unfinished; additional seed or allocation comparisons are excluded. |
 | **Q14 — Indivisible units and assignment?** | Answered | A splits whole assays with target coverage anchors. B splits scaffold-assay components; its largest component supplies98.70% of training rows, and target-coverage rescue components are forced into training. Assignment is not exchangeable across train and held-out units. |
 | **Q15 — Distribution shift?** | With limits | Raw-source descriptor C2ST balanced accuracy is about 0.85–0.86 for B train versus held-out, versus 0.52 for A. B's training positive rate is 0.6790 versus 0.7902 in test. BBSE estimates 0.7850, but its class-conditional invariance assumption is unverified. Split constraints limit population-level interpretation. |
 | **Q16 — Protein support in B test?** | With limits | All1,723 B test proteins occur in training, with1–1,303 training assays each. Initial-B test macro ranges0.0539 for one training assay to 0.1935 for>100. Low-support intervals are wide and groups differ in composition; this is not a causal support effect. |
@@ -101,12 +108,12 @@ does not imply an unseen scaffold.
 | **Q22 — How were observations selected?** | With limits | Curation retains exact numeric binding measurements on both sides of the threshold. Retained assays' archived numeric measurements are already69.22% positive, with large source differences. Original testing frames and unpublished outcomes are unavailable; missing observations are not negatives or prevalence estimates for generated molecules. |
 | **Q23 — Same-side labels and threshold noise?** | Answered |43.63%/54.20% of eligible A/B test assays have all binary labels on one side of 6. Also35.58%/32.21% of test rows lie within the raw-replicate RMS band around 6. BCE then lacks a within-assay label-order preference; this does not prove it cannot help shared features. |
 | **Q24 — Batch construction?** | Answered | Batches mix bounded assay lists and classification-only rows. Eligible-list fractions average0.5583/0.5625 on A/B and vary substantially; each epoch-zero ordering has one local batch without a ranking-eligible list. The audit reconstructs the sampler, not historical device traces. |
-| **Q25 — Contrastive false negatives?** | With limits | Own-assay, same-protein and duplicate-query exclusions already exist. Other training-known positives can remain negatives:0.530%/0.714% of audited protein→molecule negative comparisons on A/B. This is a known-positive lower bound; masking's performance effect is pending. |
+| **Q25 — Contrastive false negatives?** | With limits | Own-assay, same-protein and duplicate-query exclusions already exist. Other training-known positives can remain negatives:0.530%/0.714% of audited protein→molecule negative comparisons on A/B. This is a known-positive lower bound. The additional masking experiment is outside the narrowed scope, so its performance effect remains unknown. |
 | **Q26 — Projections before or after fusion?** | Answered | Contrastive projections precede cross-attention and use separate pooled encoder outputs. Ranking and BCE use fused representations. Cross-pair contrastive scores therefore use embedding products. |
 | **Q27 — Ranking-loss normalization?** | Answered | The reference sums weighted Plackett–Luce selections, then averages sampled lists without normalizing by retained weight sum. Larger assays get more bounded-list opportunities, so original assays are not equally weighted. Normalization variants' performance remains pending. |
 | **Q28 — Protein-frequency skew?** | With limits | The top 1% of proteins supply 30.07%/30.64% of A/B assay-list opportunities. The reference has no log-Q correction. Skew is established; use of a learned popularity shortcut is not. |
 | **Q29 — Whole-unit subsets?** | Partial | E41 views use whole assays on A and whole components on B. B's10% of units retains98.86% of rows, limiting saturation conclusions. E40 A views are qualified; strict B matching has no whole-component exchange. E40/E41 performance experiments and the proposed B exception are outside the narrowed active scope; no performance conclusion is claimed. |
-| **Q30 — Loss-alone and pairwise combinations?** | Pending | No completed loss-subset comparison exists. That grid is outside the narrowed active scope. Full-model observations cannot identify each loss's contribution; the requested ranking variants and contrastive detachment address different comparisons. |
+| **Q30 — Loss-alone and pairwise combinations?** | Not run: user scope | No completed loss-subset comparison exists. The user excluded that grid from the active task. Full-model observations cannot identify each loss's contribution; the requested ranking variants and contrastive detachment address different comparisons. |
 | **Q31 — Do scorer orders agree?** | With limits | Controlled-B ranking/BCE agreement falls0.67647→0.59235, while ranking/cosine agreement rises0.07402→0.23018. Final BCE/cosine label macros0.13944/0.07754 remain below ranking0.17975. Prediction agreement does not measure gradient conflict. |
 | **Q32 — Protein-only BCE performance?** | With limits | Frozen-feature protein-only models recover about 48.9%/54.6% of excess validation AUROC above chance for A/initial B. Their scores are constant within assays. This comparison of separate predictors is not a causal fraction of the full model's signal. |
 | **Q33 — Auxiliary gradient alignment?** | Pending | No scientific gradient-alignment or transfer result yet. Fixed batches and CPU implementation qualification are prepared; actual trained-checkpoint probes remain gated behind the preceding experiments. |
@@ -126,6 +133,7 @@ the fixed depth 3 A/B test results0.12849/0.06071 remain the requested baseline 
 Original random-split pair-median labeling changed 5,289 training labels using
 held-out measurements; the corresponding scaffold count was zero. Controlled
 runs use partition-local binary-label construction.
-This correction, the constrained B split and the selected-test/seed gaps must
+This correction, the constrained B split, unfinished selected-test comparisons
+and the fixed-seed uncertainty limit must
 remain visible in the final conclusions. Completing software or an audit
 watcher does not complete a scientific experiment.
