@@ -67,7 +67,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**4/24 requested variant fits are complete.** Frozen-encoder A42 completed all
+**5/24 requested variant fits are complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -77,9 +77,12 @@ Last-two-blocks A42 completed 15 epochs with best/final macro **0.34153 at
 epoch15** ([run 7cjkhhsw](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/7cjkhhsw)).
 Last-two-blocks B42 completed 15 epochs with best macro **0.16670 at epoch8**
 and final **0.15388** ([run zba1gr0v](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/zba1gr0v)).
-All four retained best-macro checkpoints are verified. LoRA rank4 A42 was
-verified training on GPUs 0, 2, 5 and 6 on November 4
+LoRA rank4 A42 completed all 15 epochs with best/final macro **0.31065 at
+epoch15**
 ([run 8tbg64mm](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/8tbg64mm)).
+All five retained best-macro checkpoints are verified. LoRA rank4 B42 was
+verified training on GPUs 0, 2, 5 and 6 on November 4
+([run igxpwkjs](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/igxpwkjs)).
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -91,10 +94,11 @@ was adopted; no training process was signaled or refitted. The queue excludes
 legacy extra split-allocation inference and model averaging. This scheduling
 correction adds no scientific completion credit.
 
-**Interim E34–E35 comparison:** Within each split, the frozen setting changes
+**Interim E34–E36 comparison:** Within each split, the frozen setting changes
 only both encoder-freeze flags and the output directory from the full42
 reference; the last-two-blocks setting changes only both unfrozen-layer counts
-and the output directory. Across all 15 epochs, validation and fixed training-probe
+and the output directory. LoRA rank4 A changes only encoder LoRA rank/alpha
+(4/8) and output directory. Across all 15 epochs, validation and fixed training-probe
 fingerprints, ordered row identities and labels match exactly: A has
 195,618/39,740 validation/probe rows; B has 136,957/43,115.
 A and B remain different populations.
@@ -104,6 +108,7 @@ A and B remain different populations.
 | A / full encoders | 0.34368 (14) | 0.34332 | 0.49208 |
 | A / frozen encoders | 0.34118 (15) | 0.34118 | 0.55463 |
 | A / last two blocks | 0.34153 (15) | 0.34153 | 0.50567 |
+| A / LoRA rank4 | 0.31065 (15) | 0.31065 | 0.41728 |
 | B / full encoders | 0.18458 (6) | 0.17975 | 0.51969 |
 | B / frozen encoders | 0.14643 (6) | 0.13679 | 0.58219 |
 | B / last two blocks | 0.16670 (8) | 0.15388 | 0.52087 |
@@ -122,6 +127,12 @@ The B ranking-loss minimum remains early, at epoch2 (2.81098), ending at
 2.98448. A's ranking minimum is epoch14. These descriptive results do not
 establish statistical equivalence on A or a selected-test benefit on B.
 
+LoRA rank4 A's best validation macro is **0.03303 below full A**. Its validation
+macro increases at every epoch through 15, while both final validation and
+training-probe scores remain below full A. The smaller final probe-minus-validation
+gap (0.10663 versus 0.14876) does not establish better generalization. Rank4 B,
+ranks16/64 and selected-test results remain pending for E36.
+
 **Q09:** B's early validation ranking-loss rise survives freezing: its minimum
 is epoch2 (2.83134), then it rises at every epoch to 3.22761 at epoch15.
 Full B's ranking minimum is epoch3 (2.79424), ending at 2.92986. In A, ranking
@@ -132,16 +143,18 @@ pattern; these observations do not isolate a causal mechanism.
 
 These are native metrics with verified payload hashes, not independent metric
 recalculations or statistical change-point tests. A validation has 7,997
-defined eligible assays except frozen and last-two-blocks epoch3 (7,996);
+defined eligible assays except frozen and last-two-blocks epoch3 and LoRA rank4
+epochs4/9/13 (7,996);
 final and peak coverage agree. B validation has 3,969 and its probe 2,047
 defined eligible assays in all three fits throughout. Selected-test comparisons
-remain pending, so E34 and E35 are not complete. Evidence under
+remain pending, so E34–E36 are not complete. Evidence under
 `requested_interim/` on Atum:
 
 - `frozen_A_seed42_native_20261104.json`, SHA256 `0ab551c69e8d64245123eb5ab44346236c916608961d5f6b012c87bd403a5968`.
 - `frozen_B_seed42_native_20261104.json`, SHA256 `9c4eb2b7dec6e88b7ac81297415fb3594bc76428c801f2925691b9584ed30003`.
 - `last_two_blocks_A_seed42_native_20261104.json`, SHA256 `46dedb629f5a50b7c6f7f6174b6f72491294beb3f06e426092d56090a7b6aea0`.
 - `last_two_blocks_B_seed42_native_20261104.json`, SHA256 `cf6ae9651b9400ea42fdb2b8b128b4106c225c04adf2226ef6910bf387bd11d7`.
+- `lora4_A_seed42_native_20261104.json`, SHA256 `8906161cd405395fb2041979207a919b5960cbee714093e7519486d2f602b92c`.
 
 These artifacts bind native trajectories, prediction payloads and configuration
 hashes. No additional inference or fitting was performed for this comparison.
