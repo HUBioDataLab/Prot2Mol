@@ -1,6 +1,6 @@
 # Paired-input ranking generalization: interim evidence report
 
-Snapshot: 2026-11-05. **The study is not complete.** This report follows the
+Snapshot: 2026-11-06. **The study is not complete.** This report follows the
 [34 questions and experiment specification](<../../../Paired input ranking generalization.md>).
 The [evidence ledger](protocol.json) records every question and all 70 experiment
 entries, including 12 conditional interventions. Artifact locations, hashes and
@@ -67,7 +67,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**10/24 requested variant fits are complete.** Frozen-encoder A42 completed all
+**11/24 requested variant fits are complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -95,9 +95,12 @@ epoch15**
 LoRA rank64 B42 completed all 15 epochs with best macro **0.16879 at epoch8**
 and final **0.16353**
 ([run 8r1q7fsj](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/8r1q7fsj)).
-All ten retained best-macro checkpoints are verified. Contrastive-detachment A42 was
-verified training on GPUs 0, 2, 5 and 6 on November 5
+Contrastive-detachment A42 completed all 15 epochs with best macro **0.36443
+at epoch14** and final **0.36438**
 ([run ivwxt7ns](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/ivwxt7ns)).
+All eleven retained best-macro checkpoints are verified. Contrastive-detachment
+B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+([run fhl9hwyh](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/fhl9hwyh)).
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -220,6 +223,30 @@ remain pending, so E34–E36 are not complete. Evidence under
 
 These artifacts bind native trajectories, prediction payloads and configuration
 hashes. No additional inference or fitting was performed for this comparison.
+
+**Interim E44 comparison:** Detachment A changes only
+`contrastive_detach_encoders=True` and the output directory from full A42.
+This blocks contrastive gradients into both encoders while retaining the
+ranking, BCE and contrastive losses with their original weights. All 30 native
+validation/probe exports have matching ordered rows and labels; coverage is
+7,997/2,048 defined eligible assays throughout.
+
+| A / setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
+| --- | ---: | ---: | ---: |
+| Full reference | 0.34368 (14) | 0.34332 | 0.49208 |
+| Detach contrastive encoder gradients | 0.36443 (14) | 0.36438 | 0.56094 |
+
+Detachment's validation macro exceeds full A at every matched epoch. The best
+and final improvements are **+0.02076 and +0.02106**. Its final probe-minus-validation
+gap is larger, 0.19656 versus 0.14876. Final contrastive loss is higher
+(3.05338 versus 1.65268), as is ranking loss (2.43732 versus 2.41737), despite
+the higher ranking macro. Detachment's ranking/BCE loss minima occur at epoch12;
+total and contrastive minima occur at epoch15. These are descriptive native
+metrics, not independent recalculations or evidence that gradient conflict has
+been measured. B and selected-test comparisons remain pending, so E44 and Q33's
+gradient analysis are unfinished. Evidence:
+`requested_interim/detach_contrastive_A_seed42_native_20261106.json`, SHA256
+`fe35394e9c315d2437a24c241397bfde2842fe0dade880622cb7593365570801`.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
