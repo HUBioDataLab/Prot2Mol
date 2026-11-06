@@ -67,7 +67,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**12/24 requested variant fits are complete.** Frozen-encoder A42 completed all
+**13/24 requested variant fits are complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -101,9 +101,12 @@ at epoch14** and final **0.36438**
 Contrastive-detachment B42 completed all 15 epochs with best macro **0.17571
 at epoch7** and final **0.16708**
 ([run fhl9hwyh](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/fhl9hwyh)).
-All twelve retained best-macro checkpoints are verified. Per-group listwise
-normalization A42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+Per-group listwise normalization A42 completed all 15 epochs with best/final
+macro **0.33629 at epoch15**
 ([run 35lhbwgg](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/35lhbwgg)).
+All thirteen retained best-macro checkpoints are verified. Per-group listwise
+normalization B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+([run djxcgvr9](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/djxcgvr9)).
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -268,6 +271,34 @@ remain pending. Evidence under `requested_interim/` on Atum:
 
 - `detach_contrastive_A_seed42_native_20261106.json`, SHA256 `fe35394e9c315d2437a24c241397bfde2842fe0dade880622cb7593365570801`.
 - `detach_contrastive_B_seed42_native_20261106.json`, SHA256 `8642000c2eb7405c543c297e17412b8b3f87ae6ee65c32df557a51c96e2fe9c6`.
+
+**Interim E45 normalization comparison:** Normalized A changes only
+`ranking_normalize_per_group=True` and the output directory from full A42.
+Each list's ranking loss is divided by the sum of its contributing positional
+weights before averaging across lists. All three objectives and their nominal
+weights remain unchanged, but this normalization changes the ranking-loss
+scale; raw ranking and total loss values are not directly comparable across
+these two settings. All 30 validation/probe exports have identical ordered
+rows and labels (195,618/39,740 rows).
+
+| A / setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
+| --- | ---: | ---: | ---: |
+| Full reference | 0.34368 (14) | 0.34332 | 0.49208 |
+| Per-group listwise normalization | 0.33629 (15) | 0.33629 | 0.48462 |
+
+Normalized A's validation macro rises at every epoch, but both validation and
+fixed training-probe macro remain below full A at all 15 matched epochs. Its
+best and final validation changes are **−0.00738 and −0.00702**. The final
+probe-minus-validation gap is 0.14833 versus full A's 0.14876. Within the
+normalized trajectory, ranking loss has its minimum at epoch13, BCE at
+epoch11, and total/contrastive losses at epoch15. Validation/probe coverage is
+7,997/2,048 defined eligible assays except normalized validation at epoch14
+(7,996); peak and final coverage agree with full A. These are descriptive
+single-seed native metrics, not independent recalculations. Normalized B,
+both assay-balanced fits and selected-test comparisons remain pending, so
+E45 is not complete. Evidence:
+`requested_interim/listwise_normalized_A_seed42_native_20261106.json`, SHA256
+`69c0f74a799959565f5ae92cc84956379b84a949f131b4eed44df51d051d687b`.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
