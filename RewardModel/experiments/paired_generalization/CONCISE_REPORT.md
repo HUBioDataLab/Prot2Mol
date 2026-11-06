@@ -67,7 +67,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**11/24 requested variant fits are complete.** Frozen-encoder A42 completed all
+**12/24 requested variant fits are complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -98,9 +98,12 @@ and final **0.16353**
 Contrastive-detachment A42 completed all 15 epochs with best macro **0.36443
 at epoch14** and final **0.36438**
 ([run ivwxt7ns](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/ivwxt7ns)).
-All eleven retained best-macro checkpoints are verified. Contrastive-detachment
-B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+Contrastive-detachment B42 completed all 15 epochs with best macro **0.17571
+at epoch7** and final **0.16708**
 ([run fhl9hwyh](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/fhl9hwyh)).
+All twelve retained best-macro checkpoints are verified. Per-group listwise
+normalization A42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+([run 35lhbwgg](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/35lhbwgg)).
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -224,29 +227,47 @@ remain pending, so E34–E36 are not complete. Evidence under
 These artifacts bind native trajectories, prediction payloads and configuration
 hashes. No additional inference or fitting was performed for this comparison.
 
-**Interim E44 comparison:** Detachment A changes only
-`contrastive_detach_encoders=True` and the output directory from full A42.
+**Interim E44 comparison:** Detachment A/B change only
+`contrastive_detach_encoders=True` and the output directory from their full42
+references.
 This blocks contrastive gradients into both encoders while retaining the
-ranking, BCE and contrastive losses with their original weights. All 30 native
-validation/probe exports have matching ordered rows and labels; coverage is
-7,997/2,048 defined eligible assays throughout.
+ranking, BCE and contrastive losses with their original weights. Within each
+split, all 30 native validation/probe exports have matching ordered rows and
+labels. A coverage is 7,997/2,048 defined eligible assays throughout. B has
+3,969/2,047 except detachment validation at epoch3 (3,968); peak and final
+coverage agree with full B.
 
-| A / setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
+| Split / setting | Best validation macro (epoch) | Final validation macro | Final probe macro |
 | --- | ---: | ---: | ---: |
-| Full reference | 0.34368 (14) | 0.34332 | 0.49208 |
-| Detach contrastive encoder gradients | 0.36443 (14) | 0.36438 | 0.56094 |
+| A / full reference | 0.34368 (14) | 0.34332 | 0.49208 |
+| A / detach contrastive encoder gradients | 0.36443 (14) | 0.36438 | 0.56094 |
+| B / full reference | 0.18458 (6) | 0.17975 | 0.51969 |
+| B / detach contrastive encoder gradients | 0.17571 (7) | 0.16708 | 0.58785 |
 
 Detachment's validation macro exceeds full A at every matched epoch. The best
 and final improvements are **+0.02076 and +0.02106**. Its final probe-minus-validation
 gap is larger, 0.19656 versus 0.14876. Final contrastive loss is higher
 (3.05338 versus 1.65268), as is ranking loss (2.43732 versus 2.41737), despite
 the higher ranking macro. Detachment's ranking/BCE loss minima occur at epoch12;
-total and contrastive minima occur at epoch15. These are descriptive native
-metrics, not independent recalculations or evidence that gradient conflict has
-been measured. B and selected-test comparisons remain pending, so E44 and Q33's
-gradient analysis are unfinished. Evidence:
-`requested_interim/detach_contrastive_A_seed42_native_20261106.json`, SHA256
-`fe35394e9c315d2437a24c241397bfde2842fe0dade880622cb7593365570801`.
+total and contrastive minima occur at epoch15.
+
+Detachment B's best and final validation macro are **0.00887 and 0.01268 below
+full B**. Its peak occurs at epoch7, then falls by 0.00864 by epoch15. Validation
+macro exceeds full B only at epochs1, 2 and 4, while the fixed training-probe
+macro exceeds full B at all 15 epochs. Its final probe-minus-validation gap is
+larger, 0.42077 versus 0.33994. Ranking loss reaches its minimum at epoch2
+(2.80283), ending at 3.12983 versus full B's 2.92986. BCE also reaches its
+minimum at epoch2; total and contrastive minima occur at epoch13. Final
+contrastive loss is 7.26590 versus full B's 5.83346. Thus the validation gain
+on A is not reproduced on B in these completed fits.
+
+These are descriptive single-seed native metrics, not independent
+recalculations or evidence that gradient conflict has been measured. Both E44
+fits are complete, but selected-test comparisons and Q33's gradient analysis
+remain pending. Evidence under `requested_interim/` on Atum:
+
+- `detach_contrastive_A_seed42_native_20261106.json`, SHA256 `fe35394e9c315d2437a24c241397bfde2842fe0dade880622cb7593365570801`.
+- `detach_contrastive_B_seed42_native_20261106.json`, SHA256 `8642000c2eb7405c543c297e17412b8b3f87ae6ee65c32df557a51c96e2fe9c6`.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
