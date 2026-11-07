@@ -109,6 +109,9 @@ normalization B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
 ([run djxcgvr9](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/djxcgvr9)).
 **November 7 execution update:** W&B now marks normalized B finished at epoch15;
 native completion and retained-checkpoint verification await restored SSH access.
+Its exact W&B history peaks at **0.17121 at epoch5** and ends at **0.16224 at
+epoch15**; the subsequent best-score reevaluation is excluded from that final
+epoch value. Both are below full B. The E45 section below records the evidence.
 The next fit, assay-balanced A
 ([run zzskjup5](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/zzskjup5)),
 failed at its first evaluation: prediction batches passed ranking labels into
@@ -122,7 +125,8 @@ evaluation still computes all losses and assay weights. All 99 targeted CPU
 tests pass, including checkpoint saving, both validation and fixed-probe
 exports, unequal-assay loss reduction and exact prediction/embedding parity.
 These tests use small encoders and do not constitute Atum GPU validation.
-The fix has not been deployed to Atum, and recovery has not been launched.
+The tested fix was pushed as `fe5fb5d` on `codex/paired-ranking-generalization`.
+It has not been deployed to Atum, and recovery has not been launched.
 SSH closes at the configured gateway; current server process state is unverified.
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
@@ -311,11 +315,27 @@ normalized trajectory, ranking loss has its minimum at epoch13, BCE at
 epoch11, and total/contrastive losses at epoch15. Validation/probe coverage is
 7,997/2,048 defined eligible assays except normalized validation at epoch14
 (7,996); peak and final coverage agree with full A. These are descriptive
-single-seed native metrics, not independent recalculations. Normalized B,
-both assay-balanced fits and selected-test comparisons remain pending, so
-E45 is not complete. Evidence:
+single-seed native metrics, not independent recalculations. Native verification
+of normalized B, both assay-balanced fits and selected-test comparisons remain
+pending, so E45 is not complete. Evidence:
 `requested_interim/listwise_normalized_A_seed42_native_20261106.json`, SHA256
 `69c0f74a799959565f5ae92cc84956379b84a949f131b4eed44df51d051d687b`.
+
+**Normalized B, W&B evidence while SSH is unavailable:** Both finished runs'
+exact histories contain epochs1–15 at matching optimizer steps, followed by a
+separate post-training reevaluation matching each run's best score. Normalized B
+peaks at **0.17121 at epoch5** versus full B's **0.18458 at epoch6** (difference
+**−0.01337**). Its actual epoch15 macro is **0.16224** versus **0.17975**
+(difference **−0.01751**); it is below full B at all 15 logged epochs. The later
+reevaluation at step13155 reports 0.17121 and must not be mistaken for the final
+epoch's score. The uploaded output log also reports no test evaluation. This
+does not verify retained checkpoint bytes, native completion receipts, or
+ordered row/label identity and eligible-assay coverage across these trajectories.
+Local evidence: `artifacts/paired_generalization/reconnect_20261107/normalized_B_wandb_comparison.json`,
+SHA256 `fa0281b5874942e1264c116fbec0fa6e1f4a3d75a8d1de0238947fd533677f04`;
+normalized/full W&B history SHA256 respectively
+`286bf71da91056ce2d08f3c5b5a531e4a08bf2daf28a79a2bfe6ce81cc8ad381` /
+`f72bb6c24f1e435ae3a2ae14675f5d3684fe9f209b2f3357b43111f4ef7f6c22`.
 
 **Reference labels below:** “Initial B” means the fresh scaffold baseline above.
 “Controlled A/B” means the separate base-LR seed42 reference fits. Their results
