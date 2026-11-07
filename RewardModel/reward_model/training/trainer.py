@@ -845,15 +845,19 @@ class RewardModelTrainer(Trainer):
         self._reset_train_component_accumulator()
         return logs
 
-    def _build_model_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_model_inputs(
+        self, inputs: Dict[str, Any], *, include_supervision: bool = True
+    ) -> Dict[str, Any]:
         model_inputs = {
             "protein_input_ids": inputs["protein_input_ids"],
             "protein_attention_mask": inputs["protein_attention_mask"],
             "molecule_input_ids": inputs["molecule_input_ids"],
             "molecule_attention_mask": inputs["molecule_attention_mask"],
-            "activity_labels": inputs["activity_labels"],
             "return_dict": True,
         }
+        if not include_supervision:
+            return model_inputs
+        model_inputs["activity_labels"] = inputs["activity_labels"]
         if "pchembl_values" in inputs and "ranking_group_ids" in inputs:
             model_inputs["pchembl_values"] = inputs["pchembl_values"]
             model_inputs["ranking_group_ids"] = inputs["ranking_group_ids"]
@@ -954,7 +958,10 @@ class RewardModelTrainer(Trainer):
         for batch in dataloader:
             batch = self._prepare_inputs(batch)
             with torch.no_grad(), self.compute_loss_context_manager():
-                outputs = model(**self._build_model_inputs(batch))
+                # Prediction batches can split assays and carry no training
+                # sampling weights. All evaluation losses are recomputed below
+                # from the complete, ordered cohort with its assay partitions.
+                outputs = model(**self._build_model_inputs(batch, include_supervision=False))
             gathered_values = [
                 outputs.activity_logits.detach(),
                 outputs.ranking_score.detach(),

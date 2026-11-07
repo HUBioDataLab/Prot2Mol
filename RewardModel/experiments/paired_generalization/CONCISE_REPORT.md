@@ -1,6 +1,6 @@
 # Paired-input ranking generalization: interim evidence report
 
-Snapshot: 2026-11-06. **The study is not complete.** This report follows the
+Snapshot: 2026-11-07. **The study is not complete.** This report follows the
 [34 questions and experiment specification](<../../../Paired input ranking generalization.md>).
 The [evidence ledger](protocol.json) records every question and all 70 experiment
 entries, including 12 conditional interventions. Artifact locations, hashes and
@@ -67,7 +67,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**13/24 requested variant fits are complete.** Frozen-encoder A42 completed all
+**13/24 requested variant fits are verified complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -107,6 +107,23 @@ macro **0.33629 at epoch15**
 All thirteen retained best-macro checkpoints are verified. Per-group listwise
 normalization B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
 ([run djxcgvr9](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/djxcgvr9)).
+**November 7 execution update:** W&B now marks normalized B finished at epoch15;
+native completion and retained-checkpoint verification await restored SSH access.
+The next fit, assay-balanced A
+([run zzskjup5](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/zzskjup5)),
+failed at its first evaluation: prediction batches passed ranking labels into
+the model without the sampling weights required by assay-balanced training.
+Its W&B `output.log` records `ValueError: Assay-balanced training requires
+source-assay weights and batch item count` (SHA256
+`645bdc088b1b07539d04ef6f4b19c76f1a1618c0519d2ba9253199b5098322b5`).
+The failure was reproduced in a local CPU training/evaluation test. A prepared
+fix makes evaluation forwards prediction-only; the existing complete-cohort
+evaluation still computes all losses and assay weights. All 99 targeted CPU
+tests pass, including checkpoint saving, both validation and fixed-probe
+exports, unequal-assay loss reduction and exact prediction/embedding parity.
+These tests use small encoders and do not constitute Atum GPU validation.
+The fix has not been deployed to Atum, and recovery has not been launched.
+SSH closes at the configured gateway; current server process state is unverified.
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
