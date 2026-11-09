@@ -1,0 +1,12 @@
+{
+  "answers.md": "195396cf99c1fb5cf41a10c90db2cfeaaa40655b6050014f2579a6c5eaa14a3f",
+  "data_measurements.md": "095c7ffd1be3f7986d5ff58ae0c4293f01b46fdf6d25852ac51164cb4c3f9e3d",
+  "epoch_measurements.md": "cfb22a7a74a984ee11db3cad3484ce32aef88d1361ac7cc097099c3413161882",
+  "experiment_disposition.md": "5e5acebe3bafff6718ca193b4227e4806f95358de1439dd9d5454b3fd613825b",
+  "historical_measurement_notes.md": "bcc6322a6c4873c24944ff4088b4a3864307fce373475945bd3bcf72a32b3f56",
+  "measurements/all_numeric_records.csv.gz": "f98b4c9f473a41b0ab178786c8b347afc200c27a3dd542b0c9fdd67c5b211f6f",
+  "measurements/epoch_curves.csv": "e7ae8428938884d499fbfb8064c6f247d8295ddab1cd993465ba168d0dfb6b7a",
+  "measurements/evidence_index.json": "8b6189dd0363f7cff9d1090fc6ecfe6ae8af67c21b5aafbd8ee03634adfe2299",
+  "measurements/fit_summary.csv": "8e30eed630fe071b194909db39c7c59da78d0526e457ea28d0eb3aee96575f58",
+  "verification.json": "0f1a7315c1ae3a0608f68ffc50a873ad0963ae7e89df13596f4a88a78ab84db3"
+}
