@@ -6,7 +6,7 @@ These tables format existing records. They do not fit models or evaluate new pre
 
 The positive fraction in this first table uses the original observation-level binary labels, before partition-local pair-median relabeling. For example, B test is 0.78980110 here and 0.79023920 after pair-median relabeling. The latter is the model-label prevalence reported in Q15. Continuous-score composition and binary-label composition must not be conflated.
 
-| Split | Partition | Rows | Original positive fraction | Constant-label groups | Label-tied pair fraction | Replicated-row fraction |
+| Split | Partition | Rows | Original positive fraction | Constant-label groups | Label-tied pair fraction | Repeatd-row fraction |
 | --- | --- | --- | --- | --- | --- | --- |
 | A | train | 1569095 | 0.67959556 | 48107 | 0.05362456 | 0.03367801 |
 | A | val | 195618 | 0.72616017 | 5990 | 0.07728980 | 0.03477185 |
@@ -16,11 +16,11 @@ The positive fraction in this first table uses the original observation-level bi
 | B | test | 136956 | 0.78980110 | 4176 | 0.05654096 | 0.03907824 |
 
 
-## Replicate disagreement and split-half agreement
+## Repeat disagreement and split-half agreement
 
 RMS is raw-repeat disagreement, not the standard error of a median. The ranges below describe random half assignment, not population confidence intervals. The corrected quantity is a heuristic and is not an established full-population ceiling.
 
-| Split | Partition | Replicated observations | Repeat pairs | RMS difference | Qualifying groups | Original eligible groups | Coverage | Split-half macro | Corrected heuristic |
+| Split | Partition | Repeatd observations | Repeat pairs | RMS difference | Qualifying groups | Original eligible groups | Coverage | Split-half macro | Corrected heuristic |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | train | 52844 | 73595 | 0.78055161 | 3126 | 63867 | 0.04894546 | 0.53988937 | 0.70119906 |
 | A | val | 6802 | 9070 | 0.81514179 | 421 | 7997 | 0.05264474 | 0.52609171 | 0.68941896 |
@@ -30,7 +30,7 @@ RMS is raw-repeat disagreement, not the standard error of a median. The ranges b
 | B | test | 5352 | 10078 | 0.75750338 | 348 | 3972 | 0.08761329 | 0.37800495 | 0.54854535 |
 
 
-| Split | Partition | Assignments | Replicated members | Defined-group range | Assignment macro range | Positive-correlation assignments |
+| Split | Partition | Assignments | Repeatd members | Defined-group range | Assignment macro range | Positive-correlation assignments |
 | --- | --- | --- | --- | --- | --- | --- |
 | A | train | 100 | 42656 | [3085, 3099] | [0.5336612185191096, 0.5460984543961744] | 100 |
 | A | val | 100 | 5744 | [413, 416] | [0.510020049984679, 0.5416894886915953] | 100 |
@@ -42,7 +42,7 @@ RMS is raw-repeat disagreement, not the standard error of a median. The ranges b
 
 ## Ranking eligibility and threshold proximity
 
-Native eligibility uses the float32-label path. Threshold proximity below is row-weighted proximity of partition-local pair medians to 6, using the training-derived raw-repeat RMS. It differs from proximity of each original observation score.
+Native eligibility uses the float32-label path. Threshold proximity below is row-weighted proximity of partition-local pair medians to θ, using the training-derived raw-repeat RMS. It differs from proximity of each original observation score.
 
 | Split | Partition | Native eligible | Sampler eligible | n < 3 | Insufficient span | Precision disagreements | Eligible same-side fraction | Pair-label proximity | Observation-score proximity |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -96,15 +96,15 @@ All entries below have units s². Primary and group-balanced fits use different 
 
 | Split | Partition | Fit | Fitted marginal variance | Observed variance | Direct repeat-noise variance | Boundary components |
 | --- | --- | --- | --- | --- | --- | --- |
-| A | train | Primary | 4.06074557 | 1.95182357 | 0.29618666 | ['measurement_noise', 'observation_residual', 'x_by_similarity_class'] |
+| A | train | Primary | 4.06074557 | 1.95182357 | 0.29618666 | ['measurement_noise', 'observation_residual', 'x_by_candidate_category'] |
 | A | train | Group-balanced | 2.07203480 | 1.95182357 | 0.29618666 | [] |
-| A | val | Primary | 1.87948546 | 1.87948546 | 0.32244896 | ['observation_residual', 'x_by_similarity_class'] |
+| A | val | Primary | 1.87948546 | 1.87948546 | 0.32244896 | ['observation_residual', 'x_by_candidate_category'] |
 | A | val | Group-balanced | 2.07131037 | 1.87948546 | 0.32244896 | ['measurement_noise'] |
-| A | test | Primary | 1.78246534 | 1.78246534 | 0.23648937 | ['x_by_similarity_class'] |
+| A | test | Primary | 1.78246534 | 1.78246534 | 0.23648937 | ['x_by_candidate_category'] |
 | A | test | Group-balanced | 2.07184689 | 1.78246534 | 0.23648937 | [] |
-| B | train | Primary | 3.98438793 | 1.95783207 | 0.28100611 | ['measurement_noise', 'observation_residual', 'x_by_similarity_class'] |
+| B | train | Primary | 3.98438793 | 1.95783207 | 0.28100611 | ['measurement_noise', 'observation_residual', 'x_by_candidate_category'] |
 | B | train | Group-balanced | 2.07490697 | 1.95783207 | 0.28100611 | [] |
-| B | val | Primary | 1.98634307 | 1.64717058 | 0.36703236 | ['measurement_noise', 'observation_residual', 'similarity_class_main'] |
-| B | val | Group-balanced | 2.06724506 | 1.64717058 | 0.36703236 | ['x_by_similarity_class', 'observation_residual', 'measurement_noise'] |
-| B | test | Primary | 1.70107325 | 1.70107325 | 0.31066707 | ['observation_residual', 'similarity_class_main'] |
+| B | val | Primary | 1.98634307 | 1.64717058 | 0.36703236 | ['measurement_noise', 'observation_residual', 'candidate_category_main'] |
+| B | val | Group-balanced | 2.06724506 | 1.64717058 | 0.36703236 | ['x_by_candidate_category', 'observation_residual', 'measurement_noise'] |
+| B | test | Primary | 1.70107325 | 1.70107325 | 0.31066707 | ['observation_residual', 'candidate_category_main'] |
 | B | test | Group-balanced | 2.10514189 | 1.70107325 | 0.31066707 | ['observation_residual', 'measurement_noise'] |

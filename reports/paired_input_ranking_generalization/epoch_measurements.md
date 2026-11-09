@@ -2,7 +2,7 @@
 
 All 23 completed fits are shown at every epoch. Validation values come from native Trainer records. Fixed-probe values come from the corresponding native exports where available. Missing values remain blank. Initial B and Controlled B are separate fits. Full-precision values and all other native logged metrics are in [epoch_curves.csv](measurements/epoch_curves.csv).
 
-## Initial_B
+## M001
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.17561471 | Unavailable | 0.48299506 | 2.92871475 | 5.83497238 | 6.68789959 |
 
 
-## detach_contrastive__A__seed42__lr1p0
+## M002
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -44,7 +44,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.36437840 | 0.56094168 | 0.45512131 | 2.43731904 | 3.05337930 | 3.77648926 |
 
 
-## detach_contrastive__B__seed42__lr1p0
+## M003
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -65,7 +65,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.16707651 | 0.58785047 | 0.48004660 | 3.12983155 | 7.26589966 | 8.16836929 |
 
 
-## frozen__A__seed42__lr1p0
+## M004
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -86,7 +86,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.34118048 | 0.55463288 | 0.45792273 | 2.49174094 | 3.76462770 | 4.50204372 |
 
 
-## frozen__B__seed42__lr1p0
+## M005
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -107,7 +107,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.13678884 | 0.58219296 | 0.45983809 | 3.22761416 | 8.52604389 | 9.44790649 |
 
 
-## full__A__seed42__lr0p3
+## M006
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -128,7 +128,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.27927916 | 0.33896153 | 0.45061868 | 2.50890136 | 2.55787206 | 3.29775214 |
 
 
-## full__A__seed42__lr1p0
+## M007
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.34331738 | 0.49207621 | 0.42771879 | 2.41736627 | 1.65268421 | 2.36395550 |
 
 
-## full__A__seed42__lr3p0
+## M008
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -170,7 +170,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.37531688 | 0.57819093 | 0.43168974 | 2.39050078 | 1.54897630 | 2.25452399 |
 
 
-## full__A__seed43__lr1p0
+## M009
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -191,7 +191,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.34493525 | 0.49137050 | 0.43771893 | 2.41682124 | 1.64872134 | 2.36235642 |
 
 
-## full__B__seed42__lr0p3
+## M011
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -212,7 +212,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.18051769 | 0.37511298 | 0.44447416 | 2.79370379 | 6.11248589 | 6.92203045 |
 
 
-## full__B__seed42__lr1p0
+## M012
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -233,7 +233,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.17975193 | 0.51968852 | 0.49210343 | 2.92985845 | 5.83345747 | 6.68894768 |
 
 
-## full__B__seed42__lr3p0
+## M013
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -254,7 +254,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.16400919 | 0.59629982 | 0.57388800 | 3.10172462 | 6.71307325 | 7.63197660 |
 
 
-## full__B__seed43__lr1p0
+## M014
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -275,7 +275,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.16829567 | 0.50516460 | 0.48945102 | 2.94575047 | 5.78322935 | 6.64202976 |
 
 
-## last_two_blocks__A__seed42__lr1p0
+## M017
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -296,7 +296,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.34153066 | 0.50566538 | 0.43980774 | 2.41997910 | 1.98972905 | 2.70467567 |
 
 
-## last_two_blocks__B__seed42__lr1p0
+## M018
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -317,7 +317,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.15387883 | 0.52086854 | 0.46725130 | 2.98448300 | 6.17392349 | 7.03685713 |
 
 
-## listwise_normalized__A__seed42__lr1p0
+## M019
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -338,7 +338,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.33629307 | 0.48462296 | 0.43087986 | 1.45961607 | 1.65153277 | 2.12415671 |
 
 
-## listwise_normalized__B__seed42__lr1p0
+## M020
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -359,7 +359,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.16224005 | 0.50576951 | 0.48328638 | 1.70358133 | 5.87334681 | 6.42006397 |
 
 
-## lora16__A__seed42__lr1p0
+## M021
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -380,7 +380,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.31663178 | 0.43577799 | 0.44861305 | 2.45248699 | 2.50049233 | 3.22576737 |
 
 
-## lora16__B__seed42__lr1p0
+## M022
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -401,7 +401,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.16466730 | 0.45936514 | 0.44867367 | 2.85885453 | 6.52363586 | 7.35051775 |
 
 
-## lora4__A__seed42__lr1p0
+## M023
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -422,7 +422,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.31064943 | 0.41728397 | 0.44423246 | 2.45923066 | 2.65625548 | 3.38212132 |
 
 
-## lora4__B__seed42__lr1p0
+## M024
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -443,7 +443,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.17124082 | 0.44905745 | 0.45628288 | 2.85654759 | 6.68276787 | 7.51097536 |
 
 
-## lora64__A__seed42__lr1p0
+## M025
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -464,7 +464,7 @@ All 23 completed fits are shown at every epoch. Validation values come from nati
 | 15 | 0.32330585 | 0.44982801 | 0.44590226 | 2.43916273 | 2.34309268 | 3.06435895 |
 
 
-## lora64__B__seed42__lr1p0
+## M026
 
 | Epoch | Validation macro | Probe macro | BCE loss | Ranking loss | Contrastive loss | Total loss |
 | --- | --- | --- | --- | --- | --- | --- |

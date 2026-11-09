@@ -1,21 +1,6 @@
 {
-  "snapshot": "2026-11-09",
-  "scope": "Report extraction and consistency verification only. No model fitting, inference, retraining or new scientific comparison.",
-  "source_records": 1786,
-  "numeric_boolean_null_fields": 1422144,
-  "field_type_counts": {
-    "integer": 572062,
-    "float": 764050,
-    "boolean": 2146,
-    "undefined": 66584,
-    "numeric_string": 17302
-  },
-  "source_hash_matches": 1786,
-  "exact_field_matches": 1422144,
-  "completed_fits": 23,
-  "epoch_rows": 345,
-  "native_epoch_metric_values_checked": 6210,
-  "question_count": 34,
+  "scope": "Anonymized reporting of existing measurements only. No training or inference executed.",
+  "questions": 34,
   "question_status_counts": {
     "Answered": 12,
     "Partial": 3,
@@ -24,24 +9,63 @@
     "Excluded by user scope": 1
   },
   "experiment_entries": 70,
-  "terminology_scan_files": 9,
-  "terminology_matches": 0,
-  "verified_relative_links": 16,
-  "historical_source_lines": {
-    "detailed_observations": 2272,
-    "stop_and_variant_observations": 498
+  "completed_fits": 23,
+  "epoch_records": 345,
+  "anonymous_model_catalog_entries": 34,
+  "collected_record_entries": 1786,
+  "records_with_shared_fields": 1748,
+  "shared_evidence_fields": 1420985,
+  "exact_retained_field_matches": 1420985,
+  "withheld_identifier_fields": 1159,
+  "withheld_categories": {
+    "absolute_time": 593,
+    "process_account_or_source_identifier": 566
   },
-  "historical_report_lines": 2780,
-  "known_transcription_correction": {
-    "fit": "full_A_seed42_base",
-    "epoch": 7,
-    "earlier_prose": 0.30188,
-    "native": 0.3022522362359804
+  "shared_value_types": {
+    "integer": 571496,
+    "float": 763457,
+    "boolean": 2146,
+    "undefined": 66584,
+    "numeric_string": 17302
   },
-  "source_archive_sha256": "b09e7ecc2058371d00061f1550ebde458d436b91f2cc39af44ae48912e3a0117",
-  "limitations": [
-    "Extraction checks do not independently validate the underlying scientific estimators.",
-    "Raw observation predictions and model tensors are not expanded.",
-    "Historical notes retain earlier scope and intermediate results; current answers govern status."
-  ]
+  "unchanged_numeric_fit_and_epoch_cells": 20785,
+  "narrative_decimal_preservation": {
+    "answers.md": {
+      "source_decimal_occurrences": 505,
+      "withheld_absolute_time_occurrences": 0,
+      "other_missing_decimal_occurrences": 0
+    },
+    "data_measurements.md": {
+      "source_decimal_occurrences": 230,
+      "withheld_absolute_time_occurrences": 0,
+      "other_missing_decimal_occurrences": 0
+    },
+    "epoch_measurements.md": {
+      "source_decimal_occurrences": 2055,
+      "withheld_absolute_time_occurrences": 0,
+      "other_missing_decimal_occurrences": 0
+    },
+    "experiment_disposition.md": {
+      "source_decimal_occurrences": 0,
+      "withheld_absolute_time_occurrences": 0,
+      "other_missing_decimal_occurrences": 0
+    },
+    "historical_measurement_notes.md": {
+      "source_decimal_occurrences": 1110,
+      "withheld_absolute_time_occurrences": 14,
+      "other_missing_decimal_occurrences": 0
+    }
+  },
+  "original_source_hashes_included": false,
+  "original_mapping_included": false,
+  "limits": [
+    "Input-specific semantics are intentionally abstracted.",
+    "Exact numerical values can still be matched to other copies.",
+    "No external classifier outcome is asserted."
+  ],
+  "shared_files_scanned": 13,
+  "remaining_detected_domain_terms": 0,
+  "remaining_original_identifiers": 0,
+  "verified_relative_links": 22,
+  "gzip_name_and_time_metadata_removed": true
 }

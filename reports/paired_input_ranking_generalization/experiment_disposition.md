@@ -9,13 +9,13 @@ Historical totals: 23 complete, 12 partial, 35 pending. These include subsequent
 | E01 | Tier 1 | Re-score saved predictions with per-group averaged Spearman | partial | Initial B and reference audits completed; requested selected-model comparison unfinished. |
 | E02 | Tier 1 | Compute concordant-minus-discordant concordance over within-group pairs | partial | Initial B and reference audits completed; requested selected-model comparison unfinished. |
 | E03 | Tier 1 | Compute tie-adjusted Kendall tau-b | partial | Initial B and reference audits completed; requested selected-model comparison unfinished. |
-| E04 | Tier 1 | Treat differences within replicate noise as ties | partial | Noise-band evidence completed for Initial B; requested comparison unfinished. |
+| E04 | Tier 1 | Treat differences within repeat noise as ties | partial | Noise-band evidence completed for Initial B; requested comparison unfinished. |
 | E05 | Tier 1 | Report pairwise ordering accuracy in the specified group-size bins | partial | Group-size pair-accuracy evidence completed for Initial B; requested comparison unfinished. |
-| E06 | Tier 1 | Audit size, eligibility, positive rate, scores, variance, replicates, and query coverage across all six partitions | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
+| E06 | Tier 1 | Audit size, eligibility, positive rate, scores, variance, repeats, and query coverage across all six partitions | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
 | E07 | Tier 1 | Tabulate indivisible component sizes and assignment rules | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
 | E08 | Tier 1 | Stratify Split A by maximum training-candidate similarity under the predefined relation | partial | Binary class strata measured for baseline and references; requested selected-test extension unfinished. |
 | E09 | Tier 1 | Reweight Split A to Split B group-size and label composition | partial | Baseline and reference composition matching measured; requested extension unfinished. |
-| E10 | Tier 1 | Estimate replicate split-half ceiling with assumptions and coverage stated | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
+| E10 | Tier 1 | Estimate repeat split-half ceiling with assumptions and coverage stated | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
 | E11 | Tier 1 | Fit candidate-cluster main effect, query-by-cluster interaction, and noise components where identifiable | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
 | E12 | Tier 1 | Decompose saved checkpoint losses, including both contrastive directions | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
 | E13 | Tier 1 | Compare BCE discrimination with log-loss over checkpoints | complete | Completed recorded audit or baseline; qualifications are in the answers and measurement notes. |
@@ -52,7 +52,7 @@ Historical totals: 23 complete, 12 partial, 35 pending. These include subsequent
 | E44 | Tier 3 | Detach contrastive gradients from encoders | pending | A/B detachment fits complete; selected-test comparison unfinished. |
 | E45 | Tier 3 | Normalize ranking objectives per group | pending | A/B list-normalized fits complete; group-balanced A failed, B unstarted; selected-test comparison unfinished. |
 | E46 | Tier 3 | Compare uniform pair weights with top-weighting | pending | Requested uniform-pair fits unstarted. |
-| E47 | Tier 3 | Calibrate soft pair queries using replicate noise | pending | Requested noise-calibrated pair fits unstarted. |
+| E47 | Tier 3 | Calibrate soft pair queries using repeat noise | pending | Requested noise-calibrated pair fits unstarted. |
 | E48 | Tier 3 | Evaluate checkpoint averaging, as specified in the gated execution sequence | pending | Checkpoint-averaging intervention excluded from narrowed scope. |
 | E49 | Tier 4 | Adapt heads on adaptation units and evaluate disjoint validation/test units | pending | Adaptation design and software preparation only; no scientific job completed. |
 | E50 | Tier 4 | Repeat adaptation including cross-attention | pending | Adaptation design and software preparation only; no scientific job completed. |
@@ -84,30 +84,30 @@ Fourteen of 24 variant fits completed. One failed at evaluation; nine were never
 
 | Fit | Observed state |
 | --- | --- |
-| frozen__A__seed42__lr1p0 | Completed 15 epochs |
-| frozen__B__seed42__lr1p0 | Completed 15 epochs |
-| last_two_blocks__A__seed42__lr1p0 | Completed 15 epochs |
-| last_two_blocks__B__seed42__lr1p0 | Completed 15 epochs |
-| lora4__A__seed42__lr1p0 | Completed 15 epochs |
-| lora4__B__seed42__lr1p0 | Completed 15 epochs |
-| lora16__A__seed42__lr1p0 | Completed 15 epochs |
-| lora16__B__seed42__lr1p0 | Completed 15 epochs |
-| lora64__A__seed42__lr1p0 | Completed 15 epochs |
-| lora64__B__seed42__lr1p0 | Completed 15 epochs |
-| detach_contrastive__A__seed42__lr1p0 | Completed 15 epochs |
-| detach_contrastive__B__seed42__lr1p0 | Completed 15 epochs |
-| listwise_normalized__A__seed42__lr1p0 | Completed 15 epochs |
-| listwise_normalized__B__seed42__lr1p0 | Completed 15 epochs |
-| group_balanced__A__seed42__lr1p0 | Failed at first evaluation; no completed checkpoint |
-| group_balanced__B__seed42__lr1p0 | Unstarted |
-| pairwise_top__A__seed42__lr1p0 | Unstarted |
-| pairwise_top__B__seed42__lr1p0 | Unstarted |
-| pairwise_uniform__A__seed42__lr1p0 | Unstarted |
-| pairwise_uniform__B__seed42__lr1p0 | Unstarted |
-| pairwise_hard_zero_margin__A__seed42__lr1p0 | Unstarted |
-| pairwise_hard_zero_margin__B__seed42__lr1p0 | Unstarted |
-| pairwise_noise_soft__A__seed42__lr1p0 | Unstarted |
-| pairwise_noise_soft__B__seed42__lr1p0 | Unstarted |
+| M004 | Completed 15 epochs |
+| M005 | Completed 15 epochs |
+| M017 | Completed 15 epochs |
+| M018 | Completed 15 epochs |
+| M023 | Completed 15 epochs |
+| M024 | Completed 15 epochs |
+| M021 | Completed 15 epochs |
+| M022 | Completed 15 epochs |
+| M025 | Completed 15 epochs |
+| M026 | Completed 15 epochs |
+| M002 | Completed 15 epochs |
+| M003 | Completed 15 epochs |
+| M019 | Completed 15 epochs |
+| M020 | Completed 15 epochs |
+| M015 | Failed at first evaluation; no completed checkpoint |
+| M016 | Unstarted |
+| M031 | Unstarted |
+| M032 | Unstarted |
+| M033 | Unstarted |
+| M034 | Unstarted |
+| M027 | Unstarted |
+| M028 | Unstarted |
+| M029 | Unstarted |
+| M030 | Unstarted |
 
 
 The separate requested 10,000-pair encoding comparison has no completed scientific result. It is not counted as an E01–E70 completion.

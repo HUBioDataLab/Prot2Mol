@@ -1,6 +1,6 @@
-# Paired-input ranking generalization: empirical answers
+# Grouped ranking study: empirical answers
 
-Evidence snapshot: **9 November 2026**. This report answers the 34 questions in `Paired input ranking generalization.md`, preserving their wording and order. It uses only query **x**, candidate **y**, comparison group **g**, observed score **s**, binary label, similarity class and indivisible split unit.
+This report addresses 34 questions about a paired-input ranking benchmark, in their specified order. Query **x**, candidate **y**, comparison group **g**, scalar label **s** and candidate category are abstract mathematical roles. The classification cutoff is denoted **θ**; its recorded parameter value is retained in the numeric register. Original input types and source-specific metadata are intentionally omitted.
 
 **The study was stopped before completion.** There are 23 completed 15-epoch neural fits: one Initial B fit, eight full-model reference, learning-rate or seed fits, and fourteen requested variants. The latest 24-variant queue finished fourteen fits; one failed and nine never started. No completed requested variant exceeds the full reference on B validation. Selected-test comparisons for the requested model grid, adaptation and mechanism analyses remain unfinished. A completed fit is not a completed experiment.
 
@@ -11,14 +11,15 @@ Of the 34 questions, **12 are answered, 16 have answers with limits, three are p
 This document gives the answer, measurements and interpretation limits for each question. Its accompanying files retain the detailed evidence:
 
 - [Epoch measurements](epoch_measurements.md): all 15 epochs of all 23 completed fits, including validation losses and available fixed-training-probe metrics.
+- [Anonymous model catalog](measurements/model_catalog.csv): model aliases and their experimental settings.
 - [Full-precision epoch curves](measurements/epoch_curves.csv) and [fit summary](measurements/fit_summary.csv).
 - [Data, noise and variance tables](data_measurements.md): six-partition measurements and both variance weighting conventions.
 - [Historical measurement notes](historical_measurement_notes.md): the earlier quantitative observations, runtime qualifications and intermediate results, expressed in the same terminology. Historical plans and statuses are superseded by this report.
 - [Experiment disposition](experiment_disposition.md): every E01–E70 entry, including subsequent exclusions and unfinished work.
-- [Complete numeric register](measurements/all_numeric_records.csv.gz): **1,422,144 numeric, boolean or null fields from 1,786 collected records**, with [record index and source hashes](measurements/evidence_index.json). The register includes repeated historical snapshots and runtime metadata; its rows are not independent measurements or experiments. Raw observation-level predictions and model tensors are not expanded into this register.
-- [Extraction verification](verification.json) and [file checksums](report_checksums.json): source-field equality, native-curve checks, coverage counts and file integrity.
+- [Complete numeric register](measurements/all_numeric_records.csv.gz): **1,420,985 numeric, boolean or null fields from 1,786 collected records**, with [anonymous record index](measurements/evidence_index.json). The register includes repeated historical snapshots and nonidentifying runtime measurements; its rows are not independent measurements or experiments. Raw observation-level predictions and model tensors are not expanded into this register.
+- [Extraction verification](verification.json) and [file checksums](report_checksums.json): measurement preservation, native-curve checks, coverage counts and shared-file integrity.
 
-Record IDs such as **R0923** refer to the index. All registered numeric values retain source precision. Human-readable tables round values; missing or undefined measurements remain missing or undefined. The record index uses neutral titles and field names. Original source bytes are identified by SHA256, rather than reproduced as domain-specific identifiers.
+Record IDs such as **R0923** refer to the index. All registered numeric values retain source precision. Readable tables round values; missing or undefined measurements remain missing or undefined. The record index uses neutral titles and field names. The original-source mapping is kept outside the shared bundle. Record IDs do not encode original names or locations. Input-specific inclusion checks are represented by anonymous filter labels.
 
 “Initial B” denotes the first fresh 15-epoch fit. “Controlled B” denotes the later full-model reference. They are different fits, and their trajectories must not be spliced. Unless specified otherwise, comparisons of requested variants below use seed 42, the selected base learning rate, native validation macro Spearman and each fit's own best epoch. A and B contain different evaluation populations, so their difference is not a paired treatment effect.
 
@@ -67,7 +68,7 @@ Eligible test coverage is **8,278/16,431 = 50.38%** on A and **3,972/9,578 = 41.
 
 Precision is consequential at the eligibility boundary: float64 export arithmetic gives Initial B test macro **0.1770244006 over 3,971 groups**, whereas the native float32 path gives **0.1768796098 over 3,972**. After aligning the native precision rule, **93 export/readout comparisons agreed within 10⁻¹⁴**. This is an arithmetic and cohort effect, not evidence that inference batch size changed model predictions. Sources: **R0923**, the metric-verification records and **R1598**.
 
-## Q03 — Do the two test partitions differ in group-size distribution, within-group score variance, near-tie rate or replicate count?
+## Q03 — Do the two test partitions differ in group-size distribution, within-group score variance, near-tie rate or repeat count?
 
 **Answered.** Yes. All six partitions were audited:
 
@@ -81,7 +82,7 @@ Precision is consequential at the eligibility boundary: float64 export arithmeti
 | B | test | 136956 | 9578 | 1723 | 81140 | 3972 | 2 | 0.180864 |
 
 
-In particular, A/B test median sizes are **3/2**, and mean within-group score variances are **0.30457078/0.18086350**. Replicate and near-tie distributions also differ; the complete partition tables are in [data measurements](data_measurements.md). These differences make the raw A/B averages different estimands, but do not by themselves quantify how much of the score gap they cause.
+In particular, A/B test median sizes are **3/2**, and mean within-group score variances are **0.30457078/0.18086350**. Repeat and near-tie distributions also differ; the complete partition tables are in [data measurements](data_measurements.md). These differences make the raw A/B averages different estimands, but do not by themselves quantify how much of the score gap they cause.
 
 A composition-matched depth-3 baseline comparison covers **3,964/3,972 B eligible groups (99.80%)**. On common support, A macro changes **0.1281 → 0.1154** after weighting to B's composition, versus B **0.0613**. The remaining gap is **0.0541**. The A weighting change is **−0.01266**, conditional interval **[−0.01551, −0.00969]**, with effective group count **7,067**. Residual mean group sizes remain **26.11/31.93**, and score spans **2.173/1.954**; coarse matching is incomplete.
 
@@ -99,7 +100,7 @@ The original splitter produces identical assignments for seeds **42, 43 and 44**
 
 ## Q05 — Does the metric tolerate small score differences the way the loss does? How do top-weighted metrics move?
 
-**With limits.** Ordinary Spearman has no replicate-noise band. On Initial B test, pair accuracy is **0.5892** without a band, **0.6305** under the fixed margin and **0.6581** after excluding label differences inside the training replicate-RMS band. All-pair concordance changes **0.1683 → 0.1471 → 0.1205**. These are changes to the scoring rule and denominator, not improvements to the model.
+**With limits.** Ordinary Spearman has no repeat-noise band. On Initial B test, pair accuracy is **0.5892** without a band, **0.6305** under the fixed margin and **0.6581** after excluding label differences inside the training repeat-RMS band. All-pair concordance changes **0.1683 → 0.1471 → 0.1205**. These are changes to the scoring rule and denominator, not improvements to the model.
 
 Initial B eligible-group NDCG@1/@3/@5 changes from **0.59687/0.66438/0.71182** at epoch 6 to **0.59098/0.66322/0.70751** at epoch 15. The first two peak at epoch 11 and the third at epoch 6. With the broader nonconstant cohort, the first two instead peak at epoch 8. Controlled B has NDCG@1/@3/@5 peaks at epochs **6/13/8**, and all three end below their epoch-6 values. Thus metric and cohort choice can change the apparent preferred epoch. This does not establish reproducible objective conflict. Sources: **R0923**, the noise-aware and trajectory records.
 
@@ -133,7 +134,7 @@ Independent export checks verified **831,555 A group/readout correlations across
 
 **With limits.** Yes, on B the ranking-loss rise survives freezing: frozen B reaches its ranking-loss minimum at **epoch 2** and increases at every subsequent epoch. Full B reaches its minimum at **epoch 3**. Frozen B's best macro is **0.14642708 at epoch 6**, versus full B **0.18457785 at epoch 6**; final macros are **0.13678884/0.17975193**. Frozen B's final probe macro is **0.58219296**, versus full B **0.51968852**, giving an even larger probe/validation separation.
 
-On A, frozen/full ranking-loss minima are at **12/15**. Frozen/full best macros are **0.34118048/0.34367521** and final probe macros **0.55463288/0.49207621**. Matched row identities, labels and native curves were verified. Freezing does not remove the B behavior, but these comparisons do not isolate a causal mechanism or provide a selected-test or replicated benefit.
+On A, frozen/full ranking-loss minima are at **12/15**. Frozen/full best macros are **0.34118048/0.34367521** and final probe macros **0.55463288/0.49207621**. Matched row identities, labels and native curves were verified. Freezing does not remove the B behavior, but these comparisons do not isolate a causal mechanism or provide a selected-test or repeated benefit.
 
 ## Q10 — Does the learned contrastive temperature keep sharpening? Does the contrastive validation loss still rise against a fixed candidate pool?
 
@@ -218,27 +219,27 @@ Weak-support intervals are wide and bins differ in composition. Performance is n
 
 The completed validation pairs already show that improvements need not transfer between splits: detachment raises A but lowers B; increasing the full-model learning rate threefold raises A's peak to **0.37531688** but lowers B's peak to **0.17310025**. This is descriptive evidence against assuming every A improvement helps B. It is not the unfinished E58 association analysis, and does not establish a general inverse relationship.
 
-## Q18 — What is the replicate-based noise ceiling of the chosen metric on each split?
+## Q18 — What is the repeat-based noise ceiling of the chosen metric on each split?
 
-**With limits.** The measured test split-half macros are **A 0.54450467 / B 0.37800495**, with Spearman–Brown heuristics **0.70503949/0.54854535**. Qualifying replicated-member coverage is only **420/8,278 = 5.07%** of eligible A groups and **348/3,972 = 8.76%** of eligible B groups.
+**With limits.** The measured test split-half macros are **A 0.54450467 / B 0.37800495**, with Spearman–Brown heuristics **0.70503949/0.54854535**. Qualifying repeated-member coverage is only **420/8,278 = 5.07%** of eligible A groups and **348/3,972 = 8.76%** of eligible B groups.
 
 Each estimate uses **100 random half assignments**. A's assignment range is **[0.52771567, 0.56065509]**, with **413–416 defined groups** per repetition. All corresponding B values and the four other partitions are retained in [data measurements](data_measurements.md) and **R1500**.
 
-The correction assumes exchangeable parallel measurements. Applying it to a macro grouped-rank statistic is a heuristic, and the replicated subset is selective. These numbers are **not established ceilings for the full test populations**. Dividing whole-test model performance by them would not establish the fraction of attainable performance achieved.
+The correction assumes exchangeable parallel measurements. Applying it to a macro grouped-rank statistic is a heuristic, and the repeated subset is selective. These numbers are **not established ceilings for the full test populations**. Dividing whole-test model performance by them would not establish the fraction of attainable performance achieved.
 
-## Q19 — How does within-group variance of s divide among the y-cluster main effect, the x×y interaction, and replicate noise?
+## Q19 — How does within-group variance of s divide among the y-cluster main effect, the x×y interaction, and repeat noise?
 
 **With limits.** Six partition-specific variance fits and six group-balanced alternatives were produced. The full component and within-group contribution tables are in [data measurements](data_measurements.md), with full precision in **R1602–R1608**.
 
 On A test, the primary fit estimates query, group, class-main, interaction, raw-measurement-noise and observation-residual variances of **0.25080549, 0.92082342, 0.47299692, 0, 0.10354355 and 0.03582322**, respectively, in **s²**. After within-group centering and equal-group averaging, the class-main contribution is **0.18376655** and observation residual **0.01888998**; query and group intercepts cancel.
 
-The estimated within-group interaction contribution changes **0 → 0.11592039** on A test and **0.1716375 → 0.0567531** on B test when using group-balanced fitting. B train's fitted marginal variance changes **3.9844 → 2.0749**, versus observed **1.9578**. Boundary noise estimates conflict with directly observed replicate disagreement.
+The estimated within-group interaction contribution changes **0 → 0.11592039** on A test and **0.1716375 → 0.0567531** on B test when using group-balanced fitting. B train's fitted marginal variance changes **3.9844 → 2.0749**, versus observed **1.9578**. Boundary noise estimates conflict with directly observed repeat disagreement.
 
 The decomposition is therefore not stable enough to identify a transferable interaction share or an architectural ceiling. Raw-measurement variance is not uncertainty of the aggregated median. Observation residual can contain unmodeled y-specific signal; it cannot all be called irreducible noise.
 
-## Q20 — What fraction of within-group pairs differ by less than the replicate noise?
+## Q20 — What fraction of within-group pairs differ by less than the repeat noise?
 
-**Answered.** Training raw-replicate RMS differences are **A 0.78055161 / B 0.76605203** in s units. These bands contain **60.802%/61.887%** of test within-group label differences. A fixed band of **log10(3)** contains **42.297%/43.640%**.
+**Answered.** Training raw-repeat RMS differences are **A 0.78055161 / B 0.76605203** in s units. These bands contain **60.802%/61.887%** of test within-group label differences. A fixed band of **0.47712125471966244** contains **42.297%/43.640%**.
 
 These large fractions make near-tie handling consequential. RMS raw-repeat disagreement measures differences between individual repeated measurements; it is neither a confidence interval nor the standard error of an aggregated label. Test-specific and validation-specific RMS values are also recorded, but the reported test noise-band evaluation uses training-derived bands. Source: **R1500** and the near-tie records.
 
@@ -252,19 +253,19 @@ Eligible/ineligible training median group sizes are **11/1**. Mean within-group 
 
 ## Q22 — How were pairs chosen for observation, given the 70% positive rate?
 
-**With limits.** Source reconstruction retained exact numeric measurements, single-query groups, source confidence **≥8**, canonical input versions and candidate normalization/quality checks, followed by within-group median aggregation. It retained measurements on both sides of the binary threshold.
+**With limits.** The dataset was reconstructed from input records that passed predefined inclusion checks. Records were grouped by query, checked for consistency and aggregated within groups by the median. It retained measurements on both sides of the binary threshold.
 
-All **1,957,400 curated observations** were reconstructed from **2,032,748 retained raw measurements**, with **zero count or median mismatches**. The archived groups contain **4,161,420 measurement records across 164,312 groups**. Of these, **2,034,645** have the required numeric score, **2,126,775** do not, and **1,897** numeric records fall outside retained observation identities. Other recorded endpoint categories K1/K2 account for **1,345,088 records**; **500,807** records have inequality qualifiers. These categories are not counts of distinct missing pairs or valid negatives.
+All **1,957,400 retained observations** were reconstructed from **2,032,748 retained raw recorded labels**, with **zero count or median mismatches**. The input groups contain **4,161,420 measurement records across 164,312 groups**. Of these, **2,034,645** have the required numeric score, **2,126,775** do not, and **1,897** numeric records fall outside retained observation identities. Other input-record categories U1/U2 account for **1,345,088 records**; **500,807** records have non-exact-label flags. These categories are not counts of distinct missing pairs or valid negatives.
 
-The original aggregated observations are **69.04% positive**. Numeric archive records are **69.2176% positive**, and retained raw measurements **69.2218%**. Source collections differ strongly: **L: 1,138,209 rows, 67.79% positive; P: 637,588, 82.86%; Q: 116,824, 4.61%**. These three collections do not cover all observations; **64,779 rows** belong to other collections.
+The original aggregated observations are **69.04% positive**. Numeric input records are **69.2176% positive**, and retained raw recorded labels **69.2218%**. Source collections differ strongly: **C01: 1,138,209 rows, 67.79% positive; C02: 637,588, 82.86%; C03: 116,824, 4.61%**. These three collections do not cover all observations; **64,779 rows** belong to other collections.
 
-Original selection frames, unrecorded trials and observation probabilities are unavailable. The data demonstrate source selection and composition, not a quantified mechanism of preferential testing. Missing pairs are not negatives, and observed prevalence is not the prevalence among newly generated candidates.
+Original sampling frames, unrecorded outcomes and inclusion probabilities are unavailable. The data demonstrate source selection and composition, not a quantified mechanism of preferential observation. Missing pairs are not negatives, and observed prevalence is not the prevalence among newly generated candidates.
 
 An additional provenance issue was found: the original pooled pair-median procedure allowed held-out measurements to change **5,289 A training labels**, versus **zero on B**. Controlled fits use partition-local pair medians for binary labels. The exact historical split identity behind the original configuration could not be recovered; the new fits are not byte-identical reconstructions of that historical dataset. Sources: **R1380–R1381**, partition-label verification records.
 
-## Q23 — How many groups have all members on one side of the threshold, and how far is the threshold from the replicate noise?
+## Q23 — How many groups have all members on one side of the threshold, and how far is the threshold from the repeat noise?
 
-**Answered.** Binary labels use the **partition-local pair median ≥6**; strict contrastive-positive anchors use **s >6**. These boundary rules differ.
+**Answered.** Binary labels use the **partition-local pair median ≥θ**; strict contrastive-positive anchors use **s >θ**. These boundary rules differ.
 
 | Split / partition | All-positive groups | All-negative groups | Same-side fraction among eligible groups |
 | --- | ---: | ---: | ---: |
@@ -275,7 +276,7 @@ An additional provenance issue was found: the original pooled pair-median proced
 | B validation | 4,683 | 2,443 | 50.09% |
 | B test | 4,919 | 2,664 | 54.20% |
 
-The first two count columns concern all groups; the last column uses only ranking-eligible groups. On A/B test, **35.58%/32.21% of rows' pair-median scores** are within the training raw-replicate RMS band around 6. Using each original observation score instead gives **35.51%/32.03%**. BCE supplies no within-group binary ordering preference when every member has the same binary label. This does not prove that BCE cannot improve shared features. Source: **R1598**.
+The first two count columns concern all groups; the last column uses only ranking-eligible groups. On A/B test, **35.58%/32.21% of rows' pair-median scores** are within the training raw-repeat RMS band around θ. Using each original observation score instead gives **35.51%/32.03%**. BCE supplies no within-group binary ordering preference when every member has the same binary label. This does not prove that BCE cannot improve shared features. Source: **R1598**.
 
 ## Q24 — Are batches built from whole groups or from observations, and is the fraction of ranking-eligible groups per batch fixed?
 
@@ -289,7 +290,7 @@ The reconstructed first-epoch order has **12,820 A / 14,020 B local microbatches
 
 Across **512 audited batches**, training-known positive fractions among x→y negative comparisons are **0.530%/0.714% on A/B**, or **0.437/0.576 comparisons per anchor**. The y→x fractions are **0.441%/0.657%**. A numerical fixture verifies the sign of the resulting gradient pressure.
 
-This is a lower bound based on observed training positives with **s>6**. It is not the prevalence of all true positives, nor a measured change in generalization from additional masking. The masking intervention was outside the narrowed scope and was not completed.
+This is a lower bound based on observed training positives with **s>θ**. It is not the prevalence of all true positives, nor a measured change in generalization from additional masking. The masking intervention was outside the narrowed scope and was not completed.
 
 ## Q26 — Are the contrastive projections taken before or after cross-attention?
 
@@ -405,11 +406,11 @@ The user-fixed depth-3 LambdaMART selected **500 A / 270 B trees**, with test in
 
 For Initial B, pair accuracy by group size is **n=2: 0.56846081 (1,150 groups); n=3: 0.56365503 (537); n=4–10: 0.55544266 (1,521); n=11–25: 0.57201655 (1,255); n>25: 0.58955236 (1,152)**. The **3,963 singleton groups** contribute no pairs. These bin counts concern the broader pairwise population, not the headline-eligible macro cohort.
 
-## Provenance, corrections and stop state
+## Verification, corrections and stop state
 
-The November 9 stop verification found **no project-owned training or controller processes**, and **no termination signal was needed**. Training had stopped at the group-balanced A evaluation failure; the downstream reporting and probe queues completed no scientific jobs. The project goal remains paused. The server was at revision **003cdca9113b94f5412c8fe41f6dbc2e85a05b07**; the evaluation repair was not deployed. Stop receipt SHA256: **1a61aaaa6b5353956903e178281b985ab6e1c536f34715c154429ba481a213cc**. Consolidated evidence: **R1786**.
+The stop verification found **no study-owned training or controller processes**, and **no termination signal was needed**. Training had stopped at the group-balanced A evaluation failure; downstream reporting and probe queues completed no scientific jobs. The study remains paused. The evaluation repair was not deployed. Consolidated evidence: **R1786**.
 
-All fourteen completed requested fits have verified completion and retention metadata. Normalized B best-weight SHA256 is **74010b0e999de17864ba235b1deeba2be04931163cbb34524411c7c8db045922**; final-weight SHA256 is **477e62b58f01b1a9a40ece76e8ff123ca359231799c0c12143d648109b827e8f**. Numeric-field source hashes and the report-file checksums provide the audit trail without embedding original domain-specific paths.
+All fourteen completed requested fits have verified completion and retention records. Original run identifiers, source hashes, infrastructure details and file locations are excluded from this shared report. The file checksums cover only the anonymized package. An anonymous record index connects each reported value to its retained evidence fields.
 
 An earlier ten-epoch narrative table transcribed controlled A epoch 7 as **0.30188**. The native value is **0.3022522362359804**; the epoch CSV and corrected historical appendix use that value, rounded to **0.30225** where appropriate. The incorrect transcription is not a second measurement.
 

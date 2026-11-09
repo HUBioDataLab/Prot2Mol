@@ -1,12 +1,14 @@
 {
-  "answers.md": "195396cf99c1fb5cf41a10c90db2cfeaaa40655b6050014f2579a6c5eaa14a3f",
-  "data_measurements.md": "095c7ffd1be3f7986d5ff58ae0c4293f01b46fdf6d25852ac51164cb4c3f9e3d",
-  "epoch_measurements.md": "cfb22a7a74a984ee11db3cad3484ce32aef88d1361ac7cc097099c3413161882",
-  "experiment_disposition.md": "5e5acebe3bafff6718ca193b4227e4806f95358de1439dd9d5454b3fd613825b",
-  "historical_measurement_notes.md": "bcc6322a6c4873c24944ff4088b4a3864307fce373475945bd3bcf72a32b3f56",
-  "measurements/all_numeric_records.csv.gz": "f98b4c9f473a41b0ab178786c8b347afc200c27a3dd542b0c9fdd67c5b211f6f",
-  "measurements/epoch_curves.csv": "e7ae8428938884d499fbfb8064c6f247d8295ddab1cd993465ba168d0dfb6b7a",
-  "measurements/evidence_index.json": "8b6189dd0363f7cff9d1090fc6ecfe6ae8af67c21b5aafbd8ee03634adfe2299",
-  "measurements/fit_summary.csv": "8e30eed630fe071b194909db39c7c59da78d0526e457ea28d0eb3aee96575f58",
-  "verification.json": "0f1a7315c1ae3a0608f68ffc50a873ad0963ae7e89df13596f4a88a78ab84db3"
+  "SHARING.md": "069bdc55d318d98c33a32bcdf6fc74b57e54e70e232c3e8de017dfdaa40c69aa",
+  "answers.md": "50527da174a2d6767c466cc8056dbf67a5aae470007163ab9528f971ffb163e3",
+  "data_measurements.md": "2ddf120237ce15d8ee63d7cf17dcc0d4762676217a1a5d7af1dd4c6b8edf3017",
+  "epoch_measurements.md": "58ab36f2e0ae317278b94769b7400dec5a2d0504012889c51e8f6a74ec65c348",
+  "experiment_disposition.md": "3f16d7adb9d228f8d38e49a9b20d4b04d87fbd906ecee5f473019420428fe3b8",
+  "historical_measurement_notes.md": "70c71d8816a61aa5b8ab029d6e485ac701a5c8da32d20442b4cb5352e8005d85",
+  "measurements/all_numeric_records.csv.gz": "4dbefda772c13ac6e3001eb662e11dd8143c761437afdd7143585134d295277a",
+  "measurements/epoch_curves.csv": "f7eef4acdb2c1ab84924c54837fb74b86e751b33fdd30a0ac6db3e1a5a0e851c",
+  "measurements/evidence_index.json": "3231805c02a29031e398f7d92d24ba35daea46c6e624e7acb0690d704313a791",
+  "measurements/fit_summary.csv": "06d4dc87172f6dfe84238d1cc6a52813f4b2d43041bc8d3815be1a0752377d17",
+  "measurements/model_catalog.csv": "3e26c169d29d444e2c227f044286b76aa8ce887b5b79fae0d8f0ef10c90d89cb",
+  "verification.json": "c210789f3bdd714757b91216ebfdbf4474d7c8bde5812e4e06d650a91c164ed9"
 }
