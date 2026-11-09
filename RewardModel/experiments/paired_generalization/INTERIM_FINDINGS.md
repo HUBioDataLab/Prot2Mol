@@ -1,4 +1,11 @@
-# Interim evidence — study incomplete
+# Detailed historical evidence — study stopped, incomplete
+
+**November 9, 2026:** The user stopped experiments and the persistent goal is
+paused. Atum has no project-owned training or controller processes running.
+The current consolidated results, 14/24 requested fit status, and all 34
+question assessments are in [CONCISE_REPORT.md](CONCISE_REPORT.md). Sections
+below retain their dated historical evidence; references to future queues,
+additional seeds or wider experiment scope are not current execution plans.
 
 This records completed audits, not the final answer to all 34 questions. Runtime
 evidence is under `RewardModel/outputs/paired_generalization` on Atum. The

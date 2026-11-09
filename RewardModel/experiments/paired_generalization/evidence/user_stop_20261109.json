@@ -1,0 +1,1401 @@
+{
+  "assay_balanced_evaluation_fix": {
+    "commit": "fe5fb5d",
+    "deployed": false,
+    "local_cpu_tests_passed": 99,
+    "pushed": true
+  },
+  "completed_15_epoch_neural_fit_count": 23,
+  "completed_initial_scaffold_baselines": 1,
+  "completed_reference_lr_seed_fits": [
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__A__seed42__lr0p3/checkpoint-11228",
+      "completion_evidence_verified": true,
+      "completion_sha256": "01430261a06ff4159a3465436cf3cc8d18040a01261ddcba9895b11c03164a78",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 7.670036315917969,
+          "eval_macro_spearman": 0.13113473499191658,
+          "step": 802
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 5.661093711853027,
+          "eval_macro_spearman": 0.17297972798869776,
+          "step": 1604
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 4.883183002471924,
+          "eval_macro_spearman": 0.1957943277037058,
+          "step": 2406
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 4.449470043182373,
+          "eval_macro_spearman": 0.21411812593826257,
+          "step": 3208
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 4.119295597076416,
+          "eval_macro_spearman": 0.2310532851476817,
+          "step": 4010
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 3.934845209121704,
+          "eval_macro_spearman": 0.24359918242697695,
+          "step": 4812
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 3.755685567855835,
+          "eval_macro_spearman": 0.24857869685150796,
+          "step": 5614
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 3.625620126724243,
+          "eval_macro_spearman": 0.2560746604674336,
+          "step": 6416
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 3.5444729328155518,
+          "eval_macro_spearman": 0.26241745377864983,
+          "step": 7218
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 3.458380937576294,
+          "eval_macro_spearman": 0.26927453420722125,
+          "step": 8020
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 3.3984949588775635,
+          "eval_macro_spearman": 0.27298914879129926,
+          "step": 8822
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 3.3582303524017334,
+          "eval_macro_spearman": 0.2734643375705248,
+          "step": 9624
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 3.3260319232940674,
+          "eval_macro_spearman": 0.27708100032074257,
+          "step": 10426
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 3.304903507232666,
+          "eval_macro_spearman": 0.28035522968099963,
+          "step": 11228
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 3.2977521419525146,
+          "eval_macro_spearman": 0.27927915954821453,
+          "step": 12030
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__A__seed42__lr0p3"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__A__seed42__lr1p0/checkpoint-11228",
+      "completion_evidence_verified": true,
+      "completion_sha256": "c3ae4dc2c4c2859fad517990e8a8a6aaeec1db68346fb0ce814670fdf885a7b7",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 5.664665699005127,
+          "eval_macro_spearman": 0.16488244861936158,
+          "step": 802
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 4.100218772888184,
+          "eval_macro_spearman": 0.2124417651407992,
+          "step": 1604
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 3.4806571006774902,
+          "eval_macro_spearman": 0.24317477544098057,
+          "step": 2406
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 3.174839973449707,
+          "eval_macro_spearman": 0.2614509988013972,
+          "step": 3208
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 2.9384708404541016,
+          "eval_macro_spearman": 0.2795310568466753,
+          "step": 4010
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 2.8137669563293457,
+          "eval_macro_spearman": 0.2884304088240611,
+          "step": 4812
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 2.698223829269409,
+          "eval_macro_spearman": 0.3022522362359804,
+          "step": 5614
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 2.604064464569092,
+          "eval_macro_spearman": 0.31323758442831584,
+          "step": 6416
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 2.5285167694091797,
+          "eval_macro_spearman": 0.3190824483387202,
+          "step": 7218
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 2.481574535369873,
+          "eval_macro_spearman": 0.32603864444320013,
+          "step": 8020
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 2.4381847381591797,
+          "eval_macro_spearman": 0.3326822326580211,
+          "step": 8822
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 2.410811424255371,
+          "eval_macro_spearman": 0.33636556710076665,
+          "step": 9624
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 2.3870835304260254,
+          "eval_macro_spearman": 0.33914635167331164,
+          "step": 10426
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 2.3709893226623535,
+          "eval_macro_spearman": 0.3436752128379461,
+          "step": 11228
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 2.363955497741699,
+          "eval_macro_spearman": 0.3433173840369495,
+          "step": 12030
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__A__seed42__lr1p0"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__A__seed42__lr3p0/checkpoint-12030",
+      "completion_evidence_verified": true,
+      "completion_sha256": "59eac1be7ea547102fe7144c6731a44edadd6d876ccd342b66558b2e1ff37e27",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 4.665897846221924,
+          "eval_macro_spearman": 0.18481478705635984,
+          "step": 802
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 3.3973517417907715,
+          "eval_macro_spearman": 0.2328859799409617,
+          "step": 1604
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 2.9373555183410645,
+          "eval_macro_spearman": 0.2548689179065426,
+          "step": 2406
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 2.7003912925720215,
+          "eval_macro_spearman": 0.2729138975089079,
+          "step": 3208
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 2.5259008407592773,
+          "eval_macro_spearman": 0.2922662349375977,
+          "step": 4010
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 2.473405122756958,
+          "eval_macro_spearman": 0.30774877705245934,
+          "step": 4812
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 2.430807113647461,
+          "eval_macro_spearman": 0.3177697330183657,
+          "step": 5614
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 2.360459804534912,
+          "eval_macro_spearman": 0.33357533999479294,
+          "step": 6416
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 2.3355484008789062,
+          "eval_macro_spearman": 0.3364369657192003,
+          "step": 7218
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 2.3297619819641113,
+          "eval_macro_spearman": 0.3492966405868873,
+          "step": 8020
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 2.2645912170410156,
+          "eval_macro_spearman": 0.3604599992295167,
+          "step": 8822
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 2.259786367416382,
+          "eval_macro_spearman": 0.3671829333919509,
+          "step": 9624
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 2.2620370388031006,
+          "eval_macro_spearman": 0.3704499755257538,
+          "step": 10426
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 2.2624096870422363,
+          "eval_macro_spearman": 0.3741197144649758,
+          "step": 11228
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 2.254523992538452,
+          "eval_macro_spearman": 0.37531687829244537,
+          "step": 12030
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__A__seed42__lr3p0"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__A__seed43__lr1p0/checkpoint-12030",
+      "completion_evidence_verified": true,
+      "completion_sha256": "34743d890316f85addafc191d344690a36d7adaf6c592d1e4e6dbb2e0b260fb6",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 5.665983200073242,
+          "eval_macro_spearman": 0.16407715755531338,
+          "step": 802
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 4.068253993988037,
+          "eval_macro_spearman": 0.21342513146344536,
+          "step": 1604
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 3.504202127456665,
+          "eval_macro_spearman": 0.24308619692200448,
+          "step": 2406
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 3.1452159881591797,
+          "eval_macro_spearman": 0.26232610333085604,
+          "step": 3208
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 2.9245173931121826,
+          "eval_macro_spearman": 0.2758407350884189,
+          "step": 4010
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 2.7983498573303223,
+          "eval_macro_spearman": 0.2895850265293642,
+          "step": 4812
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 2.675966262817383,
+          "eval_macro_spearman": 0.3025569877983184,
+          "step": 5614
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 2.596782922744751,
+          "eval_macro_spearman": 0.30862232484940744,
+          "step": 6416
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 2.5175976753234863,
+          "eval_macro_spearman": 0.3204607275871078,
+          "step": 7218
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 2.4653053283691406,
+          "eval_macro_spearman": 0.328602562272475,
+          "step": 8020
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 2.4254138469696045,
+          "eval_macro_spearman": 0.3366967272159547,
+          "step": 8822
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 2.4002318382263184,
+          "eval_macro_spearman": 0.3376223638711841,
+          "step": 9624
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 2.377370834350586,
+          "eval_macro_spearman": 0.34246322365104986,
+          "step": 10426
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 2.3684043884277344,
+          "eval_macro_spearman": 0.3434781290693775,
+          "step": 11228
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 2.362356424331665,
+          "eval_macro_spearman": 0.3449352521080645,
+          "step": 12030
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__A__seed43__lr1p0"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__B__seed42__lr0p3/checkpoint-10524",
+      "completion_evidence_verified": true,
+      "completion_sha256": "2be77d9e4c726411f58da31078379aecc86c0fb80b91ef01e3080c62c1d339ba",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 11.273354530334473,
+          "eval_macro_spearman": 0.08365586986112705,
+          "step": 877
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 9.252054214477539,
+          "eval_macro_spearman": 0.1210511395897792,
+          "step": 1754
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 8.425379753112793,
+          "eval_macro_spearman": 0.14177368828599524,
+          "step": 2631
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 7.98193359375,
+          "eval_macro_spearman": 0.14958977175094865,
+          "step": 3508
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 7.641797065734863,
+          "eval_macro_spearman": 0.15932493698817654,
+          "step": 4385
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 7.438970565795898,
+          "eval_macro_spearman": 0.16888600794681885,
+          "step": 5262
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 7.33720588684082,
+          "eval_macro_spearman": 0.1648492752002335,
+          "step": 6139
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 7.222450256347656,
+          "eval_macro_spearman": 0.17353598323055006,
+          "step": 7016
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 7.112059593200684,
+          "eval_macro_spearman": 0.17458701342955674,
+          "step": 7893
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 7.073062896728516,
+          "eval_macro_spearman": 0.17700936517651075,
+          "step": 8770
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 7.000202178955078,
+          "eval_macro_spearman": 0.17921535814520845,
+          "step": 9647
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 7.002676010131836,
+          "eval_macro_spearman": 0.18322109417054472,
+          "step": 10524
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 6.93536901473999,
+          "eval_macro_spearman": 0.17784305791405045,
+          "step": 11401
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 6.935699939727783,
+          "eval_macro_spearman": 0.1796643126660644,
+          "step": 12278
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 6.922030448913574,
+          "eval_macro_spearman": 0.18051769060268766,
+          "step": 13155
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__B__seed42__lr0p3"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__B__seed42__lr1p0/checkpoint-5262",
+      "completion_evidence_verified": true,
+      "completion_sha256": "1372d4e4dc731f697b3deeba5aec0b89fad488cb6a435d6ef899a72ec66c0b8b",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 9.377896308898926,
+          "eval_macro_spearman": 0.10991939908606675,
+          "step": 877
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 7.788309097290039,
+          "eval_macro_spearman": 0.14458326123610854,
+          "step": 1754
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 7.259832859039307,
+          "eval_macro_spearman": 0.1691166007873555,
+          "step": 2631
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 7.108067512512207,
+          "eval_macro_spearman": 0.16577154552335227,
+          "step": 3508
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 6.816667556762695,
+          "eval_macro_spearman": 0.1717191765954298,
+          "step": 4385
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 6.818523406982422,
+          "eval_macro_spearman": 0.18457785491707168,
+          "step": 5262
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 6.856753349304199,
+          "eval_macro_spearman": 0.1788873559395924,
+          "step": 6139
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 6.772375106811523,
+          "eval_macro_spearman": 0.18049155180742144,
+          "step": 7016
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 6.782880783081055,
+          "eval_macro_spearman": 0.17596110763404163,
+          "step": 7893
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 6.796831130981445,
+          "eval_macro_spearman": 0.1777594258306914,
+          "step": 8770
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 6.761724472045898,
+          "eval_macro_spearman": 0.17989735336347729,
+          "step": 9647
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 6.778798580169678,
+          "eval_macro_spearman": 0.17750375579111824,
+          "step": 10524
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 6.710712432861328,
+          "eval_macro_spearman": 0.17779942345240296,
+          "step": 11401
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 6.696285247802734,
+          "eval_macro_spearman": 0.17759969014178595,
+          "step": 12278
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 6.688947677612305,
+          "eval_macro_spearman": 0.1797519334642265,
+          "step": 13155
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__B__seed42__lr1p0"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__B__seed42__lr3p0/checkpoint-5262",
+      "completion_evidence_verified": true,
+      "completion_sha256": "9a4554eb53f128e06be0374b3ea57db4d912134094f326709b4ebae5a3d40075",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 8.435429573059082,
+          "eval_macro_spearman": 0.13178025948849736,
+          "step": 877
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 7.712280750274658,
+          "eval_macro_spearman": 0.14211840358912822,
+          "step": 1754
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 7.355980396270752,
+          "eval_macro_spearman": 0.15544543400387148,
+          "step": 2631
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 7.218236923217773,
+          "eval_macro_spearman": 0.16181185352340546,
+          "step": 3508
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 7.226285934448242,
+          "eval_macro_spearman": 0.16448714982398005,
+          "step": 4385
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 7.211067199707031,
+          "eval_macro_spearman": 0.17310025490037464,
+          "step": 5262
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 7.320755481719971,
+          "eval_macro_spearman": 0.16808857031941676,
+          "step": 6139
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 7.3696441650390625,
+          "eval_macro_spearman": 0.16529166398106146,
+          "step": 7016
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 7.46513557434082,
+          "eval_macro_spearman": 0.1653201999837748,
+          "step": 7893
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 7.510283470153809,
+          "eval_macro_spearman": 0.1678066303840957,
+          "step": 8770
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 7.56822395324707,
+          "eval_macro_spearman": 0.16692244011011456,
+          "step": 9647
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 7.669854164123535,
+          "eval_macro_spearman": 0.1683315556632449,
+          "step": 10524
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 7.615871906280518,
+          "eval_macro_spearman": 0.16715764954062537,
+          "step": 11401
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 7.609457015991211,
+          "eval_macro_spearman": 0.16507304027677197,
+          "step": 12278
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 7.63197660446167,
+          "eval_macro_spearman": 0.16400918963276254,
+          "step": 13155
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__B__seed42__lr3p0"
+    },
+    {
+      "best_model_checkpoint": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/full__B__seed43__lr1p0/checkpoint-4385",
+      "completion_evidence_verified": true,
+      "completion_sha256": "8e2410eb9afd84fd49b628cc28ea35b30fb1459af0db8d6df7ef39794881f2b0",
+      "curve": [
+        {
+          "epoch": 1.0,
+          "eval_loss": 9.502781867980957,
+          "eval_macro_spearman": 0.12513274816738432,
+          "step": 877
+        },
+        {
+          "epoch": 2.0,
+          "eval_loss": 7.74497652053833,
+          "eval_macro_spearman": 0.15015823102967885,
+          "step": 1754
+        },
+        {
+          "epoch": 3.0,
+          "eval_loss": 7.2911152839660645,
+          "eval_macro_spearman": 0.15533768395347897,
+          "step": 2631
+        },
+        {
+          "epoch": 4.0,
+          "eval_loss": 6.8675336837768555,
+          "eval_macro_spearman": 0.17011848775867894,
+          "step": 3508
+        },
+        {
+          "epoch": 5.0,
+          "eval_loss": 6.719467639923096,
+          "eval_macro_spearman": 0.1773860175233056,
+          "step": 4385
+        },
+        {
+          "epoch": 6.0,
+          "eval_loss": 6.808382987976074,
+          "eval_macro_spearman": 0.16830365529094027,
+          "step": 5262
+        },
+        {
+          "epoch": 7.0,
+          "eval_loss": 6.768558502197266,
+          "eval_macro_spearman": 0.16399144285816597,
+          "step": 6139
+        },
+        {
+          "epoch": 8.0,
+          "eval_loss": 6.685543060302734,
+          "eval_macro_spearman": 0.16370205090950118,
+          "step": 7016
+        },
+        {
+          "epoch": 9.0,
+          "eval_loss": 6.668735504150391,
+          "eval_macro_spearman": 0.16577953879913468,
+          "step": 7893
+        },
+        {
+          "epoch": 10.0,
+          "eval_loss": 6.724390029907227,
+          "eval_macro_spearman": 0.1665849801320786,
+          "step": 8770
+        },
+        {
+          "epoch": 11.0,
+          "eval_loss": 6.665379524230957,
+          "eval_macro_spearman": 0.16611581078361087,
+          "step": 9647
+        },
+        {
+          "epoch": 12.0,
+          "eval_loss": 6.6463093757629395,
+          "eval_macro_spearman": 0.16646708267941795,
+          "step": 10524
+        },
+        {
+          "epoch": 13.0,
+          "eval_loss": 6.678504943847656,
+          "eval_macro_spearman": 0.1662139436301829,
+          "step": 11401
+        },
+        {
+          "epoch": 14.0,
+          "eval_loss": 6.64705228805542,
+          "eval_macro_spearman": 0.1689789405194138,
+          "step": 12278
+        },
+        {
+          "epoch": 15.0,
+          "eval_loss": 6.642029762268066,
+          "eval_macro_spearman": 0.16829566800248677,
+          "step": 13155
+        }
+      ],
+      "epoch": 15.0,
+      "has_completion": true,
+      "has_state": true,
+      "id": "full__B__seed43__lr1p0"
+    }
+  ],
+  "completed_requested_variant_fits": [
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.3411804791496723,
+      "completion_evidence_verified": true,
+      "config_sha256": "23f6ff07996c40c10276d99b43d1a3d68c0a2909f14935a9495cd0ea5237b4ab",
+      "final_validation_macro_spearman": 0.3411804791496723,
+      "id": "frozen__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "7b79596ce1eba8243d099287308c883dc208edf2bb00f19a3ba83c0f8806822d",
+        "experiment_summary.json": "1d90b656f7a7d1fdbf9cbd90e5f3892517bfdb8390fda7202a72878a334af958",
+        "launch_provenance.json": "ac9d9bc7318e5f78c192c4ea6b18232e7b5181589c54687ed8d91db3179764c3",
+        "rank_0_complete.json": "0619221273c160285e4d3dac3819001d13226247ec9415aff735d038f0713a8d",
+        "rank_1_complete.json": "cc5e21545cf3450e99329271a2f308390060952db37084aae63cbadfc58ccc28",
+        "rank_2_complete.json": "91852d33236e75981069f41705a7b7f95ef8f5969b1e4f70873dcac550434f58",
+        "rank_3_complete.json": "c09be5075d64266690f8d95fe5e7473035138b6bae45af4111c9f7f26ce47aeb",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "cba91de102ad9c8af2bf8fbcc3c3620b3225d0d9b85fe559cf816d8663468dfc"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/frozen__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "d82b8edabd3d4bf4e42c83644b1c1f33435828e7e8e51387bbb52f69493aa262"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "d82b8edabd3d4bf4e42c83644b1c1f33435828e7e8e51387bbb52f69493aa262"
+        }
+      ]
+    },
+    {
+      "best_epoch": 6.0,
+      "best_validation_macro_spearman": 0.14642708192309947,
+      "completion_evidence_verified": true,
+      "config_sha256": "44953f09c6f1cd355dc5a7b292160cb093531e0d4a92276ead8472003b2883f0",
+      "final_validation_macro_spearman": 0.1367888418074568,
+      "id": "frozen__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "30cac099b8be12b27f85c75a5a9fac3eda0c03c8e23f5772f819775715538eeb",
+        "experiment_summary.json": "44aa9aced63ca6d943c16c7b34707369447ee6a2f93e31f0fdaea2b3c9f13433",
+        "launch_provenance.json": "cb3b275bcb78644e89da34ffcebbedac337e70203e62f1ce342439949ed45fe7",
+        "rank_0_complete.json": "7b622d3ea35ec73f53e0a141826b3d50985d0964660a03613accf74f03e450df",
+        "rank_1_complete.json": "d300fb0f0a25963bcaed65ced9d3942963e2c2edc108a5ea20992a667c81a1ec",
+        "rank_2_complete.json": "067aa88fb9a1f54da59310f6123d43919ebfbc2b93ec8eaffb9375691c9aff59",
+        "rank_3_complete.json": "d84db568bca4c55ce0f2f6ae37449aa4c4b6a3e3df738405ad8376a3b8c2ddde",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "c04cd108086ca7f41edf28e17bf5d2a6e3a78234b1ce98d72b595e69d586df91"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/frozen__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "7b04cefbd90e431fa580e22d0e25fb8e0ff74cd8e470ecd078fffc1b30ea3e28"
+        },
+        {
+          "path": "checkpoint-5262/pytorch_model.bin",
+          "sha256": "7b04cefbd90e431fa580e22d0e25fb8e0ff74cd8e470ecd078fffc1b30ea3e28"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "4c3c68fb2da3101bbfd6808be3d05c47944736c10373baff6b3ef0ec84adb9f8"
+        }
+      ]
+    },
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.3415306581450805,
+      "completion_evidence_verified": true,
+      "config_sha256": "69bf255af579c366123f0cb67f5cb75f52cf6670247700570662e757c7ce3cac",
+      "final_validation_macro_spearman": 0.3415306581450805,
+      "id": "last_two_blocks__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "e6766332f45505179d71fde9bda798a9644286efcb676b4ad14fa232ec2f619e",
+        "experiment_summary.json": "73cb2bd96c7fd4dbf430678eebe519b69c97c6bec6c23e4fd0a2137c34f9ca57",
+        "launch_provenance.json": "6dd6e4e48c5e408f1cc44031b8ebaa6713fcc39de4129d8636963c2830ffbfad",
+        "rank_0_complete.json": "e3456dd63037f499f01d92b583903a11886550555899531e75968a008d59a60d",
+        "rank_1_complete.json": "e23c3ee1c0edc84ff8c715ba8822bdce26ccc85b47e509ba0c21d34feb9507da",
+        "rank_2_complete.json": "a13b8e11c199daabe807577cb21aeba594ff2f55af236df67cf59eaf89d91ba0",
+        "rank_3_complete.json": "aa4d9e12263c26727952e4f96351c76eae60222afd9c18ac3782b15eee400912",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "576419fc95c9034c57824d75466daab820f7fb8cedc6469ae417bdaadae8722c"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/last_two_blocks__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "ed42e4da140d7755f886d8daf9c246e52d000904a7f4c1f3736ad2611452ca5e"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "ed42e4da140d7755f886d8daf9c246e52d000904a7f4c1f3736ad2611452ca5e"
+        }
+      ]
+    },
+    {
+      "best_epoch": 8.0,
+      "best_validation_macro_spearman": 0.16669710827497708,
+      "completion_evidence_verified": true,
+      "config_sha256": "3a9698889836cca48819a1c4162fb87d92a6dd41d330bdc4ccca629e26f34172",
+      "final_validation_macro_spearman": 0.15387883115149414,
+      "id": "last_two_blocks__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "26869a5b027ddb7a58629edf964f26ad2eb4d01d3ff897456f6ca51456faff82",
+        "experiment_summary.json": "0cb8ae48960f8556f4a016a695202d0ace5d7df00acc1ee6e37c1b61a2c32fdd",
+        "launch_provenance.json": "4e60aa34389f416e3cc9a6aba6c44a697b0e27f4e9340442e8bf979919a8454e",
+        "rank_0_complete.json": "0986c8d7393dc3ea15e219ad41f3458d6351f6951f6221d9d1beea0c3d068100",
+        "rank_1_complete.json": "29d2efa68dec84998e140f8f188f55399a99d1cc8521756db56d4f1fb2e9b4b6",
+        "rank_2_complete.json": "8dc2db73df27ddd773fbaa76d751a91fd617afea8e0ef4e1fbe953c8fb759d66",
+        "rank_3_complete.json": "133cc5d6fbc038e223dbdb2711997f35269577676f575d0150aa86fb1c90ed80",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "bf34494466d58421d8df16c646c4e1577aaa1f32c7fb542f82caf6eb9669b291"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/last_two_blocks__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "cc7df02eea93c38202810549722b992533257d1b96cda1687796f68d47657610"
+        },
+        {
+          "path": "checkpoint-7016/pytorch_model.bin",
+          "sha256": "cc7df02eea93c38202810549722b992533257d1b96cda1687796f68d47657610"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "ca532708e24a1460cc5d6b8c8ef3c3e1e2aff4cb9018cf6ca69337865b905953"
+        }
+      ]
+    },
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.3106494259967833,
+      "completion_evidence_verified": true,
+      "config_sha256": "7feea18867996369b3d0eca5e958c34e30227a80ca828bef7b376c2f6900487c",
+      "final_validation_macro_spearman": 0.3106494259967833,
+      "id": "lora4__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "6c434df1dfdeaa95bdfcb90f660824c69659fb2692b849fd2780f0f2a4bd6789",
+        "experiment_summary.json": "8741370e5a2a68583f3e2180e7742515f130095b86703ae90d44341657a7d43b",
+        "launch_provenance.json": "707c64b9a55bdc67f7808cbc269e332264653f06842de6da7b06e4824493dbea",
+        "rank_0_complete.json": "fa491325a6ed3eb62d9a53c6a9a3cabeff9bc36e127d87a3de05a74afdf60c52",
+        "rank_1_complete.json": "6c0877be84b8319f7637e0658968a95c8f01d6d4108410923d634f3ded911740",
+        "rank_2_complete.json": "ccd9002fa77660f76a0a8297631ba2ff0bb83a3876426c30ccd5ea6eaa57f89a",
+        "rank_3_complete.json": "2d05416b2f75861a7977ea864348afe5543434e9817f935200010ad622297c33",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "c91cdefbb39798cd902a1e56d4c9f596db581249eba39249865a0299c7bf77fe"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora4__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "eb8bfc0638b325302c48b21c7e1184b9c8fb828cb5e30eef5302374aedf37461"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "eb8bfc0638b325302c48b21c7e1184b9c8fb828cb5e30eef5302374aedf37461"
+        }
+      ]
+    },
+    {
+      "best_epoch": 11.0,
+      "best_validation_macro_spearman": 0.17134498725701067,
+      "completion_evidence_verified": true,
+      "config_sha256": "a2b1df8e1e77ea2091e4c5c1ed6a43c1b2d7a441eb8e4941e25836f769f848f9",
+      "final_validation_macro_spearman": 0.17124082318880843,
+      "id": "lora4__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "5b78a087180b9d1beee237805e2200960f3133a3b42f40cb5ba3e4c26ed7c3a3",
+        "experiment_summary.json": "813896a9361c1c268ce54339b032c004756a6e0f92e05cb50a11f6b077dbf529",
+        "launch_provenance.json": "467d5618872664f51d622c484d9998f0ba898250b0ef56a7345ac97dd9b5f42a",
+        "rank_0_complete.json": "813494d83eba03489eeb393a9a951ec16a58c892043d2db638f3c2b88ced1a1a",
+        "rank_1_complete.json": "558e80ad98ffad4224004b0fd3d58413c041f0631f924d6e81158494e100d44e",
+        "rank_2_complete.json": "472cf2fead84c07e9fe34859705fb79e0b9b497e63b010a09218aba64f589dc9",
+        "rank_3_complete.json": "b7d2e42577e55577307012dccbb49dca4444748e68bd8baf25fbfd8e63596150",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "e8dd2651744262606e24596a96b991b36ab82ef79eead3e389d44b1634d773f4"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora4__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "bfe0f109f3d0e618fe9c4f88ea5fa226245e40d863eba637f2943a2a8656d51f"
+        },
+        {
+          "path": "checkpoint-9647/pytorch_model.bin",
+          "sha256": "bfe0f109f3d0e618fe9c4f88ea5fa226245e40d863eba637f2943a2a8656d51f"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "f9137a4d7ea1741700e1f5bfb7364c68066068759128737abfeb1387ed36de69"
+        }
+      ]
+    },
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.31663178339156484,
+      "completion_evidence_verified": true,
+      "config_sha256": "d48f38d353d996ae6ccaea53c34e82909a6225873d647d5ca525af0f663e19af",
+      "final_validation_macro_spearman": 0.31663178339156484,
+      "id": "lora16__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "137fe38956c9301d31d01b4fa43c65e81895078b3c554b6ab466ce1db3f9cf49",
+        "experiment_summary.json": "c4ee2ac91890462147f9f9c99a95eab1ce97a9b282cac5d901b18e6a6dbe38d8",
+        "launch_provenance.json": "4ae70d1971539c881e123127763eac61cfb070f8c6fb978334978aa005741bc4",
+        "rank_0_complete.json": "bb581f591a33ca84335234ee9a424768a03dea9d07624b4c10443c69ff60a57f",
+        "rank_1_complete.json": "20d6de254ff49a1b2eb541a9d5f74d2512dfe70bdbeaf390f8691d9f7e2e31a3",
+        "rank_2_complete.json": "f9ef5fba7aaa9e13d75ccab12eb083429504d0449de2712a04017c64cd3c0fb8",
+        "rank_3_complete.json": "5f43a027cb8a9a849cc4c69af0b31176b9aaeca9c2c4521450cee7dc8461afac",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "1bb9d3d387a7b901177e49e344b442f3f45e90d292faa3e5b5063beb832b1a7c"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora16__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "451c83372cdc80a055269a65f5478c1955e02be2d2d42494245d96169c50fb41"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "451c83372cdc80a055269a65f5478c1955e02be2d2d42494245d96169c50fb41"
+        }
+      ]
+    },
+    {
+      "best_epoch": 11.0,
+      "best_validation_macro_spearman": 0.17702552805422156,
+      "completion_evidence_verified": true,
+      "config_sha256": "b8257649c031a3c11322adb9fa3d9812df55715e2afa0a895d8c881f8809352a",
+      "final_validation_macro_spearman": 0.16466729781752318,
+      "id": "lora16__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "57bf68dc478e20613bf9a55eabb574625ad1ec07912f37c91a21e44692de2d49",
+        "experiment_summary.json": "4532373909dbb01c41aa619d58853b9e188865003095eb4ace536396e3d94e5f",
+        "launch_provenance.json": "4fa2df8103fc41363cf8af077052fca4d411871ff80523df7b10f316c0632089",
+        "rank_0_complete.json": "bd3e460e2be2b5d6b88d14557ec195479cde280d0584600852ae7b886076bea7",
+        "rank_1_complete.json": "ce9068c58faf91fef92b80be5d36750f7acf614b9c5bfbc82f3d8e31d09b835b",
+        "rank_2_complete.json": "c23635be5dc0993afac85e908eb7c1d88cc857b003f62dff88b9f704da5f51da",
+        "rank_3_complete.json": "79b832c888a5ceba26ed7bb88185024ecdc74988913e45a0dfeaacca685c92ce",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "a6989548ed9d37e5c7afa7614b8677e57d80da0ae25ff55633ca868df7534e14"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora16__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "6040c7910c3608fe947d394afa9952e82498c19b138ac85622e728a33b2650e3"
+        },
+        {
+          "path": "checkpoint-9647/pytorch_model.bin",
+          "sha256": "6040c7910c3608fe947d394afa9952e82498c19b138ac85622e728a33b2650e3"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "3c3d8c014f342ca41b9a295b1b7296c912e879e5da0ffd68993832befd64dd01"
+        }
+      ]
+    },
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.32330585378633236,
+      "completion_evidence_verified": true,
+      "config_sha256": "b919c8104a0e1babb26ccd1ee28d79d9319b473c6b8bf8d574f9d230b9b53415",
+      "final_validation_macro_spearman": 0.32330585378633236,
+      "id": "lora64__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "3006337189f7aa454e3255923521ad99d9353ff2cfc5d36be2ab66077ca1724a",
+        "experiment_summary.json": "623fd19cd24bf84ef78dce7ba767d47dbfad23f6a29feba61e2532c93564a8a2",
+        "launch_provenance.json": "c8c38337c2809bddbf423c14ae72708de1b556e9f03d1def8c9cbb5edb69ba94",
+        "rank_0_complete.json": "96ed6d3612f184dd7714256715c5b141eddb577950c425e4b35de4d06ba8da58",
+        "rank_1_complete.json": "2dd53153fa91cfc1986badb1033d356eb82b39992b5a76e58dc99c987b591130",
+        "rank_2_complete.json": "87a3012aa7bf21c421ae5f3707f5877d2731c036246855c444a5c6e3f8d8caf2",
+        "rank_3_complete.json": "30ab6ee6b44662ec7035f342614c25186d0f3fb19fb5b95e08a7d5ea50035186",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "7a73a1ca23c92ac7893faeafe3ddf35dc3af6993d09b9f1952cd692c9baba204"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora64__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "43f46aa483b7f2638d5bb99a93844fa9f2ecfd06cf2e81a5995d314a153959db"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "43f46aa483b7f2638d5bb99a93844fa9f2ecfd06cf2e81a5995d314a153959db"
+        }
+      ]
+    },
+    {
+      "best_epoch": 8.0,
+      "best_validation_macro_spearman": 0.1687931133401029,
+      "completion_evidence_verified": true,
+      "config_sha256": "fee2214154b6d679d878a735a7f2b57d9f8c7a6774aaaef75b637a8efc9fcdc0",
+      "final_validation_macro_spearman": 0.16353484757565098,
+      "id": "lora64__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "c492a9a40ee4239741d59a38ef86d9b9d125bb9b69508887397e68180e5ac7d1",
+        "experiment_summary.json": "eef0ec8cfdfb7708b8587fb6072d72360badec7048aacf4b85f2ead1418c0b35",
+        "launch_provenance.json": "c0087a402f5dab6375772b077899adc84f70e830117abc8affebd5f2e4b6f6b6",
+        "rank_0_complete.json": "4bc428c9dbc9f5b58d91a9e6164e5e862fa511400c44a5dad2287af40933df48",
+        "rank_1_complete.json": "eb22fe732cb44959e65718b0660a80812aa0a3205888d68d8fee9598c33f1e69",
+        "rank_2_complete.json": "8ef0fec2e984838f04f54ba0c07e66b6b41d9fb569ca57d72e4f79628c9e6dcd",
+        "rank_3_complete.json": "1928dd5baafb53e01f07164b38d262408649f7cc9130e5be8f294ec7cf33e841",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "a78e4f0d8f979aa8e1ae7a400c43c97f9fab7adf1546a914f591b325da1822a1"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/lora64__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "a02dce45115f73df630f662f0e98fc74246146b99c36a1737a614604c995c7e6"
+        },
+        {
+          "path": "checkpoint-7016/pytorch_model.bin",
+          "sha256": "a02dce45115f73df630f662f0e98fc74246146b99c36a1737a614604c995c7e6"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "9d1932bcde3d97dbb49f341a147dfe769d555c957df261a6aa9d640fd38be69f"
+        }
+      ]
+    },
+    {
+      "best_epoch": 14.0,
+      "best_validation_macro_spearman": 0.3644320221864412,
+      "completion_evidence_verified": true,
+      "config_sha256": "956d11d38651765935fb49d3f7549e004ab1914b647063746fc1a59783bc8268",
+      "final_validation_macro_spearman": 0.36437839806153083,
+      "id": "detach_contrastive__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "02344c6f90383276a97e1b93405a24a0d377fa64c040a69939bba2987ad1b28f",
+        "experiment_summary.json": "d92d78c992e84f20c391120855d6aaeb98be6604f5e33a0c3294dbf95017e89e",
+        "launch_provenance.json": "22fb9e95937d7faa19193f886b199e8a65041623d5fa2286419c650494ba83cd",
+        "rank_0_complete.json": "4920597cb45668b9b08f8f0cafac5816a50579465f2c684f5fcda689cb912d7b",
+        "rank_1_complete.json": "d9ad46d9cd4446747b2634f8584ce346475c23a4aaead41faaa19bd425f9c3f0",
+        "rank_2_complete.json": "6b822d6faeee6c9a5fbef5dfac0dea02877ad76627edaacec1496c3ddc4121bc",
+        "rank_3_complete.json": "517cf13cdedf3b5ea3276702112e1d0ade0adf72728eb5c4110f5e7bc68d0f42",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "513f2fbf03d2c8fc1d3de0af9827e960b7cb54ec075be8ce2126cd38f72359a9"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/detach_contrastive__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "abce67a91100ae7b31e5f8f4264f90186e262e721213da68d07c0a0d2b1a025a"
+        },
+        {
+          "path": "checkpoint-11228/pytorch_model.bin",
+          "sha256": "abce67a91100ae7b31e5f8f4264f90186e262e721213da68d07c0a0d2b1a025a"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "9a164bfc265d5491c7f54cb14f1df9330dad015f2d2d16d56d87a37ff04d286c"
+        }
+      ]
+    },
+    {
+      "best_epoch": 7.0,
+      "best_validation_macro_spearman": 0.1757115996030205,
+      "completion_evidence_verified": true,
+      "config_sha256": "af2231d45a6d7f4ae529c4cf95966436fc798dd3d6c83a4999b8b68777d7b180",
+      "final_validation_macro_spearman": 0.1670765129160489,
+      "id": "detach_contrastive__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "1ae69b459cfc3a7c0a0bdc70a6513b581e4cf70ea21efd4285d840ca766b59a8",
+        "experiment_summary.json": "249e90b98d2b9531baedd513eccd26ca65862f4c7737d2d7d1c967efdf7be8c2",
+        "launch_provenance.json": "4bf43820e699850f3730282b3806e345edb7abdc4bba26973fe7bda297111867",
+        "rank_0_complete.json": "9170a6490faea6aebad03290399015398a72f3d769437bb3961d5b4a75bc53ab",
+        "rank_1_complete.json": "051eb63e437e030f11c23fd5d42f668a75ac72fb595918611b48dd83433f9199",
+        "rank_2_complete.json": "82937a929c03bedcfaa9ac3849a48890d02f0891d188595398c397e47fed83ba",
+        "rank_3_complete.json": "c904b784c611c09a2005e8c879ef6c699835210e9d8276f76d2d986752befedb",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "20763b4a36a291a3e1e08e952df3594739dae0016d1f6d5ef2d90207d5e2640b"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/detach_contrastive__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "2571e3e3d596deba193eb538a9063c0e850790c40ddc09a95a23afa284008724"
+        },
+        {
+          "path": "checkpoint-6139/pytorch_model.bin",
+          "sha256": "2571e3e3d596deba193eb538a9063c0e850790c40ddc09a95a23afa284008724"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "d3f5f4fb9310fc6606e1a480b219eeb5e6d074e3f4958db542393b933b8ac39b"
+        }
+      ]
+    },
+    {
+      "best_epoch": 15.0,
+      "best_validation_macro_spearman": 0.3362930731763899,
+      "completion_evidence_verified": true,
+      "config_sha256": "ae0fdc27185256dae7b1da1065f8539d5a1672e0899256db7925774f967db9ab",
+      "final_validation_macro_spearman": 0.3362930731763899,
+      "id": "listwise_normalized__A__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "eb4711ac4ad88c392d7030542be10e09a1582cd4cc22091862a9c356f419d0e9",
+        "experiment_summary.json": "b92a29a56ebae0fa8d7a3241be21ec306bbff12c8e51bbc13136b754c1c0d31b",
+        "launch_provenance.json": "55e62c9b70ae159617f11d26a1c3b43ff2fc5cd8f4abe848493c640ba870425c",
+        "rank_0_complete.json": "4164ce63d477f3b6970b604385ab0416cdf3a626719c8e7904e4fc9a0af6d132",
+        "rank_1_complete.json": "a8fc4ec02004f71c08630046cfdd4f87ce55c7d562ad08e19f84c3834a57cff3",
+        "rank_2_complete.json": "c69056a186b39d4164f90f89dba6adec96c58a79777624ae3edf57810f9dca1f",
+        "rank_3_complete.json": "f32d6a80f1469ab13b5dae4d6648b503cdca905941648ca0a5d377a01da646ee",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "9393868229d2aa73235ad08c5404fbcd1fde4623a00f4bc2acd5b7b2664b100d"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/listwise_normalized__A__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "f1dbabcc3a7d5852568f1b1d11ac817336df730afcb0048c810cd62f12ea01a1"
+        },
+        {
+          "path": "checkpoint-12030/pytorch_model.bin",
+          "sha256": "f1dbabcc3a7d5852568f1b1d11ac817336df730afcb0048c810cd62f12ea01a1"
+        }
+      ]
+    },
+    {
+      "best_epoch": 5.0,
+      "best_validation_macro_spearman": 0.17121073095630335,
+      "completion_evidence_verified": true,
+      "config_sha256": "750e39f2b46ba9c4f8992cea46bdcea1e5431aeb5c7b388d175dc8e1dbf49e05",
+      "final_validation_macro_spearman": 0.16224004579571935,
+      "id": "listwise_normalized__B__seed42__lr1p0",
+      "native_completion_hashes": {
+        "controlled_run.json": "97af3f3418ea91c492d15c89bf3a06473f3fb31d7413e161bc09f25e53794299",
+        "experiment_summary.json": "2c9f7a08a7161e2a70a378501f01985d86aaee6e0764e100ab66700d91359fa4",
+        "launch_provenance.json": "3cd209eee5234ff7a4562b2b0eacb198ae717ed3c1e95a1cd5893e047cd76670",
+        "rank_0_complete.json": "27ba51dc9a221bf9ef9eef2b917bafbf454e28b0e77b64e9e9a54a8dce1bb421",
+        "rank_1_complete.json": "887eb8f9e3073f818a9cef9ca79606bd0f489cb85bc063bfee45293c356c71bd",
+        "rank_2_complete.json": "3ad1e4025256927659070c7c6206ddf9dc0963af80be1c041dd2039eb82dea34",
+        "rank_3_complete.json": "3dc755a20e1e3fb962bf95dfea611d91f7fea851816db2bf202fb8a644098bc7",
+        "runtime_qualification.json": "eb76fb94195bbb571874112ca6d65f1c3440f2687686f2ce9eb562df7efe1bc4",
+        "trainer_state.json": "47826719afb57ab9d118ce4bca6a47711c27018f3089b1e0070bb75e729728e4"
+      },
+      "output_dir": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/controlled/runs/listwise_normalized__B__seed42__lr1p0",
+      "retained_weight_records": [
+        {
+          "path": "pytorch_model.bin",
+          "sha256": "74010b0e999de17864ba235b1deeba2be04931163cbb34524411c7c8db045922"
+        },
+        {
+          "path": "checkpoint-4385/pytorch_model.bin",
+          "sha256": "74010b0e999de17864ba235b1deeba2be04931163cbb34524411c7c8db045922"
+        },
+        {
+          "path": "checkpoint-13155/pytorch_model.bin",
+          "sha256": "477e62b58f01b1a9a40ece76e8ff123ca359231799c0c12143d648109b827e8f"
+        }
+      ]
+    }
+  ],
+  "controllers": {
+    "requested_handoff_recovery_20261104": {
+      "invocation.json": {
+        "pid": 4128683,
+        "plan_sha256": "5e1d221439def56086221a820eb70161d1e13851054358f56a6dcf6e202c3a75",
+        "started_unix": 1793755617.0189986
+      },
+      "status.json": {
+        "checked_unix": 1794004907.3004174,
+        "completed_jobs": [
+          "frozen__A__seed42__lr1p0",
+          "frozen__B__seed42__lr1p0",
+          "last_two_blocks__A__seed42__lr1p0",
+          "last_two_blocks__B__seed42__lr1p0",
+          "lora4__A__seed42__lr1p0",
+          "lora4__B__seed42__lr1p0",
+          "lora16__A__seed42__lr1p0",
+          "lora16__B__seed42__lr1p0",
+          "lora64__A__seed42__lr1p0",
+          "lora64__B__seed42__lr1p0",
+          "detach_contrastive__A__seed42__lr1p0",
+          "detach_contrastive__B__seed42__lr1p0",
+          "listwise_normalized__A__seed42__lr1p0",
+          "listwise_normalized__B__seed42__lr1p0"
+        ],
+        "error": "training failed; inspect logs/checkpoints before any restart",
+        "error_type": "RuntimeError",
+        "phase": "stopped_for_inspection",
+        "pid": 4128683
+      }
+    },
+    "requested_recovered_probes_20261104": {
+      "invocation.json": {
+        "pid": 4128785,
+        "plan_sha256": "4bb69d5855764e1b6ef0b48597bc5c1b909fd8ed50f22f2e57b65d7aaa06dffd",
+        "started_unix": 1793755624.9882965
+      },
+      "status.json": {
+        "checked_unix": 1794005226.264727,
+        "completed_probes": [],
+        "error": "Reporting stopped; probes cannot start",
+        "error_type": "RuntimeError",
+        "phase": "stopped_for_inspection",
+        "pid": 4128785
+      }
+    },
+    "requested_recovered_reporting_20261104": {
+      "invocation.json": {
+        "pid": 4128768,
+        "plan_sha256": "5674a8d63804b5848bbcb9c95f8664f25ee9fd3c0fcf2508640983bb9ea0b23d",
+        "started_unix": 1793755621.1175504
+      },
+      "status.json": {
+        "checked_unix": 1794005223.2964249,
+        "completed_jobs": [],
+        "error": "Requested training controller ended without completion",
+        "error_type": "RuntimeError",
+        "phase": "stopped_for_inspection",
+        "pid": 4128768
+      }
+    }
+  },
+  "failed_assay_balanced_A_saved_checkpoints": [],
+  "failed_requested_fits": [
+    "assay_balanced__A__seed42__lr1p0"
+  ],
+  "goal_status": "paused",
+  "initial_baseline": {
+    "summary_sha256": "9efbee216ca2c648a55f8629222cfacb8382ba9937d3abf147ece8daaad840fb",
+    "test": 0.1768796098004701,
+    "test_evaluated": "absent_in_historical_schema",
+    "validation": 0.1846001459709722
+  },
+  "normalized_B_checkpoint_bytes_and_31_manifests_verified": true,
+  "normalized_B_matched_validation_probe_exports": 30,
+  "purpose": "User-requested report and experiment stop; no scientific jobs launched",
+  "question_counts": {
+    "answered": 12,
+    "answered_with_limits": 16,
+    "excluded_by_user": 1,
+    "partial": 3,
+    "pending": 2,
+    "total": 34
+  },
+  "requested_fit_counts": {
+    "completed": 14,
+    "failed": 1,
+    "not_started": 9,
+    "total": 24
+  },
+  "server_stop": {
+    "path": "/home/atabey/Prot2Mol/RewardModel/outputs/paired_generalization/protocol_amendments/user_stop_20261109/stop_verified.json",
+    "record": {
+      "boot_id": "866e7b9e-72a4-437f-8ecd-49105d1d18b9",
+      "experiments_started_by_this_request": false,
+      "fix_deployed": false,
+      "goal_status": "paused",
+      "gpu_processes": "GPU-267fec4b-d322-66de-3393-5f58b0890404, 2819322, python\nGPU-afeea7f8-f607-cb89-97c8-ac99899ee835, 3277567, python\n",
+      "project_processes": [],
+      "reason": "Experiment controllers were already terminal after the assay-balanced A evaluation failure; no live project processes found",
+      "request": "User requested stop experiments and report everything completed so far",
+      "server_head": "003cdca9113b94f5412c8fe41f6dbc2e85a05b07",
+      "signals_sent": [],
+      "uid": 1003,
+      "verified_at": "2026-11-09T11:22:19.332790+00:00"
+    },
+    "sha256": "1a61aaaa6b5353956903e178281b985ab6e1c536f34715c154429ba481a213cc"
+  },
+  "source_artifacts": {
+    "artifacts/paired_generalization/user_stop_20261109/native_audit.json": "48fccced1eaa45631502adca59c612afb2cc6f56a0d6bb47a61dc5fa4066a306",
+    "artifacts/paired_generalization/user_stop_20261109/normalized_B_native_comparison_v2.json": "f454c8c52cc4af411d2d66dd1230aa89af49aa98681ce9f5973a7a8a365b5a25",
+    "artifacts/paired_generalization/user_stop_20261109/retention_and_references_v2.json": "956d356c7af61c19464751ebc0be9a3d1983027e02c5435b60ed0e7415a737d3",
+    "artifacts/paired_generalization/user_stop_20261109/stop_verified.json": "dfcf8f19726ceb918014e19f122bbda57cafc2aa8c6b34bf39445e0145de6595"
+  },
+  "test_comparison_status": "Requested 26-model selected-checkpoint comparisons unfinished; initial B selected test and Tier2 tests available",
+  "unstarted_requested_fits": [
+    "assay_balanced__B__seed42__lr1p0",
+    "pairwise_top__A__seed42__lr1p0",
+    "pairwise_top__B__seed42__lr1p0",
+    "pairwise_uniform__A__seed42__lr1p0",
+    "pairwise_uniform__B__seed42__lr1p0",
+    "pairwise_hard_zero_margin__A__seed42__lr1p0",
+    "pairwise_hard_zero_margin__B__seed42__lr1p0",
+    "pairwise_noise_soft__A__seed42__lr1p0",
+    "pairwise_noise_soft__B__seed42__lr1p0"
+  ],
+  "verified_at": "2026-11-09T11:23:03.329412+00:00"
+}

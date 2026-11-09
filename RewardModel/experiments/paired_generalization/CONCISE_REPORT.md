@@ -1,10 +1,98 @@
-# Paired-input ranking generalization: interim evidence report
+# Paired-input ranking generalization: stopped-study report
 
-Snapshot: 2026-11-07. **The study is not complete.** This report follows the
+Snapshot: 2026-11-09. **Experiments stopped at the user's request; the study is not complete.** This report follows the
 [34 questions and experiment specification](<../../../Paired input ranking generalization.md>).
 The [evidence ledger](protocol.json) records every question and all 70 experiment
 entries, including 12 conditional interventions. Artifact locations, hashes and
 qualification limits are in [detailed findings](INTERIM_FINDINGS.md).
+
+**Verified stop:** Atum was reachable on November 9. Two process inventories
+found no project-owned training or controller processes; no termination signal
+was needed. Training had stopped on the assay-balanced A evaluation failure,
+and the reporting/probe controllers had stopped without completing any of their
+queued scientific jobs. The persistent goal is paused. No experiment was
+launched, resumed or rerun for this report. Existing logs, checkpoints and
+prediction files were inspected. The server remains at `003cdca`; the evaluation
+fix is pushed but was not deployed. The server stop receipt is
+`RewardModel/outputs/paired_generalization/protocol_amendments/user_stop_20261109/stop_verified.json`,
+SHA256 `1a61aaaa6b5353956903e178281b985ab6e1c536f34715c154429ba481a213cc`.
+
+**Completed training inventory:** 23 full 15-epoch neural fits: the initial
+fresh scaffold baseline, eight full-model reference/LR/seed fits, and fourteen
+requested fixed-seed variant fits. This excludes small runtime checks and the
+non-neural baseline fits. Of the requested 24 variants, **14 completed, one
+failed, and nine never started**. The earlier seed44 A attempt was cancelled
+and excluded. A completed fit does not mean its selected-test comparison is
+complete. The initial fresh B baseline has a selected test result; the narrowed
+26-model selected-test comparison is unfinished.
+
+**Consolidated fixed-seed results:** Best native validation macro Spearman,
+with each run's selected epoch in parentheses. A is the random-assay split;
+B is the scaffold-component split. A and B evaluate different populations.
+
+| Setting | A | B |
+| --- | ---: | ---: |
+| Full reference | 0.34368 (14) | **0.18458 (6)** |
+| Frozen encoders | 0.34118 (15) | 0.14643 (6) |
+| Last two encoder blocks | 0.34153 (15) | 0.16670 (8) |
+| LoRA rank 4 | 0.31065 (15) | 0.17134 (11) |
+| LoRA rank 16 | 0.31663 (15) | 0.17703 (11) |
+| LoRA rank 64 | 0.32331 (15) | 0.16879 (8) |
+| Detach contrastive encoder gradients | **0.36443 (14)** | 0.17571 (7) |
+| Normalize listwise ranking per group | 0.33629 (15) | 0.17121 (5) |
+
+No completed requested variant beats full B. Detachment improves A but reduces
+B. This is observed single-seed validation evidence, not a completed test-set
+comparison or proof that no other intervention could help. All three objectives
+remain present, with nominal ranking/BCE/contrastive weights 0.25/0.25/1;
+detachment changes gradient flow and normalization changes ranking-loss scale.
+
+**Data and metric work completed:** ChEMBL37 was downloaded and checked, and
+all 1,957,400 curated observations were reconstructed from 2,032,748 retained
+measurements with zero count/median mismatches. Scaffold-component splitting,
+tokenization, partition-local labels, supervision eligibility, protein support,
+replicate disagreement, contrastive masks, frequency skew, metric precision,
+loss/readout trajectories, composition and distribution shift were audited.
+The original random-split pair-median procedure used held-out measurements to
+change 5,289 training labels; controlled fits use partition-local labels.
+Original historical split identity could not be recovered exactly, so this is
+not a byte-identical reconstruction of the original `m5guoqkx` dataset.
+The 34-question table below states the findings and their limits individually.
+
+**Completed inexpensive baselines:** Test macro Spearman as recorded in the
+baseline audit; lookup/identity methods have restricted or undefined coverage.
+The protein-only BCE baseline is reported separately because it gives constant
+within-assay scores (test AUROC A/B: 0.6696/0.6493).
+
+| Baseline | A test | B test |
+| --- | ---: | ---: |
+| Molecule-only ridge | 0.0775 | 0.0624 |
+| Same-protein nearest-scaffold lookup | 0.2572 | Undefined |
+| Independent per-protein ridge | 0.2419 | 0.0726 |
+| Two-step ridge | 0.1034 | 0.0488 |
+| Identity matrix filter | 0.4207 | Undefined |
+| Paired Kronecker ridge | 0.1690 | 0.0631 |
+| Protein-shuffled Kronecker ridge | 0.0662 | 0.0596 |
+| Bilinear inductive completion | 0.2126 | 0.0779 |
+| User-fixed depth-3 LambdaMART | 0.1285 | 0.0607 |
+
+Undefined B scores mean those methods cannot order its within-assay molecules;
+they are not zero correlations. Lookup and identity-filter A coverage is
+79.72% and 93.32%, respectively. The jointly trained initial-B model's cosine
+readout scores 0.06623 on test versus 0.17688 for its ranking head, on the same
+3,972 eligible assays. This is a readout comparison, not contrastive-only training.
+All eleven Tier-2 ledger entries are complete; full details, coverage and
+conditional intervals are in the linked baseline ladder in `INTERIM_FINDINGS.md`.
+
+**Work prepared but not completed:** The selected-checkpoint reporting,
+adaptation, geometry, gradient-cosine, lookahead-transfer and A/B variant-analysis
+code and fixed protocols exist, but the requested scientific results were not
+produced. The separate 10,000-pair SELFormer/MoLFormer/ProtT5 embedding comparison
+has no completed result in this study. Earlier HPO, further seeds, loss-subset
+searches and additional LambdaMART runs were excluded by user amendments.
+The ten unfinished requested fits and remaining analyses are stopped, not queued
+for continuation. Current verification is recorded in
+[the stop evidence](evidence/user_stop_20261109.json).
 
 **Historical ledger:** 23 experiments complete, 12 partial and 35 pending across
 the original 70 entries. These counts include experiments the user subsequently
@@ -67,7 +155,7 @@ for E34–E36, E44–E47, E49–E58, E01–E05, E08–E09 and E19–E20.
 Seed42 has the higher existing B base-LR validation peak (0.18458 versus
 0.17739). The new fixed-configuration queue contains 24 fits (12 requested
 variants on A/B), reusing full A/B42. Evaluation and Tier 4 work remain pending.
-**13/24 requested variant fits are verified complete.** Frozen-encoder A42 completed all
+**14/24 requested variant fits are verified complete.** Frozen-encoder A42 completed all
 15 epochs and selected epoch15, validation macro **0.34118**
 ([run khvzu281](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/khvzu281)).
 It was preserved without retraining. Frozen B42 also completed all 15 epochs:
@@ -104,11 +192,11 @@ at epoch7** and final **0.16708**
 Per-group listwise normalization A42 completed all 15 epochs with best/final
 macro **0.33629 at epoch15**
 ([run 35lhbwgg](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/35lhbwgg)).
-All thirteen retained best-macro checkpoints are verified. Per-group listwise
-normalization B42 was verified training on GPUs 0, 2, 5 and 6 on November 6
+All fourteen retained best-macro checkpoints are verified. Per-group listwise
+normalization B42 completed 15 epochs on GPUs 0, 2, 5 and 6
 ([run djxcgvr9](https://wandb.ai/hubiodatascilab/Prot2Mol_RewardModel/runs/djxcgvr9)).
-**November 7 execution update:** W&B now marks normalized B finished at epoch15;
-native completion and retained-checkpoint verification await restored SSH access.
+**November 9 verification:** Normalized B's native 15-epoch completion,
+best/final checkpoint bytes and 31 prediction manifests are verified on Atum.
 Its exact W&B history peaks at **0.17121 at epoch5** and ends at **0.16224 at
 epoch15**; the subsequent best-score reevaluation is excluded from that final
 epoch value. Both are below full B. The E45 section below records the evidence.
@@ -127,7 +215,8 @@ exports, unequal-assay loss reduction and exact prediction/embedding parity.
 These tests use small encoders and do not constitute Atum GPU validation.
 The tested fix was pushed as `fe5fb5d` on `codex/paired-ranking-generalization`.
 It has not been deployed to Atum, and recovery has not been launched.
-SSH closes at the configured gateway; current server process state is unverified.
+Atum access is restored. The failed attempt has no saved checkpoint directory;
+the user stopped the experiments before any recovery or restart.
 The selected-checkpoint evaluation and comparison reports are now implemented
 for this fixed scope; scientific selected-test results are not yet available.
 Preparation and local scheduling tests add no scientific completion credit.
@@ -315,23 +404,31 @@ normalized trajectory, ranking loss has its minimum at epoch13, BCE at
 epoch11, and total/contrastive losses at epoch15. Validation/probe coverage is
 7,997/2,048 defined eligible assays except normalized validation at epoch14
 (7,996); peak and final coverage agree with full A. These are descriptive
-single-seed native metrics, not independent recalculations. Native verification
-of normalized B, both assay-balanced fits and selected-test comparisons remain
-pending, so E45 is not complete. Evidence:
+single-seed native metrics, not independent recalculations. Both assay-balanced
+fits and selected-test comparisons are unfinished, so E45 is not complete. Evidence:
 `requested_interim/listwise_normalized_A_seed42_native_20261106.json`, SHA256
 `69c0f74a799959565f5ae92cc84956379b84a949f131b4eed44df51d051d687b`.
 
-**Normalized B, W&B evidence while SSH is unavailable:** Both finished runs'
-exact histories contain epochs1–15 at matching optimizer steps, followed by a
+**Normalized B, native verification completed November 9:** Both finished runs'
+histories contain epochs1–15 at matching optimizer steps, followed by a
 separate post-training reevaluation matching each run's best score. Normalized B
 peaks at **0.17121 at epoch5** versus full B's **0.18458 at epoch6** (difference
 **−0.01337**). Its actual epoch15 macro is **0.16224** versus **0.17975**
 (difference **−0.01751**); it is below full B at all 15 logged epochs. The later
 reevaluation at step13155 reports 0.17121 and must not be mistaken for the final
-epoch's score. The uploaded output log also reports no test evaluation. This
-does not verify retained checkpoint bytes, native completion receipts, or
-ordered row/label identity and eligible-assay coverage across these trajectories.
-Local evidence: `artifacts/paired_generalization/reconnect_20261107/normalized_B_wandb_comparison.json`,
+epoch's score. Native receipts confirm no test evaluation. All 30 matched
+validation/probe export pairs have identical ordered identities and labels
+(136,957/43,115 rows). Defined validation/probe assay counts are 3,969/2,047,
+except normalized validation epochs1/11 (3,968) and probe epoch2 (2,046).
+Best/final coverage matches the reference. Final probe macro is 0.50577 versus
+full B's 0.51969. Retained root/best weights have SHA256
+`74010b0e999de17864ba235b1deeba2be04931163cbb34524411c7c8db045922`;
+final weights have SHA256
+`477e62b58f01b1a9a40ece76e8ff123ca359231799c0c12143d648109b827e8f`.
+Local native-comparison evidence:
+`artifacts/paired_generalization/user_stop_20261109/normalized_B_native_comparison_v2.json`,
+SHA256 `f454c8c52cc4af411d2d66dd1230aa89af49aa98681ce9f5973a7a8a365b5a25`.
+Earlier W&B evidence: `artifacts/paired_generalization/reconnect_20261107/normalized_B_wandb_comparison.json`,
 SHA256 `fa0281b5874942e1264c116fbec0fa6e1f4a3d75a8d1de0238947fd533677f04`;
 normalized/full W&B history SHA256 respectively
 `286bf71da91056ce2d08f3c5b5a531e4a08bf2daf28a79a2bfe6ce81cc8ad381` /
@@ -370,7 +467,7 @@ does not imply an unseen scaffold.
 | **Q24 — Batch construction?** | Answered | Batches mix bounded assay lists and classification-only rows. Eligible-list fractions average0.5583/0.5625 on A/B and vary substantially; each epoch-zero ordering has one local batch without a ranking-eligible list. The audit reconstructs the sampler, not historical device traces. |
 | **Q25 — Contrastive false negatives?** | With limits | Own-assay, same-protein and duplicate-query exclusions already exist. Other training-known positives can remain negatives:0.530%/0.714% of audited protein→molecule negative comparisons on A/B. This is a known-positive lower bound. The additional masking experiment is outside the narrowed scope, so its performance effect remains unknown. |
 | **Q26 — Projections before or after fusion?** | Answered | Contrastive projections precede cross-attention and use separate pooled encoder outputs. Ranking and BCE use fused representations. Cross-pair contrastive scores therefore use embedding products. |
-| **Q27 — Ranking-loss normalization?** | Answered | The reference sums weighted Plackett–Luce selections, then averages sampled lists without normalizing by retained weight sum. Larger assays get more bounded-list opportunities, so original assays are not equally weighted. Normalization variants' performance remains pending. |
+| **Q27 — Ranking-loss normalization?** | Answered | The reference sums weighted Plackett–Luce selections, then averages sampled lists without normalizing by retained weight sum. Larger assays get more bounded-list opportunities, so original assays are not equally weighted. Per-group normalization reduces best validation macro on A/B to 0.33629/0.17121 versus 0.34368/0.18458. The separate assay-balanced training comparison is unfinished. |
 | **Q28 — Protein-frequency skew?** | With limits | The top 1% of proteins supply 30.07%/30.64% of A/B assay-list opportunities. The reference has no log-Q correction. Skew is established; use of a learned popularity shortcut is not. |
 | **Q29 — Whole-unit subsets?** | Partial | E41 views use whole assays on A and whole components on B. B's10% of units retains98.86% of rows, limiting saturation conclusions. E40 A views are qualified; strict B matching has no whole-component exchange. E40/E41 performance experiments and the proposed B exception are outside the narrowed active scope; no performance conclusion is claimed. |
 | **Q30 — Loss-alone and pairwise combinations?** | Not run: user scope | No completed loss-subset comparison exists. The user excluded that grid from the active task. Full-model observations cannot identify each loss's contribution; the requested ranking variants and contrastive detachment address different comparisons. |
@@ -379,14 +476,16 @@ does not imply an unseen scaffold.
 | **Q33 — Auxiliary gradient alignment?** | Pending | No scientific gradient-alignment or transfer result yet. Fixed batches and CPU implementation qualification are prepared; actual trained-checkpoint probes remain gated behind the preceding experiments. |
 | **Q34 — How were original weights selected?** | Answered | The user confirmed arbitrary selection of ranking/BCE/contrastive weights 0.25/0.25/1. W&B trials alone did not establish the decision. E39's prospective weight search is excluded from the active scope. |
 
-**Remaining active work:** Complete the 24 fixed-seed requested variant fits,
-the selected-model evaluations for those fits and the two existing full references,
-and the requested adaptation, geometry and gradient/transference probes. Verify
-E01–E05, E08–E09, E19 and E20 against those saved predictions, then update all
-34 answers with the results and explicit limits. E20 is whole-unit bootstrap
+**Unfinished at the user stop (not scheduled):** Ten of the 24 fixed-seed fits
+are incomplete: assay-balanced A failed, and assay-balanced B plus eight pairwise
+fits never started. Selected-model evaluations for the 24 fits and the two full
+references, and the requested adaptation, geometry and gradient/transference
+probes are unfinished. E01–E05, E08–E09, E19 and E20 have existing baseline/audit
+evidence, but their extension to the selected variants and final updates to all
+34 answers were not completed. E20 is whole-unit bootstrap
 uncertainty, not an allocation search. The old E33, multi-seed and parameter-search
 queues are stopped; no compute-budget or within-component exception is awaiting
-approval for this active scope. Unrequested experiments remain incomplete in the
+approval. All experiment queues are stopped. Unrequested experiments remain incomplete in the
 historical ledger and will not be run. No additional LambdaMART fits are planned;
 the fixed depth 3 A/B test results0.12849/0.06071 remain the requested baseline evidence.
 
