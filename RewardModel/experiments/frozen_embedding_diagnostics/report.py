@@ -104,6 +104,12 @@ def report():
     predfile=np.load(primary/'predictions.npz')
     predictions={m:predfile[m] for m in result['metrics']}
     destination=OUT/'shareable';destination.mkdir(exist_ok=True)
+    if __package__:
+        from .verify_outputs import verify
+    else:
+        from verify_outputs import verify
+    verify()
+    shutil.copyfile(source/'independent_verification.json',destination/'independent_verification.json')
     if (source/'inferential_checks.json').exists():
         checks=read_json(source/'inferential_checks.json')
     else:
@@ -245,6 +251,7 @@ No score here establishes that an arbitrary fitted head cannot succeed. No layer
 - `pretrained_minus_random.json`: paired primary differences and conditional intervals.
 - `support_and_distance_strata.json`: primary results by reference support and distance.
 - `sample_summary.json`, `class_swap_coverage.json`, `extraction_checks.json`: sample and execution evidence.
+- `independent_verification.json`: independent per-group rank calculations and direct cosine recomputed from raw pooled vectors.
 
 Original identifiers, source input strings, model identifiers, infrastructure details and private mappings are excluded from this bundle. Exact numerical values can still be matched to other copies; no universal anonymity guarantee is implied.
 '''
