@@ -105,3 +105,33 @@ exclusion in reference construction, held-out-label independence of predictions,
 within-group direction invariance, missing-overlap handling, metric coverage,
 and conditional permutation statistics. These CPU tests are separate from the
 actual frozen encoder exports and measured scientific results.
+
+## Two requested decision follow-ups
+
+`followup.py` scores the existing selected full B reference (epoch 6) with true
+and identity-swapped queries on the original 955 eligible pilot groups. One
+fixed derangement has no self-matches and is consistent across repeated query
+occurrences. Candidates, outcomes, groups, precision and batch padding remain
+fixed. Ranking changes and score offsets are reported separately. Similar
+macro scores do not establish input invariance or equivalence.
+
+The second measurement samples 50 queries with at least 40 eligible training
+groups and five validation groups. Availability and sampling do not inspect
+scores. Forty training groups and five validation groups, ten candidates per
+group, are sampled for each query. Directions use the original frozen candidate
+encoder and final-layer content mean. If m of a query's 40 groups contribute
+pairs above the fixed 0.78 gap, its global control uses exactly m contributing
+groups, one from each of m other selected queries. The global control uses only
+training eligibility and one fixed draw; no query or layer is selected by
+performance. A minimum of 24 contributing groups per selected query is checked
+before inference. Failure does not silently replace the selected query.
+
+Both measurements preserve predictions and independently verify group-wise
+Spearman. Paired split-unit bootstrap intervals, query-cluster sensitivity and
+equal-query differences are reported. The checkpoint and frozen pilot use
+different encoder architectures and scoring paths, so a swap drop cannot isolate
+fine-tuning as the cause. Existing training queues remain stopped. Artifacts
+are isolated under `decision_followup`; the anonymous report includes no model
+names or source inputs. Run with `PYTHONPATH=RewardModel` and
+`python -m experiments.frozen_embedding_diagnostics.followup run` on the authorized
+execution host. The three inference workers use GPUs 0, 2 and 5 only.
