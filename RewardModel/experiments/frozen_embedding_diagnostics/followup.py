@@ -101,8 +101,9 @@ def independent_metric(frame,prediction,expected):
 def prepare():
     runtime();verify_sample()
     if (FOLLOW/'prepared.json').exists():verify_prepared();return
-    if FOLLOW.exists():raise RuntimeError('Inspect incomplete follow-up before reuse')
-    (FOLLOW/'private').mkdir(parents=True)
+    if FOLLOW.exists() and any(p.is_file() for p in FOLLOW.rglob('*')):
+        raise RuntimeError('Inspect incomplete follow-up before reuse')
+    (FOLLOW/'private').mkdir(parents=True,exist_ok=True)
     old_protocol=read_json(OUT/'private/protocol.json')
     for name,expected in old_protocol['source_sha256'].items():
         if digest(ROOT/name)!=expected:raise ValueError('Source dataset changed')
@@ -110,7 +111,7 @@ def prepare():
     if completion['selections']['best_macro']['step']!=5262:raise ValueError('Checkpoint selection changed')
     retained=read_json(RUN/'retained/retention.json')
     weight=digest(CHECKPOINT/'pytorch_model.bin')
-    expected=next(v['sha256'] for v in retained['source_weights'] if v['step']==5262)
+    expected=next(v['sha256'] for v in retained['source_weights'] if v['path']=='checkpoint-5262/pytorch_model.bin')
     if weight!=expected:raise ValueError('Retained selected weights changed')
     raw=pd.read_parquet(OUT/'private/source_rows.parquet')
     anchor=raw[raw.partition=='val'].reset_index(drop=True).copy()
