@@ -160,7 +160,7 @@ def report():
     for label,mask in [(f'training_groups_{n}',groups.x.map(support).to_numpy()==n) for n in sorted(support.unique())]+[(f'neighbour_distance_quartile_{n+1}',distance_bins==n) for n in range(4)]:
         for method in predictions:
             values=groups[method].to_numpy().copy();values[~mask]=np.nan
-            strata.append(dict(stratum=label,method=method,groups=int(mask.sum()),defined_groups=int(np.isfinite(values).sum()),macro_spearman=float(np.nanmean(values)) if np.isfinite(values).any() else None,interval95=evaluation.interval(values)))
+            strata.append(dict(subset=label,method=method,groups=int(mask.sum()),defined_groups=int(np.isfinite(values).sum()),macro_spearman=float(np.nanmean(values)) if np.isfinite(values).any() else None,interval95=evaluation.interval(values)))
     write_json(destination/'support_and_distance_strata.json',strata)
     extraction={}
     for path in (OUT/'embeddings').glob('*/complete.json'):
@@ -175,7 +175,8 @@ def report():
     for method,m in result['metrics'].items():
         ci=m['interval95'];ci_text='undefined' if ci is None else f'[{fmt(ci[0])}, {fmt(ci[1])}]'
         rows.append([method,fmt(m['macro_spearman']),ci_text,str(m['defined_groups']),fmt(m['gap_filtered_pair_accuracy']),fmt(random_results[method]['macro_spearman'])])
-    comparisons=table(['Comparison','Common groups','Difference','95% interval'],[[k,v['common_groups'],fmt(v['difference']),str(v['interval95'])] for k,v in result['comparisons'].items()])
+    comparisons=table(['Comparison','Common groups','Difference','95% interval'],[[k,v['common_groups'],fmt(v['difference']),
+        'undefined' if v['interval95'] is None else '['+', '.join(fmt(x) for x in v['interval95'])+']'] for k,v in result['comparisons'].items()])
     second_rows=[]
     for axis,r in results['pretrained_content_mean_layer12']['second_order'].items():
         second_rows.append([axis,r['status'],r['eligible_edges'],r.get('objects_in_edges',0),fmt(r.get('correlation')),fmt(r.get('p_holm_across_all_cases'))])
@@ -199,6 +200,8 @@ Macro Spearman averages defined within-group correlations among eligible groups.
 {table(['Readout','Macro Spearman','95% interval','Defined groups','Gap-filtered pair accuracy','Random encoders'],rows)}
 
 {comparisons}
+
+The global direction has the highest score among the fixed primary readouts. The own-query direction is worse on mutually defined groups. The same-query neighbour advantage and the nearest-query borrowing advantage both have intervals spanning zero. Direct native cosine also has an interval spanning zero. This pilot therefore detects candidate-only linear structure, while providing no clear evidence of an additional query-specific advantage under these readout rules and this small per-query reference library. It does not establish that such information is absent.
 
 ## Measurement 1: agreement versus distance
 
