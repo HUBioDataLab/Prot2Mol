@@ -22,7 +22,9 @@ the execution host.
 - The primary readout uses pretrained final-layer content-mean embeddings.
   Embedding stage 0 and all twelve blocks, two poolings, and one random encoder
   initialization are also reported: 52 cases, with no best-layer selection.
-- Both native widths are 768. Content mean excludes padding and special tokens;
+- Both native widths are 768. The query checkpoint uses its published expanded
+  symbol vocabulary and fixed four-token example prefix. Query unknown tokens
+  are forbidden. Content mean excludes padding, special tokens and that prefix;
   first-token pooling uses the actual first token. Token caps are 1,024 and 202.
   Truncation and repeated-forward determinism are recorded. Parameters are
   hashed before and after extraction. No weights or token arrays are published.
@@ -70,7 +72,8 @@ claim and no matched comparison to earlier full-cohort models.
 
 `study.py prepare` freezes data membership and provenance. `extract_all.py`
 downloads pinned model revisions and runs the four extraction workers.
-`analysis.py` computes all 52 cases. `report.py` performs the fixed additional
+`analyze_all.py` assigns the 52 cases to four disjoint workers and verifies them
+before finalization. `report.py` performs the fixed additional
 null checks, writes the anonymous tables and plots, scans shared text/schema,
 and produces a ZIP with standardized metadata. Scientific commands enforce
 the authorized execution directory and GPU environment.
@@ -80,6 +83,14 @@ directory contains original inputs, model specifications and mappings and is
 excluded from the shareable bundle. Exact numerical values remain potentially
 matchable to other copies. Existing untracked files and earlier experiment
 outputs are untouched.
+
+An initial input serialization mistakenly used the single-character format of
+a different query checkpoint. The tokenizer audit identified unknown-token
+collapse. Those exports and all derived analyses were rejected and archived
+privately; sample membership was retained. Input-contract version 2 uses the
+checkpoint's published vocabulary and prefix, records unknown-token counts,
+and is required by the report writer. Preliminary query-dependent numbers from
+the rejected extraction must not be interpreted as model evidence.
 
 Local qualification:
 
