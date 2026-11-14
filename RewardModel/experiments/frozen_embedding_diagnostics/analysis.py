@@ -200,7 +200,7 @@ def profile_edges(frame,axis,min_overlap=5):
         if np.ptp(a)==0 or np.ptp(b)==0:continue
         ra,rb=rankdata(a),rankdata(b)
         rho=float(np.corrcoef(ra,rb)[0,1])
-        records.append((i,j,rho,int(mask.sum())))
+        records.append((int(i),int(j),rho,int(mask.sum())))
     return dict(ids=table.index.tolist(),edges=records,object_support=present.sum(1).tolist(),min_overlap=min_overlap)
 
 

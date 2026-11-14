@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import json
 
 from experiments.frozen_embedding_diagnostics.analysis import (
     Evaluation,directions,neighbour_readouts,permutation_indices,profile_edges,
@@ -60,6 +61,23 @@ def test_no_shared_candidates_means_no_profile_edges():
     profile=profile_edges(frame(),'query')
     assert profile['edges']==[]
     assert second_order(profile,np.eye(3))['status']=='insufficient_overlap'
+
+
+def test_shared_profiles_serialize_without_turning_missing_values_into_zero():
+    f=frame()
+    f['y']=[f'Y{i%10:06d}' for i in range(len(f))]
+    profile=profile_edges(f,'query')
+    assert len(profile['edges'])==3
+    assert all(np.isclose(e[2],1) and e[3]==10 for e in profile['edges'])
+    json.dumps(profile,allow_nan=False)
+
+
+def test_conditional_null_retains_groups_and_detects_perfect_order():
+    from experiments.frozen_embedding_diagnostics.report import conditional_label_null
+    f=frame('val');e=Evaluation(f)
+    result=conditional_label_null(e,{'perfect':f.s.to_numpy(),'constant':np.zeros(len(f))},draws=99)
+    assert result['perfect']['p_one_sided']==.01
+    assert result['constant']['p_one_sided']==1
 
 
 def test_inverse_distance_readout_and_missing_reference():
