@@ -124,15 +124,23 @@ def report():
     write_json(destination/'all_measurements.json',results)
     write_json(destination/'inferential_checks.json',checks)
     summary=read_json(OUT/'sample_summary.json');write_json(destination/'sample_summary.json',summary)
+    frame.to_parquet(destination/'anonymous_sample.parquet',index=False)
+    shutil.copyfile(source/'profile_overlap.json',destination/'profile_overlap.json')
     swap=read_json(source/'class_swap_coverage.json');write_json(destination/'class_swap_coverage.json',swap)
     for name in ('distance_curves.parquet','class_swap_curves.parquet','label_shuffle_curves.parquet','groups.parquet'):
         shutil.copyfile(primary/name,destination/('primary_'+name))
     # Every curve and group statistic is retained; no original identity map or inputs.
-    curves=[]
+    curves=[];prediction_tables=[]
     for case in sorted(source.glob('*_layer*')):
+        stored=np.load(case/'predictions.npz')
+        predictions_frame=pd.DataFrame({k:stored[k] for k in stored.files})
+        predictions_frame['validation_row']=np.arange(len(val))
+        predictions_frame['case']=case.name
+        prediction_tables.append(predictions_frame)
         for mode,file in [('native','distance_curves.parquet'),('class_swap','class_swap_curves.parquet'),('label_shuffle','label_shuffle_curves.parquet')]:
             part=pd.read_parquet(case/file);part['case']=case.name;part['control']=mode;curves.append(part)
     pd.concat(curves,ignore_index=True).to_parquet(destination/'all_distance_curves.parquet',index=False)
+    pd.concat(prediction_tables,ignore_index=True).to_parquet(destination/'all_validation_predictions.parquet',index=False)
     groups=pd.read_parquet(primary/'groups.parquet')
     random=pd.read_parquet(source/'random_content_mean_layer12/groups.parquet')
     pretraining={m:dict(common_groups=int((groups[m].notna()&random[m].notna()).sum()),difference=float((groups[m]-random[m]).mean()) if (groups[m].notna()&random[m].notna()).any() else None,
@@ -221,7 +229,7 @@ The primary readouts additionally have a 999-draw conditional validation-label n
 
 ![Layer profiles](layer_profiles.png)
 
-Mean pooling excludes padding and special tokens. First-token pooling uses the actual first token: it is a content token for X and a start token for Y. Stages 0–12 include the embedding stage and all twelve blocks; the final stage uses each encoder's normalized final output. Native sequence limits were fixed at 1,024 tokens for X and 202 for Y. **{qtrunc} query inputs and {ytrunc} candidate inputs were truncated**; these results therefore concern those representations, including truncation. All extracted pooled vectors were finite and stored in float32 after inference with reduced-precision arithmetic.
+Mean pooling excludes padding and special tokens. First-token pooling uses the actual first token: it is a content token for X and a start token for Y. Stages 0–12 include the embedding stage and all twelve blocks; the final stage uses each encoder's normalized final output. Input token caps were fixed at 1,024 for X and 202 for Y. **{qtrunc} query inputs and {ytrunc} candidate inputs were truncated**; these results therefore concern those representations, including truncation. All extracted pooled vectors were finite and stored in float32 after inference with reduced-precision arithmetic.
 
 No score here establishes that an arbitrary fitted head cannot succeed. No layer, pooling, neighbour setting, random initialization or threshold was selected by validation performance. These are frozen diagnostic readouts on a fixed validation cohort.
 
@@ -230,6 +238,8 @@ No score here establishes that an arbitrary fitted head cannot succeed. No layer
 - `all_readouts.csv`: every native ranking readout across all 52 cases.
 - `all_measurements.json`: all metrics, paired comparisons, controls, distances and profile tests.
 - `all_distance_curves.parquet`: every distance curve and its support counts.
+- `anonymous_sample.parquet`, `all_validation_predictions.parquet`: the anonymous fixed observations and every native validation prediction; validation row indices refer to the validation subset in stored order.
+- `profile_overlap.json`: anonymous profile objects, observed overlap counts and qualifying profile edges.
 - `primary_groups.parquet`: anonymized group-level primary correlations.
 - `inferential_checks.json`: conditional label and coordinate-permutation distributions summarized without selecting a winner.
 - `pretrained_minus_random.json`: paired primary differences and conditional intervals.
