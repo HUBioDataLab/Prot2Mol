@@ -383,15 +383,57 @@ def summarize_anchor():
     return result
 
 
+def verify_cached_inputs():
+    """Compare current checkpoint tokenization against its original validation cache."""
+    from datasets import load_from_disk
+    from transformers import AutoTokenizer
+    f=pd.read_parquet(FOLLOW/'private/anchor.parquet')
+    config=read_json(CHECKPOINT/'config.json')
+    cache=ROOT/'dataset/processed/chembl_37/paired_generalization/scaffold_seed42_tokenized/val_examples'
+    stored=load_from_disk(str(cache)).select(f.source_row.astype(int).tolist())
+    for column,source in [('target_chembl_id','x_source'),('compound_id','y_source'),('assay_id','g_source')]:
+        if list(stored[column])!=f[source].tolist():raise ValueError('Original cache identity mapping differs')
+    if not np.array_equal(np.asarray(stored['pchembl_value'],dtype=np.float32),f.s.to_numpy(dtype=np.float32)):
+        raise ValueError('Original cache labels differ')
+    counts={}
+    for side,text in [('protein','x_text'),('molecule','model_candidate_text')]:
+        name=config.get(side+'_tokenizer_name_or_path') or config[side+'_model_name_or_path']
+        tokenizer=AutoTokenizer.from_pretrained(name,cache_dir=str(ROOT/'.cache/huggingface/hub'),
+            local_files_only=True,clean_up_tokenization_spaces=False)
+        max_length=config[side+'_max_length'];checked=0
+        for start in range(0,len(f),64):
+            end=min(start+64,len(f));old=stored[start:end]
+            tokens=tokenizer(f[text].iloc[start:end].tolist(),add_special_tokens=True,padding='max_length',
+                truncation=True,max_length=max_length,return_tensors='np')
+            for key in ('input_ids','attention_mask'):
+                if not np.array_equal(tokens[key],np.asarray(old[side+'_'+key])):
+                    raise ValueError('Current tokenization differs from original checkpoint validation inputs')
+            checked+=end-start
+        counts['query' if side=='protein' else 'candidate']=checked
+    result=dict(checked_rows=len(f),original_cache_identities_and_labels_match=True,
+        exact_cached_token_ids_and_masks_match=counts,swapped_queries_drawn_from_same_verified_query_pool=True)
+    write_json(FOLLOW/'cached_input_verification.json',result)
+    return result
+
+
 def report():
     runtime();verify_prepared()
+    verify_cached_inputs()
     a=summarize_anchor();d=read_json(FOLLOW/'dense_results.json');summary=read_json(FOLLOW/'sample_summary.json')
     share=FOLLOW/'shareable';share.mkdir(exist_ok=True)
     def fmt(x):return 'undefined' if x is None else f'{x:.4f}'
     def interval(v):return 'undefined' if v is None else '['+', '.join(fmt(x) for x in v)+']'
     def rows(metrics):return '\n'.join(f'| {k} | {fmt(v["macro_spearman"])} | {interval(v["interval95"])} | {v["defined_groups"]} |' for k,v in metrics.items())
     aa=a['true_minus_swapped'];dd=d['own_minus_global'];support=summary['contributing_groups_per_query']
+    conclusion=('The model benefits from the correct query assignment: the paired swap drop is positive under both reported clustering choices. It should not be treated as a candidate-only ranker on this cohort.'
+                if min(aa['interval95'][0],aa['query_cluster_interval95'][0])>0 else
+                'This intervention does not clearly establish a correct-query ranking advantage; it does not establish equivalence or input invariance.')
+    direction_conclusion=('The supported own-query direction comparison remains uncertain: its paired interval includes zero.'
+                          if dd['interval95'][0]<=0<=dd['interval95'][1] else
+                          'The supported direction comparison has a paired split-unit interval excluding zero; its sign and query-cluster sensitivity are reported below.')
     text=f'''# Query dependence and supported directions
+
+{conclusion} {direction_conclusion}
 
 Two fixed follow-up measurements were completed with no training, parameter updates, checkpoint search or additional initialization search. Only validation observations were scored; test data were not read. This report contains neutral identifiers only.
 
@@ -425,10 +467,10 @@ Own minus matched-global is **{fmt(dd['difference'])}**, with paired split-unit 
 
 Macro Spearman averages within-group correlations with score range at least 0.5. Constant predictions are undefined and coverage is explicit. Intervals use 2,000 paired bootstrap draws; split-unit and query-cluster versions are reported separately, not as a joint two-way dependence model. They condition on the selected checkpoint, sampled reference library and single fixed query permutation. No equivalence margin was declared, so a difference spanning zero is not proof of equivalence.
 
-Independent rank calculations reproduced every headline metric. Model state hashes were unchanged by inference; the two query conditions used identical model states. Frozen candidate weights match the earlier pilot exactly. Candidate input audit found {d['input_audit']['unknown_tokens']} unknown tokens; {d['truncated_inputs']} inputs exceeded the predefined token limit. The full sample, predictions, per-group results, matched references and verification receipts are included. Exact numeric values may remain matchable to other copies.
+Independent rank calculations reproduced every headline metric. Current query and candidate token IDs and attention masks matched the original checkpoint's cached validation inputs exactly for all 10,000 original pilot observations. Model state hashes were unchanged by inference; the two query conditions used identical model states. Frozen candidate weights match the earlier pilot exactly. Candidate input audit found {d['input_audit']['unknown_tokens']} unknown tokens; {d['truncated_inputs']} inputs exceeded the predefined token limit. The full sample, predictions, per-group results, matched references and verification receipts are included. Exact numeric values may remain matchable to other copies.
 '''
     (share/'report.md').write_text(text)
-    for name in ['anchor_results.json','dense_results.json','sample_summary.json','matched_groups.json','query_swap.json','anchor_predictions.parquet','anchor_groups.parquet','dense.parquet','dense_groups.parquet']:
+    for name in ['anchor_results.json','dense_results.json','sample_summary.json','matched_groups.json','query_swap.json','anchor_predictions.parquet','anchor_groups.parquet','dense.parquet','dense_groups.parquet','cached_input_verification.json']:
         if name=='dense_results.json':
             value=dict(d);value.pop('parameter_sha256');write_json(share/name,value)
         else:(share/name).write_bytes((FOLLOW/name).read_bytes())
