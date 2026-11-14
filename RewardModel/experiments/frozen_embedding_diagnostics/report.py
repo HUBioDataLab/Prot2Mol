@@ -164,7 +164,10 @@ def report():
     write_json(destination/'support_and_distance_strata.json',strata)
     extraction={}
     for path in (OUT/'embeddings').glob('*/complete.json'):
-        r=read_json(path);extraction[path.parent.name]={k:r[k] for k in ['shape','parameters_unchanged','optimizer_created','repeat_forward_max_abs_difference','truncated_inputs','input_tokens_quantiles','max_length']}
+        r=read_json(path)
+        if r.get('input_contract_version')!=2 or (r['side']=='query' and r['input_audit']['unknown_tokens']!=0):
+            raise ValueError('Only input-validated corrected exports may be reported')
+        extraction[path.parent.name]={k:r[k] for k in ['shape','parameters_unchanged','optimizer_created','repeat_forward_max_abs_difference','truncated_inputs','input_tokens_quantiles','max_length','input_audit','prefix_tokens','input_contract_version']}
     write_json(destination/'extraction_checks.json',extraction)
     create_plots(source,destination,all_readouts,predfile)
     rows=[]
@@ -181,7 +184,7 @@ def report():
 
 This study uses two independent 768-dimensional encoders, X and Y. It makes no parameter updates and fits no optimized head. The fixed cohort contains **20,000 observed pairs**: 10,000 training references and 10,000 validation observations. It contains **697 distinct queries and 18,565 distinct candidates**, with 1,000 groups and exactly 10 distinct candidates per group in each partition. The two partitions share the queries and share no candidate identities, candidate categories or original split units.
 
-The primary specification was fixed before analysis: **pretrained final-layer content-mean pooling**. Every embedding stage/block (0–12), both content-mean and first-token pooling, and one random initialization of each encoder are retained. The resulting 52 representation cases are descriptive comparisons, not a search for a best test layer. All four prior extraction processes completed with unchanged parameters and identical repeated forwards. No old experiment queue was resumed.
+The primary specification was fixed before analysis: **pretrained final-layer content-mean pooling**. Every embedding stage/block (0–12), both content-mean and first-token pooling, and one random initialization of each encoder are retained. The resulting 52 representation cases are descriptive comparisons, not a search for a best test layer. All four corrected extraction processes completed with unchanged parameters and identical repeated forwards. No old experiment queue was resumed. An initial query-input serialization error was detected and its exports and derived results were rejected. This report uses only the corrected, input-validated exports; the selected observations did not change.
 
 ## Sample and interpretation
 
@@ -235,7 +238,7 @@ The primary readouts additionally have a 999-draw conditional validation-label n
 
 ![Layer profiles](layer_profiles.png)
 
-Mean pooling excludes padding and special tokens. First-token pooling uses the actual first token: it is a content token for X and a start token for Y. Stages 0–12 include the embedding stage and all twelve blocks; the final stage uses each encoder's normalized final output. Input token caps were fixed at 1,024 for X and 202 for Y. **{qtrunc} query inputs and {ytrunc} candidate inputs were truncated**; these results therefore concern those representations, including truncation. All extracted pooled vectors were finite and stored in float32 after inference with reduced-precision arithmetic.
+Mean pooling excludes padding, special tokens and X's fixed four-token documented input prefix. First-token pooling uses that prefix's first token for X and a start token for Y. The prefix is fixed for every query and contains no observation labels. Stages 0–12 include the embedding stage and all twelve blocks; the final stage uses each encoder's normalized final output. Input token caps were fixed at 1,024 for X and 202 for Y. **{qtrunc} query inputs and {ytrunc} candidate inputs were truncated**; these results therefore concern those representations, including truncation. Unknown-token coverage is recorded in `extraction_checks.json`; all query symbols must be recognized. All extracted pooled vectors were finite and stored in float32 after inference with reduced-precision arithmetic.
 
 No score here establishes that an arbitrary fitted head cannot succeed. No layer, pooling, neighbour setting, random initialization or threshold was selected by validation performance. These are frozen diagnostic readouts on a fixed validation cohort.
 

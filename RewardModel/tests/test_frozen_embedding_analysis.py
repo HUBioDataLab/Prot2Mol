@@ -80,6 +80,11 @@ def test_conditional_null_retains_groups_and_detects_perfect_order():
     assert result['constant']['p_one_sided']==1
 
 
+def test_constant_profile_geometry_is_undefined_not_zero_correlation():
+    profile=dict(ids=list(range(6)),edges=[(i,j,float(i-j),5) for i in range(6) for j in range(i+1,6)],object_support=[5]*6,min_overlap=5)
+    assert second_order(profile,np.ones((6,8)))['status']=='undefined_constant_embedding_similarity'
+
+
 def test_inverse_distance_readout_and_missing_reference():
     p,d=weighted_neighbours(np.array([[1.,.5]]),np.array([3.,9.]),k=1)
     assert p[0]==3 and d[0]==0

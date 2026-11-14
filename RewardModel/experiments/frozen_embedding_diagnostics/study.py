@@ -28,6 +28,47 @@ MODELS = {
     "candidate": {"id": "ibm-research/MoLFormer-XL-both-10pct", "revision": "361063d0ad524ef77cf39b08469f6be770dc550f", "max_length": 202},
 }
 SEED = 42
+QUERY_PREFIX = "predict protein ms : "
+QUERY_SYMBOLS = dict(zip("ACDEFGHIKLMNPQRSTVWY", ["Ala","Cys","Asp","Glu","Phe","Gly","His","Ile","Lys","Leu","Met","Asn","Pro","Gln","Arg","Ser","Thr","Val","Trp","Tyr"]))
+QUERY_SYMBOLS.update(B="Asx",Z="Glx",U="Sec",O="Pyl",X="Xaa",J="Xaa")
+
+
+def format_query_input(sequence):
+    """Use this checkpoint's published vocabulary and fixed example prefix.
+
+    Source: pinned repository README widget. This MT checkpoint does NOT use
+    the single-character vocabulary of the differently sized XL checkpoint.
+    """
+    sequence=str(sequence).strip().upper()
+    if not sequence or any(c not in QUERY_SYMBOLS for c in sequence):
+        raise ValueError("Unexpected query alphabet")
+    return QUERY_PREFIX+" ".join(QUERY_SYMBOLS[c] for c in sequence)
+
+
+def token_audit(tokenizer,texts):
+    records=[tokenizer(t,add_special_tokens=True,truncation=False)['input_ids'] for t in texts]
+    counts=np.array([len(ids) for ids in records])
+    unknown=np.array([sum(i==tokenizer.unk_token_id for i in ids) for ids in records])
+    return counts,dict(total_tokens=int(counts.sum()),unknown_tokens=int(unknown.sum()),inputs_with_unknown=int((unknown>0).sum()),
+        unique_tokenized_inputs=len({tuple(ids) for ids in records}),inputs=len(texts))
+
+
+def archive_invalid_encoding():
+    runtime();verify_sample()
+    old=read_json(OUT/'embeddings/query_pretrained/complete.json')
+    if old.get('input_contract_version',1)!=1:
+        raise RuntimeError('Refusing to archive a corrected extraction')
+    destination=OUT/'private/rejected_input_contract_v1'
+    destination.mkdir(exist_ok=False)
+    for name in ('embeddings','analysis','shareable','frozen_representation_pilot.zip','study_complete.json','extraction_exit.json'):
+        path=OUT/name
+        if path.exists():path.rename(destination/name)
+    write_json(destination/'INVALID.json',dict(reason='Original query formatter generated unknown tokens; preliminary query-dependent measurements are invalid and must not be reported.',
+        sample_membership_unchanged=True,candidate_input_format_unchanged=True))
+    write_json(OUT/'private/input_contract_v2.json',dict(query_prefix=QUERY_PREFIX,query_symbols=QUERY_SYMBOLS,
+        query_unknown_tokens_allowed=0,mean_pool_excludes_prefix=True,
+        reference='https://huggingface.co/Rostlab/prot_t5_base_mt_uniref50/blob/3fb12c6025327b105f6f602827a5f66259f334f9/README.md',
+        correction='Fixed input serialization, not a parameter or performance search; sample identities and outcomes unchanged'))
 
 
 def write_json(path, value):
@@ -249,14 +290,21 @@ def extract(side, state, gpu):
     records=pd.read_parquet(OUT/"private"/(side+".parquet"))
     texts=records.text.astype(str).tolist()
     if side=="query":
-        texts=[" ".join(re.sub(r"[UZOB]","X",t)) for t in texts]
+        texts=[format_query_input(t) for t in texts]
     else:
         from rdkit import Chem,RDLogger
         RDLogger.DisableLog("rdApp.*")
         mols=[Chem.MolFromSmiles(t) for t in texts]
         if any(m is None for m in mols): raise ValueError("Unparseable candidate input")
         texts=[Chem.MolToSmiles(m,canonical=True,isomericSmiles=False) for m in mols]
-    lengths=np.array([len(tokenizer(t,add_special_tokens=True,truncation=False)["input_ids"]) for t in texts])
+    lengths,audit=token_audit(tokenizer,texts)
+    if side=='query' and audit['unknown_tokens']:
+        raise ValueError('The query input contract must encode every symbol without unknown tokens')
+    if audit['unknown_tokens']/max(1,audit['total_tokens'])>.01:
+        raise ValueError('Excessive unknown token rate')
+    prefix_tokens=len(tokenizer(QUERY_PREFIX,add_special_tokens=False)['input_ids']) if side=='query' else 0
+    if side=='query' and prefix_tokens!=4:raise ValueError('Native fixed prefix must contain exactly four tokens')
+    write_json(output/'input_audit.json',dict(**audit,prefix_tokens=prefix_tokens,input_contract_version=2))
     order=np.argsort(lengths,kind="stable")
     # All tensors are saved as float32 pooled vectors; no full token arrays persist.
     arrays={pool:np.lib.format.open_memmap(output/(pool+".npy"),mode="w+",dtype="float32",shape=(13,len(records),768)) for pool in ("content_mean","first_token")}
@@ -268,6 +316,7 @@ def extract(side, state, gpu):
         special=batch.pop("special_tokens_mask").to("cuda:0").bool()
         batch={k:v.to("cuda:0") for k,v in batch.items() if k in ("input_ids","attention_mask")}
         content=batch["attention_mask"].bool() & ~special
+        if prefix_tokens:content[:,:prefix_tokens]=False
         if not content.any(dim=1).all(): raise ValueError("An input has no content tokens")
         with torch.inference_mode(),torch.autocast("cuda",dtype=torch.bfloat16):
             result=model(**batch,output_hidden_states=True,return_dict=True)
@@ -297,19 +346,21 @@ def extract(side, state, gpu):
         sample_sha256=digest(OUT/"sample.parquet"),truncated_inputs=int((lengths>spec["max_length"]).sum()),
         input_tokens_quantiles={str(q):float(np.quantile(lengths,q)) for q in (0,.5,.9,.99,1)},
         max_length=spec["max_length"],seconds=time.time()-start,torch=torch.__version__,transformers=transformers.__version__,
-        files={p.name:digest(p) for p in [output/"ids.json",output/"content_mean.npy",output/"first_token.npy"]})
+        input_audit=audit,input_contract_version=2,prefix_tokens=prefix_tokens,
+        files={p.name:digest(p) for p in [output/"ids.json",output/"content_mean.npy",output/"first_token.npy",output/'input_audit.json']})
     write_json(output/"complete.json",receipt)
     print(side,state,"COMPLETE",flush=True)
 
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("action",choices=["prepare","download","extract"])
+    parser.add_argument("action",choices=["prepare","download","extract","archive-invalid"])
     parser.add_argument("--side",choices=list(MODELS))
     parser.add_argument("--state",choices=["pretrained","random"],default="pretrained")
     parser.add_argument("--gpu",type=int)
     args=parser.parse_args()
     if args.action=="prepare":prepare()
+    elif args.action=='archive-invalid':archive_invalid_encoding()
     elif args.action=="download":model_download(args.side)
     else:extract(args.side,args.state,args.gpu)
 

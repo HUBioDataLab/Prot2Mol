@@ -210,6 +210,8 @@ def second_order(profile,vectors,permutations=999):
         return dict(status='insufficient_overlap',eligible_edges=len(edges),objects=len(profile['ids']),minimum_overlap=profile['min_overlap'])
     edges=np.array(edges);i,j=edges[:,:2].astype(int).T
     similarities=np.clip(unit_vectors(vectors)@unit_vectors(vectors).T,-1,1)
+    if np.ptp(similarities[i,j])==0:
+        return dict(status='undefined_constant_embedding_similarity',eligible_edges=len(edges),objects=len(vectors),minimum_overlap=profile['min_overlap'])
     target=rankdata(edges[:,2]);target-=target.mean();target/=np.linalg.norm(target)
     def statistic(order):
         r=rankdata(similarities[order[i],order[j]]);r-=r.mean();den=np.linalg.norm(r)
@@ -315,7 +317,31 @@ def case_analysis(frame,x_vectors,y_vectors,x_lookup,y_lookup,profiles,pairs,dev
     return result,predictions,group_table,distance_curves(train,pairs,y_vectors,y_lookup),distances
 
 
-def analyze(gpu=0):
+def prepare_analysis():
+    frame=verify_sample();destination=OUT/'analysis';destination.mkdir(exist_ok=True)
+    train=frame[frame.partition=='train'].reset_index(drop=True)
+    profiles={axis:profile_edges(train,axis) for axis in ('query','category')}
+    write_json(destination/'profile_overlap.json',profiles)
+    pair_design(train).to_parquet(destination/'curve_pairs.parquet',index=False)
+    write_json(destination/'design.json',dict(sample_sha256=digest(OUT/'sample.parquet'),cases=52))
+
+
+def finalize_analysis():
+    destination=OUT/'analysis';rows=[]
+    for state in ('pretrained','random'):
+        for pool in ('content_mean','first_token'):
+            for layer in range(13):
+                case=destination/f'{state}_{pool}_layer{layer:02d}'
+                receipt=read_json(case/'complete.json')
+                for name,sha in receipt['files'].items():
+                    if digest(case/name)!=sha:raise ValueError('Case evidence changed')
+                saved=read_json(case/'results.json')
+                for method,metrics in saved['metrics'].items():rows.append(dict(state=state,pooling=pool,layer=layer,method=method,**metrics))
+    pd.DataFrame(rows).to_parquet(destination/'all_readouts.parquet',index=False)
+    write_json(destination/'complete.json',dict(cases=52,fits=0,updates=0,sample_sha256=digest(OUT/'sample.parquet')))
+
+
+def analyze(gpu=0,worker=0,workers=1):
     import os
     runtime()
     if gpu not in GPUS or os.environ.get('CUDA_VISIBLE_DEVICES')!=GPUS[gpu]:raise RuntimeError('Unauthorized analysis GPU')
@@ -324,10 +350,10 @@ def analyze(gpu=0):
     torch.backends.cuda.matmul.allow_tf32=False
     frame=verify_sample()
     destination=OUT/'analysis';destination.mkdir(exist_ok=True)
-    train=frame[frame.partition=='train'].reset_index(drop=True)
-    profiles={axis:profile_edges(train,axis) for axis in ('query','category')}
-    write_json(destination/'profile_overlap.json',profiles)
-    pairs=pair_design(train);pairs.to_parquet(destination/'curve_pairs.parquet',index=False)
+    profiles=read_json(destination/'profile_overlap.json')
+    pairs=pd.read_parquet(destination/'curve_pairs.parquet')
+    if read_json(destination/'design.json')['sample_sha256']!=digest(OUT/'sample.parquet'):
+        raise ValueError('Analysis design and sample differ')
     models={}
     for state in ('pretrained','random'):
         models[state]={}
@@ -342,12 +368,14 @@ def analyze(gpu=0):
             models[state][side]=dict(ids=ids,lookup={v:i for i,v in enumerate(ids)},
                 arrays={pool:np.load(directory/(pool+'.npy'),mmap_mode='r') for pool in ('content_mean','first_token')})
     swaps,swap_summary=permutation_indices(frame,models['pretrained']['candidate']['ids'])
-    write_json(destination/'class_swap_coverage.json',swap_summary)
-    rows=[];start=time.time()
+    if worker==0:write_json(destination/'class_swap_coverage.json',swap_summary)
+    rows=[];start=time.time();case_number=-1
     for state in ('pretrained','random'):
         model=models[state]
         for pool in ('content_mean','first_token'):
             for layer in range(13):
+                case_number+=1
+                if case_number%workers!=worker:continue
                 name=f'{state}_{pool}_layer{layer:02d}'
                 case=destination/name
                 if (case/'complete.json').exists():
@@ -376,12 +404,16 @@ def analyze(gpu=0):
                     write_json(case/'complete.json',dict(files={p.name:digest(p) for p in case.iterdir() if p.is_file()},seconds=time.time()-start))
                 for method,metrics in saved['metrics'].items():
                     rows.append(dict(state=state,pooling=pool,layer=layer,method=method,**metrics))
-                write_json(destination/'progress.json',dict(completed_cases=len(rows)//9,total_cases=52,latest=name,elapsed_seconds=time.time()-start))
+                write_json(destination/f'progress_worker{worker}.json',dict(completed_cases=len(rows)//9,total_cases=len(range(worker,52,workers)),latest=name,elapsed_seconds=time.time()-start))
                 print(name,'complete',flush=True)
-    pd.DataFrame(rows).to_parquet(destination/'all_readouts.parquet',index=False)
-    write_json(destination/'complete.json',dict(cases=52,fits=0,updates=0,seconds=time.time()-start,sample_sha256=digest(OUT/'sample.parquet')))
+    write_json(destination/f'worker{worker}_complete.json',dict(cases=len(rows)//9,worker=worker,workers=workers))
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--gpu',type=int,default=0)
-    analyze(parser.parse_args().gpu)
+    parser.add_argument('--worker',type=int,default=0);parser.add_argument('--workers',type=int,default=1)
+    parser.add_argument('--prepare',action='store_true');parser.add_argument('--finalize',action='store_true')
+    args=parser.parse_args()
+    if args.prepare:prepare_analysis()
+    elif args.finalize:finalize_analysis()
+    else:analyze(args.gpu,args.worker,args.workers)

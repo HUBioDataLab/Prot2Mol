@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from experiments.frozen_embedding_diagnostics.study import balanced_groups,select_candidates
+from experiments.frozen_embedding_diagnostics.study import balanced_groups,select_candidates,format_query_input,QUERY_SYMBOLS,token_audit
 
 
 def fixture():
@@ -29,3 +29,18 @@ def test_candidate_selection_never_uses_scores_and_preserves_identity_uniqueness
     assert a.index.tolist()==b.index.tolist()
     assert len(a)==10 and a.y_source.nunique()==10
     assert a.category_source.nunique()>=2
+
+
+def test_query_formatter_uses_checkpoint_specific_symbols_and_fixed_prefix():
+    assert format_query_input('MGLP')=='predict protein ms : Met Gly Leu Pro'
+    assert len(QUERY_SYMBOLS)==26
+    assert format_query_input('BUOZXJ').endswith('Asx Sec Pyl Glx Xaa Xaa')
+
+
+def test_token_audit_detects_unknown_collapse():
+    class UnknownTokenizer:
+        unk_token_id=2
+        def __call__(self,text,**kwargs):return {'input_ids':[2]*len(text.split())+[1]}
+    _,audit=token_audit(UnknownTokenizer(),['A C D','M G L'])
+    assert audit['unknown_tokens']==6
+    assert audit['unique_tokenized_inputs']==1
