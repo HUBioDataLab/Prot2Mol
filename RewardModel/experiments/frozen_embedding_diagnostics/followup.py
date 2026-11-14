@@ -212,7 +212,9 @@ def guard_gpu(gpu):
 def anchor_score(condition,gpu):
     guard_gpu(gpu)
     if condition not in ('true','swapped'):raise ValueError('Unknown query condition')
-    output=FOLLOW/('anchor_'+condition);output.mkdir(exist_ok=False)
+    output=FOLLOW/('anchor_'+condition)
+    if output.exists() and any(output.iterdir()):raise RuntimeError('Inspect existing scoring output before reuse')
+    output.mkdir(exist_ok=True)
     os.environ['HF_HOME']=str(ROOT/'.cache/huggingface')
     os.environ['HF_HUB_CACHE']=str(ROOT/'.cache/huggingface/hub')
     os.environ['HF_HUB_OFFLINE']='1'
@@ -223,7 +225,8 @@ def anchor_score(condition,gpu):
     protocol=read_json(FOLLOW/'private/protocol.json')
     if digest(CHECKPOINT/'pytorch_model.bin')!=protocol['weight_sha256']:raise ValueError('Weights changed')
     model=load_reward_model(str(CHECKPOINT),device=torch.device('cpu'),strict=True).eval().requires_grad_(False)
-    if model.config.to_dict()!=read_json(CHECKPOINT/'config.json'):raise ValueError('Model configuration changed')
+    if json.loads(json.dumps(model.config.to_dict()))!=read_json(CHECKPOINT/'config.json'):
+        raise ValueError('Model configuration changed')
     before=full_digest(model);model.to('cuda:0')
     f=pd.read_parquet(FOLLOW/'private/anchor.parquet')
     prediction=np.full(len(f),np.nan,dtype=np.float32)
@@ -258,7 +261,8 @@ def anchor_score(condition,gpu):
     np.save(output/'predictions.npy',prediction)
     write_json(output/'complete.json',dict(rows=len(order),groups=955,condition=condition,parameter_sha256=before,
         parameters_unchanged=True,optimizer_created=False,config_overrides=False,repeat_forward_max_abs_difference=repeat_error,
-        prediction_sha256=digest(output/'predictions.npy'),seconds=time.time()-start,weight_sha256=protocol['weight_sha256']))
+        prediction_sha256=digest(output/'predictions.npy'),seconds=time.time()-start,weight_sha256=protocol['weight_sha256'],
+        code_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()))
     print(condition,'query scoring complete',flush=True)
 
 
@@ -458,7 +462,17 @@ def run():
     commands=[('true',0,['anchor','--condition','true','--gpu','0']),('swapped',2,['anchor','--condition','swapped','--gpu','2']),('dense',5,['dense','--gpu','5'])]
     jobs=[]
     for name,gpu,args in commands:
-        log=(FOLLOW/'logs'/f'{name}.log').open('w')
+        if name=='dense' and (FOLLOW/'dense_results.json').exists():
+            result=read_json(FOLLOW/'dense_results.json')
+            if digest(FOLLOW/'dense_predictions.npz')!=result['prediction_sha256'] or digest(FOLLOW/'dense_vectors/content_mean.npy')!=result['vector_sha256']:
+                raise ValueError('Completed direction artifacts changed')
+            continue
+        if name!='dense' and (FOLLOW/('anchor_'+name)/'complete.json').exists():
+            result=read_json(FOLLOW/('anchor_'+name)/'complete.json')
+            if digest(FOLLOW/('anchor_'+name)/'predictions.npy')!=result['prediction_sha256']:
+                raise ValueError('Completed anchor predictions changed')
+            continue
+        log=(FOLLOW/'logs'/f'{name}.log').open('a')
         env={**os.environ,'CUDA_VISIBLE_DEVICES':GPUS[gpu],'OPENBLAS_NUM_THREADS':'4','OMP_NUM_THREADS':'4'}
         p=subprocess.Popen([sys.executable,'-m','experiments.frozen_embedding_diagnostics.followup',*args],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
         jobs.append((name,p,log))
